@@ -1,0 +1,37 @@
+// Paste into Tailscale admin → Access controls → JSON editor.
+// Replace YOUR_EMAIL with your tailnet login (Google/GitHub email, not a device name).
+// Then Machines → the VPS (not your laptop) → tags → tag:mayedge-vps.
+// Tag owner in the UI: autogroup:admin is fine.
+//
+// This ACL does not enable Funnel. Do not add "funnel" to nodeAttrs.
+
+{
+  "groups": {
+    "group:mayedge-admins": ["YOUR_EMAIL"],
+  },
+  "tagOwners": {
+    "tag:mayedge-vps": ["group:mayedge-admins"],
+  },
+  "acls": [
+    // SSH to the VPS over the tailnet (optional — close public TCP 22 once this works).
+    {
+      "action": "accept",
+      "src": ["group:mayedge-admins"],
+      "dst": ["tag:mayedge-vps:22"],
+    },
+    // Desk UI/API/WS via Tailscale Serve (https://<magicdns> → 127.0.0.1:14200).
+    {
+      "action": "accept",
+      "src": ["group:mayedge-admins"],
+      "dst": ["tag:mayedge-vps:443"],
+    },
+  ],
+  "ssh": [
+    {
+      "action": "check",
+      "src": ["group:mayedge-admins"],
+      "dst": ["tag:mayedge-vps"],
+      "users": ["autogroup:nonroot", "root"],
+    },
+  ],
+}

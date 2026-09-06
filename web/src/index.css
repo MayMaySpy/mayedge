@@ -1,0 +1,192 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Desk tokens — keep after shadcn so trading colors win over nova defaults. */
+@theme {
+  --color-canvas: #0a0c0f;
+  --color-panel: #0e1116;
+  --color-elevated: #1a1f27;
+  --color-rule: #252b34;
+  --color-bid: #2ecc71;
+  --color-ask: #ff4d5e;
+  --color-warn: #e8b84a;
+  --color-text: #f2f5f8;
+  /* Desk muted text (not shadcn surface — use text-muted / text-muted-foreground). */
+  --color-muted: #9aa3ae;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-heading: "IBM Plex Sans", system-ui, sans-serif;
+}
+
+@theme inline {
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Always-dark trading desk — map shadcn semantics onto desk palette. */
+:root,
+.dark {
+  --background: #0a0c0f;
+  --foreground: #f2f5f8;
+  --card: #0e1116;
+  --card-foreground: #f2f5f8;
+  --popover: #0e1116;
+  --popover-foreground: #f2f5f8;
+  --primary: #2ecc71;
+  --primary-foreground: #0a0c0f;
+  --secondary: #1a1f27;
+  --secondary-foreground: #f2f5f8;
+  --muted: #1a1f27;
+  --muted-foreground: #9aa3ae;
+  --accent: #1a1f27;
+  --accent-foreground: #f2f5f8;
+  --destructive: #ff4d5e;
+  --border: #252b34;
+  --input: #252b34;
+  --ring: #2ecc71;
+  --chart-1: #2ecc71;
+  --chart-2: #ff4d5e;
+  --chart-3: #9aa3ae;
+  --chart-4: #1a1f27;
+  --chart-5: #f2f5f8;
+  --radius: 0.25rem;
+  --sidebar: #0e1116;
+  --sidebar-foreground: #f2f5f8;
+  --sidebar-primary: #2ecc71;
+  --sidebar-primary-foreground: #0a0c0f;
+  --sidebar-accent: #1a1f27;
+  --sidebar-accent-foreground: #f2f5f8;
+  --sidebar-border: #252b34;
+  --sidebar-ring: #2ecc71;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-rule);
+}
+
+.panel-drag {
+  cursor: move;
+  user-select: none;
+}
+
+.layout-locked .panel-drag {
+  cursor: default;
+}
+
+.layout-locked .react-resizable-handle {
+  display: none !important;
+}
+
+.react-grid-layout {
+  min-height: 100%;
+  transition: none;
+}
+
+.react-grid-item {
+  transition: none;
+}
+
+.react-grid-item > .h-full {
+  height: 100%;
+  width: 100%;
+}
+
+.react-grid-item > .react-resizable-handle {
+  z-index: 6;
+  opacity: 0.85;
+}
+
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 1;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  border-color: var(--color-muted) !important;
+}
+
+.react-grid-placeholder {
+  background: rgba(46, 204, 113, 0.1) !important;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-elevated);
+  border-radius: 2px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+}

@@ -1,0 +1,36 @@
+# Alert detector thresholds.
+# sev2 / sev3 pairs: first value is "notice", second is "urgent".
+# Restart the backend after edits.
+
+cooldown_s: 90
+# Level signals (spread, premium, funding, dislocation) persist — longer mute.
+level_cooldown_s: 300
+min_severity: 2
+max_events_per_flush: 20
+warmup_s: 20
+
+# Delta % — relative moves. Usually leave these.
+oi:
+  pct_1m: [8, 20]
+  pct_5m: [15, 35]
+price:
+  pct_1m: [1.5, 4]
+  pct_5m: [3, 8]
+
+# Absolute / level — tune these to your book.
+volume:
+  usd_1m: [750000, 2500000]
+  usd_5m: [2000000, 8000000]
+spread:
+  bps: [50, 150]
+premium:
+  pct: [0.5, 1.2]
+dislocation:
+  bps: [50, 120]
+funding:
+  # Percent per hour (0.20 = 0.20%/hr). Converted from Lighter's hourly rate.
+  hourly_pct: [0.20, 0.60]
+liq_cluster:
+  count: [5, 12]
+  usd: [250000, 1000000]
+  window_s: 120

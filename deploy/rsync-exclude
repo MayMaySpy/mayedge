@@ -1,0 +1,14 @@
+.git/
+docs/
+.venv/
+backend/.venv/
+backend/.env
+backend/data/
+web/node_modules/
+web/dist/
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+*.pyc
+*.egg-info/

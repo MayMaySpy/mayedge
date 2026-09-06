@@ -1,0 +1,18 @@
+services:
+  mayedge:
+    build: .
+    env_file: ./backend/.env
+    ports:
+      - "127.0.0.1:14200:8000"
+    volumes:
+      - mayedge-data:/app/data
+    environment:
+      BIND_HOST: "0.0.0.0"
+      BIND_PORT: "8000"
+      DB_PATH: /app/data/mayedge.db
+      WEB_ROOT: /app/web
+    mem_limit: 1536m
+    restart: unless-stopped
+
+volumes:
+  mayedge-data:
