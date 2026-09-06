@@ -46,40 +46,65 @@ export function FundingHistoryTab({
   onSymbolChange,
 }: FundingHistoryTabProps) {
   const [scope, setScope] = useState<"all" | "pair">("all");
-  const [rows, setRows] = useState<AccountFunding[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState<{
+    key: string | null;
+    rows: AccountFunding[];
+    cursor: string | null;
+  }>({ key: null, rows: [], cursor: null });
   const [loadingMore, setLoadingMore] = useState(false);
 
   const marketIndex = scope === "pair" && market ? market.market_index : undefined;
+  const queryKey = String(marketIndex ?? "all");
+  const rows = page.key === queryKey ? page.rows : [];
+  const cursor = page.key === queryKey ? page.cursor : null;
+  const loading = active && page.key !== queryKey;
 
-  const loadPage = useCallback(
-    async (nextCursor?: string | null) => {
-      const more = !!nextCursor;
-      if (more) setLoadingMore(true);
-      else setLoading(true);
-      try {
-        const page = await api.accountFunding({
-          market_index: marketIndex ?? null,
-          cursor: nextCursor ?? undefined,
-          limit: 50,
-        });
-        setCursor(page.next_cursor);
-        setRows((prev) => (more ? [...prev, ...page.fundings] : page.fundings));
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to load funding");
-      } finally {
-        setLoading(false);
-        setLoadingMore(false);
-      }
-    },
-    [marketIndex]
-  );
+  const loadMore = useCallback(async () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const result = await api.accountFunding({
+        market_index: marketIndex ?? null,
+        cursor,
+        limit: 50,
+      });
+      setPage((prev) => ({
+        key: queryKey,
+        rows: prev.key === queryKey ? [...prev.rows, ...result.fundings] : result.fundings,
+        cursor: result.next_cursor,
+      }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load funding");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, marketIndex, queryKey]);
 
   useEffect(() => {
     if (!active) return;
-    void loadPage(null);
-  }, [active, loadPage]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.accountFunding({
+          market_index: marketIndex ?? null,
+          limit: 50,
+        });
+        if (cancelled) return;
+        setPage({
+          key: queryKey,
+          rows: result.fundings,
+          cursor: result.next_cursor,
+        });
+      } catch (e) {
+        if (cancelled) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load funding");
+        setPage({ key: queryKey, rows: [], cursor: null });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, marketIndex, queryKey]);
 
   return (
     <ScrollArea className="h-full">
@@ -169,7 +194,7 @@ export function FundingHistoryTab({
                 variant="outline"
                 size="sm"
                 disabled={loadingMore}
-                onClick={() => void loadPage(cursor)}
+                onClick={() => void loadMore()}
               >
                 {loadingMore ? "Loading…" : "Load more"}
               </Button>

@@ -51,14 +51,14 @@ export function OrderTicket({
   onClose,
 }: OrderTicketProps) {
   const feed = useTradingReady({ connected });
-  const [kind, setKind] = useState<OrderKind>("market");
+  const [kind, setKind] = useState<OrderKind>("algo");
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [size, setSize] = useState("");
   const [price, setPrice] = useState("");
   const [slippagePct, setSlippagePct] = useState(loadSlipPct);
   const [reduceOnly, setReduceOnly] = useState(false);
   const [tif, setTif] = useState("gtt");
-  const [algo, setAlgo] = useState<AlgoId>("twap");
+  const [algo, setAlgo] = useState<AlgoId>("chase-iceberg");
   const [twapMinutes, setTwapMinutes] = useState("15");
   const [displayQty, setDisplayQty] = useState("");
   const [offsetBps, setOffsetBps] = useState("4");

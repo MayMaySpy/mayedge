@@ -60,7 +60,10 @@ export function useMarketWs(symbol: string) {
   const marketsRef = useRef(state.markets);
   const marketIndexRef = useRef<number | null>(null);
   const resyncAtRef = useRef(0);
-  marketsRef.current = state.markets;
+
+  useEffect(() => {
+    marketsRef.current = state.markets;
+  }, [state.markets]);
 
   useEffect(() => {
     symbolRef.current = symbol;

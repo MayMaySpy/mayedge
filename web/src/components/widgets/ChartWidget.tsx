@@ -105,6 +105,8 @@ function toBars(candles: Candle[]): CandlestickData[] {
   return out;
 }
 
+const EMPTY_CANDLES: Candle[] = [];
+
 type Ohlc = { open: number; high: number; low: number; close: number };
 
 function sameOhlc(a: Ohlc | null, b: Ohlc | null): boolean {
@@ -212,8 +214,11 @@ export const ChartWidget = memo(function ChartWidget({
   children,
 }: ChartWidgetProps) {
   const [tf, setTf] = useState<Timeframe>(loadTf);
-  const [hist, setHist] = useState<Candle[]>([]);
-  const [hover, setHover] = useState<Ohlc | null>(null);
+  const [hist, setHist] = useState<{ key: string; candles: Candle[] }>({
+    key: "",
+    candles: [],
+  });
+  const [hover, setHover] = useState<{ key: string; bar: Ohlc } | null>(null);
   const candles1s = useLiveCandles1s(tf === "1s");
   const minuteCandles = useLiveMinuteCandles();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -226,20 +231,34 @@ export const ChartWidget = memo(function ChartWidget({
   const primedRef = useRef(false);
   const firstTimeRef = useRef<number | null>(null);
   const lastMetaRef = useRef<{ time: number; len: number } | null>(null);
-  overlaysRef.current = overlays;
-  onActionRef.current = onOverlayAction;
+  const seriesKey = `${symbol}:${tf}`;
+  const seriesKeyRef = useRef(seriesKey);
+  const histBars = hist.key === seriesKey ? hist.candles : EMPTY_CANDLES;
+  const hoverBar = hover?.key === seriesKey ? hover.bar : null;
+
+  useEffect(() => {
+    seriesKeyRef.current = seriesKey;
+  }, [seriesKey]);
+
+  useEffect(() => {
+    overlaysRef.current = overlays;
+  }, [overlays]);
+
+  useEffect(() => {
+    onActionRef.current = onOverlayAction;
+  }, [onOverlayAction]);
 
   useEffect(() => {
     if (tf === "1s") return;
+    const key = `${symbol}:${tf}`;
     let cancelled = false;
-    setHist([]);
     api
       .candles(symbol, tf, 500)
       .then((data) => {
-        if (!cancelled) setHist(data);
+        if (!cancelled) setHist({ key, candles: data });
       })
       .catch(() => {
-        if (!cancelled) setHist([]);
+        if (!cancelled) setHist({ key, candles: [] });
       });
     return () => {
       cancelled = true;
@@ -263,12 +282,12 @@ export const ChartWidget = memo(function ChartWidget({
   const display = useMemo(() => {
     if (tf === "1s") return candles1s;
     // 1m: never drop REST history when a short live stream arrives.
-    if (tf === "1m") return mergeCandles(hist, minuteCandles);
-    if (!hist.length) return hist;
+    if (tf === "1m") return mergeCandles(histBars, minuteCandles);
+    if (!histBars.length) return histBars;
     const lastMin = minuteCandles[minuteCandles.length - 1];
-    if (!lastMin) return hist;
-    return foldMinute(hist, lastMin, TF_SECONDS[tf]);
-  }, [tf, candles1s, minuteCandles, hist]);
+    if (!lastMin) return histBars;
+    return foldMinute(histBars, lastMin, TF_SECONDS[tf]);
+  }, [tf, candles1s, minuteCandles, histBars]);
 
   useEffect(() => {
     if (!containerRef.current || !wrapRef.current) return;
@@ -329,14 +348,19 @@ export const ChartWidget = memo(function ChartWidget({
     chart.subscribeClick(onClick);
 
     const onMove = (param: MouseEventParams) => {
+      const key = seriesKeyRef.current;
       if (!param.time) {
-        setHover((h) => (h == null ? h : null));
+        setHover((h) => (h == null || h.key !== key ? h : null));
         return;
       }
       const raw = param.seriesData.get(series);
       if (raw && "open" in raw && "close" in raw) {
         const next = ohlcOf(raw as CandlestickData);
-        setHover((prev) => (sameOhlc(prev, next) ? prev : next));
+        setHover((prev) => {
+          if (!next) return prev?.key === key ? null : prev;
+          if (prev?.key === key && sameOhlc(prev.bar, next)) return prev;
+          return { key, bar: next };
+        });
       }
     };
     chart.subscribeCrosshairMove(onMove);
@@ -364,6 +388,8 @@ export const ChartWidget = memo(function ChartWidget({
       seriesRef.current = null;
       tradingLinesRef.current = null;
     };
+    // Chart is created once; price format is applied in the effect below.
+    // oxlint-disable-next-line exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -382,7 +408,6 @@ export const ChartWidget = memo(function ChartWidget({
     primedRef.current = false;
     firstTimeRef.current = null;
     lastMetaRef.current = null;
-    setHover((h) => (h == null ? h : null));
   }, [symbol, tf]);
 
   useEffect(() => {
@@ -453,8 +478,6 @@ export const ChartWidget = memo(function ChartWidget({
   const selectTf = (next: Timeframe) => {
     if (next === tf) return;
     setTf(next);
-    // Same render as tf — don't fold 1m history as 5m/1h bars (duplicate times freeze LWC).
-    setHist([]);
     try {
       localStorage.setItem(TF_KEY, next);
     } catch {
@@ -463,7 +486,7 @@ export const ChartWidget = memo(function ChartWidget({
   };
 
   const lastBar = display.length ? ohlcOf(display[display.length - 1]) : null;
-  const ohlc = hover ?? lastBar;
+  const ohlc = hoverBar ?? lastBar;
 
   return (
     <div className="flex h-full min-h-0 flex-col">

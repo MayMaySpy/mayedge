@@ -6,19 +6,19 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
-from mayedge import feed_health
 from mayedge import db as store
+from mayedge import feed_health
 from mayedge.algos.chase.config import (
     CHASE_COI_BASE,
     CHASE_COI_END,
     HISTORY_CAP,
     RESTORE_FEED_TIMEOUT_S,
 )
+from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import ALGO_ID, ChaseIcebergParams
 from mayedge.algos.chase.job import ChaseIcebergRunner
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.numbers import fmt_decimal
-from mayedge.algos.chase.execution import ChaseExecution
 
 logger = logging.getLogger(__name__)
 

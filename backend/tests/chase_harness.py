@@ -11,13 +11,13 @@ from typing import Any
 from unittest.mock import patch
 
 from mayedge.algos.chase import ChaseBook, ChaseIcebergParams
+from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.job import (
     ChaseIcebergRunner,
     ChaseState,
     ChaseStatus,
 )
 from mayedge.lighter.models import MarketMeta
-from mayedge.algos.chase.execution import ChaseExecution
 
 
 @dataclass

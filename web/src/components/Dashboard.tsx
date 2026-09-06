@@ -40,7 +40,7 @@ import {
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { formatSize } from "@/lib/utils";
 
-const LAYOUT_KEY = "mayedge-layout-v10";
+const LAYOUT_KEY = "mayedge-layout-v11";
 const VISIBILITY_KEY = "mayedge-visibility-v7";
 
 const GRID_COLS = 12;
@@ -48,16 +48,16 @@ const GRID_ROWS = 24;
 const MARGIN = 4;
 const PAD = 4;
 
-/** Two-zone desk: trade up top, blotter + scanners below. Tiles the 12×24 grid with no gaps. */
+/** Matches docs/ui.png: chart + book/tape + ticket/algos on top, blotter row below. */
 const DEFAULT_LAYOUT: LayoutItem[] = [
   { i: "chart", x: 0, y: 0, w: 7, h: 16, minW: 4, minH: 6 },
   { i: "book", x: 7, y: 0, w: 2, h: 10, minW: 2, minH: 4 },
   { i: "tape", x: 7, y: 10, w: 2, h: 6, minW: 2, minH: 3 },
-  { i: "ticket", x: 9, y: 0, w: 3, h: 16, minW: 2, minH: 6 },
+  { i: "ticket", x: 9, y: 0, w: 3, h: 10, minW: 2, minH: 6 },
+  { i: "algos", x: 9, y: 10, w: 3, h: 6, minW: 2, minH: 3 },
   { i: "positions", x: 0, y: 16, w: 7, h: 8, minW: 6, minH: 4 },
-  { i: "algos", x: 7, y: 16, w: 5, h: 4, minW: 3, minH: 3 },
-  { i: "alerts", x: 7, y: 20, w: 2, h: 4, minW: 2, minH: 3 },
-  { i: "liqs", x: 9, y: 20, w: 3, h: 4, minW: 2, minH: 3 },
+  { i: "alerts", x: 7, y: 16, w: 2, h: 8, minW: 2, minH: 3 },
+  { i: "liqs", x: 9, y: 16, w: 3, h: 8, minW: 2, minH: 3 },
 ];
 
 function loadJson<T>(key: string, fallback: T): T {

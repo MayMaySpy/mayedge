@@ -7,9 +7,9 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
+from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import Action, ChaseIcebergParams
 from mayedge.algos.ledger import Ledger
-from mayedge.algos.chase.execution import ChaseExecution
 
 if TYPE_CHECKING:
     from mayedge.algos.chase.job import ChaseIcebergRunner

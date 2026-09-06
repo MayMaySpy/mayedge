@@ -199,7 +199,7 @@ class ChaseFillMixin:
             return True
         cursor: str | None = None
         try:
-            for page in range(REST_TRADES_MAX_PAGES):
+            for _page in range(REST_TRADES_MAX_PAGES):
                 resp = await get_trades(
                     market_id=self._state.market_index,
                     cursor=cursor,

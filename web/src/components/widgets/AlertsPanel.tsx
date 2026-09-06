@@ -96,7 +96,7 @@ export const AlertsPanel = memo(function AlertsPanel({
   const all = useLiveAlerts();
   const [minSev, setMinSev] = useState(loadMinSev);
   const seenToastRef = useRef<Set<string>>(new Set());
-  const mountedAtRef = useRef(Date.now());
+  const mountedAtRef = useRef(0);
 
   const rows = useMemo(
     () =>
@@ -108,6 +108,7 @@ export const AlertsPanel = memo(function AlertsPanel({
   );
 
   useEffect(() => {
+    if (!mountedAtRef.current) mountedAtRef.current = Date.now();
     const now = Date.now();
     let n = 0;
     for (const ev of all) {

@@ -10,12 +10,26 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
+from mayedge.algos.chase import (
+    ChaseIcebergRunner,
+    ChaseStatus,
+)
+from mayedge.algos.chase.config import (
+    CHASE_COI_BASE,
+    CHASE_COI_END,
+    MIN_REQUOTE_MS,
+    MISSING_FILL_GRACE_MS,
+    RATE_LIMIT_COOLDOWN_MS,
+    STALE_ACK_MS,
+)
+from mayedge.config import settings
+
 # Allow `from chase_harness import ...` when discover runs from backend/
 _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from chase_harness import (  # ruff: ignore[module-import-not-at-top-of-file]
+from chase_harness import (  # noqa: E402
     BootedJob,
     FakeClock,
     FakeGateway,
@@ -27,20 +41,6 @@ from chase_harness import (  # ruff: ignore[module-import-not-at-top-of-file]
     patch_chase,
     trade_print,
 )
-
-from mayedge.algos.chase import (  # ruff: ignore[module-import-not-at-top-of-file]
-    ChaseIcebergRunner,
-    ChaseStatus,
-)
-from mayedge.algos.chase.config import (  # ruff: ignore[module-import-not-at-top-of-file]
-    CHASE_COI_BASE,
-    CHASE_COI_END,
-    MIN_REQUOTE_MS,
-    MISSING_FILL_GRACE_MS,
-    RATE_LIMIT_COOLDOWN_MS,
-    STALE_ACK_MS,
-)
-from mayedge.config import settings  # ruff: ignore[module-import-not-at-top-of-file]
 
 D = Decimal
 
@@ -289,7 +289,6 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
-            coi = boot.orders.creates[0]["client_order_index"]
             boot.orders.cached_orders_override = []
             live = boot.job.state.ledger.working()
             assert live is not None
@@ -1118,10 +1117,12 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
     async def test_credit_rest_trades_page_cap_fails_closed(self) -> None:
         boot = boot_job()
         boot.orders.trades_pages = [[], [], []]
-        with patch_chase(boot.clock, boot.gateway, boot.orders):
-            with patch(
+        with (
+            patch_chase(boot.clock, boot.gateway, boot.orders),
+            patch(
                 "mayedge.algos.chase.fills.REST_TRADES_MAX_PAGES",
                 2,
-            ):
-                ok = await boot.job._credit_rest_trades()
+            ),
+        ):
+            ok = await boot.job._credit_rest_trades()
         self.assertFalse(ok)

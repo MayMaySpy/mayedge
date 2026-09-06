@@ -167,7 +167,7 @@ def _row_to_run(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
             "seq": r["seq"],
             "client_order_index": r["client_order_index"],
             "order_index": r["order_index"],
-            "side": r["side"] if "side" in r.keys() else None,
+            "side": dict(r).get("side"),
             "price": r["price"],
             "qty": r["qty"],
             "filled": r["filled"],
