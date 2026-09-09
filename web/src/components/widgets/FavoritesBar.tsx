@@ -1,12 +1,18 @@
-import { GripVertical } from "lucide-react";
-import { memo, useMemo, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, GripVertical } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TokenMark } from "@/components/desk/TokenMark";
 import type { Market } from "@/lib/api";
-import { useFavorites } from "@/lib/favorites";
-import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
+import {
+  favChangeTone,
+  favPriceLabel,
+  insertIndexAtX,
+  moveIdToIndex,
+  scrollFadeX,
+} from "@/lib/favoritesBar";
+import { setFavorites, useFavorites } from "@/lib/favorites";
+import { overlayQuote, useLiveQuotes } from "@/lib/liveData";
+import { cn, formatPct } from "@/lib/utils";
 
 interface FavoritesBarProps {
   markets: Market[];
@@ -14,114 +20,180 @@ interface FavoritesBarProps {
   onSymbolChange: (symbol: string) => void;
 }
 
-function changeVariant(change: number | null | undefined): "bid" | "ask" | "muted" {
-  if (change == null || change === 0) return "muted";
-  return change > 0 ? "bid" : "ask";
-}
+const DRAG_PX = 4;
+const toneClass = {
+  bid: "text-bid",
+  ask: "text-ask",
+  muted: "text-muted",
+} as const;
 
-export const FavoritesBar = memo(function FavoritesBar({ markets, symbol, onSymbolChange }: FavoritesBarProps) {
-  const [favorites, , reorder] = useFavorites();
+export const FavoritesBar = memo(function FavoritesBar({
+  markets,
+  symbol,
+  onSymbolChange,
+}: FavoritesBarProps) {
+  const [favorites] = useFavorites();
+  const quotes = useLiveQuotes();
+  const [draft, setDraft] = useState<string[] | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [over, setOver] = useState<string | null>(null);
-  const didDrag = useRef(false);
+  const [fade, setFade] = useState({ fadeL: 0, fadeR: 0, showRight: false });
+  const rowRef = useRef<HTMLDivElement>(null);
+  const orderRef = useRef<string[]>(favorites);
+  const favoritesRef = useRef(favorites);
+  favoritesRef.current = favorites;
+  const dragRef = useRef<{
+    id: string;
+    pointerId: number;
+    startX: number;
+    moved: boolean;
+  } | null>(null);
 
+  const order = draft ?? favorites;
   const items = useMemo(() => {
     const bySym = new Map(markets.map((m) => [m.symbol, m]));
-    // Preserve pin order — favorites array is the source of truth.
-    return favorites.map((sym) => bySym.get(sym) ?? ({ symbol: sym } as Market));
-  }, [favorites, markets]);
+    return order.map((sym) => {
+      const m = bySym.get(sym) ?? ({ symbol: sym } as Market);
+      return overlayQuote(m, quotes[m.market_index]);
+    });
+  }, [order, markets, quotes]);
+
+  const measure = () => {
+    const el = rowRef.current;
+    if (!el) return;
+    setFade(scrollFadeX(el.scrollLeft, el.clientWidth, el.scrollWidth));
+  };
+
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, [items.length]);
 
   if (items.length === 0) return null;
 
-  const move = (fromSym: string, toSym: string) => {
-    const from = favorites.indexOf(fromSym);
-    const to = favorites.indexOf(toSym);
-    if (from < 0 || to < 0 || from === to) return;
-    reorder(from, to);
+  const chipRects = () => {
+    const row = rowRef.current;
+    if (!row) return [];
+    return Array.from(row.querySelectorAll<HTMLElement>("[data-fav]")).map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: el.dataset.fav ?? "", left: r.left, width: r.width };
+    });
+  };
+
+  const onGripDown = (e: React.PointerEvent, id: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pointerId = e.pointerId;
+    dragRef.current = { id, pointerId, startX: e.clientX, moved: false };
+    orderRef.current = [...(draft ?? favoritesRef.current)];
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      const d = dragRef.current;
+      if (!d) return;
+      if (!d.moved && Math.abs(ev.clientX - d.startX) < DRAG_PX) return;
+      ev.preventDefault();
+      if (!d.moved) {
+        d.moved = true;
+        setDragging(d.id);
+      }
+      const to = insertIndexAtX(ev.clientX, chipRects(), d.id);
+      const next = moveIdToIndex(orderRef.current, d.id, to);
+      if (next === orderRef.current) return;
+      orderRef.current = next;
+      setDraft(next);
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      const d = dragRef.current;
+      dragRef.current = null;
+      setDragging(null);
+      setDraft(null);
+      if (d?.moved) setFavorites(orderRef.current);
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   };
 
   return (
-    <div className="shrink-0 border-b border-rule bg-panel">
-      <ScrollArea className="h-8 w-full">
-        <ToggleGroup
-          type="single"
-          variant="seg"
-          size="sm"
-          spacing={0}
-          value={symbol}
-          onValueChange={(v) => {
-            if (didDrag.current) {
-              didDrag.current = false;
-              return;
-            }
-            if (v) onSymbolChange(v);
-          }}
-          className="flex h-8 w-max min-w-full flex-nowrap items-center gap-0.5 px-2"
-        >
-          {items.map((m) => {
-            const change = m.change_24h;
-            const vol = formatUsdCompact(m.volume_24h);
-            const isDragging = dragging === m.symbol;
-            const isOver = over === m.symbol && dragging != null && dragging !== m.symbol;
+    <div className="relative flex h-8 shrink-0 min-w-0 items-center border-b border-rule bg-panel">
+      <div
+        ref={rowRef}
+        data-fade="x"
+        className={cn(
+          "scroll-hide flex h-full min-w-0 flex-1 items-center gap-x-2 overflow-x-auto px-2",
+          dragging && "cursor-grabbing select-none"
+        )}
+        style={{ "--fade-l": `${fade.fadeL}px`, "--fade-r": `${fade.fadeR}px` } as React.CSSProperties}
+      >
+        {items.map((m) => {
+          const on = m.symbol === symbol;
+          const isDragging = dragging === m.symbol;
+          const change = m.change_24h;
+          const tone = favChangeTone(change);
 
-            return (
-              <ToggleGroupItem
-                key={m.symbol}
-                value={m.symbol}
-                draggable
-                onDragStart={(e) => {
-                  didDrag.current = false;
-                  setDragging(m.symbol);
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", m.symbol);
-                }}
-                onDrag={(e) => {
-                  if (e.clientX !== 0 || e.clientY !== 0) didDrag.current = true;
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  if (over !== m.symbol) setOver(m.symbol);
-                }}
-                onDragLeave={() => {
-                  if (over === m.symbol) setOver(null);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const from = e.dataTransfer.getData("text/plain") || dragging;
-                  if (from) move(from, m.symbol);
-                  setDragging(null);
-                  setOver(null);
-                }}
-                onDragEnd={() => {
-                  setDragging(null);
-                  setOver(null);
-                }}
+          return (
+            <div
+              key={m.symbol}
+              data-fav={m.symbol}
+              className={cn("flex h-8 shrink-0 items-center", isDragging && "opacity-40")}
+            >
+              <div
                 className={cn(
-                  "h-7 cursor-grab gap-1 px-1.5 active:cursor-grabbing data-[state=on]:bg-elevated/60 [&_svg:not([class*='size-'])]:size-3",
-                  isDragging && "opacity-40",
-                  isOver && "bg-elevated/40 ring-1 ring-bid/40"
+                  "flex items-center gap-1 overflow-visible rounded-full px-1 py-0.5 text-sm transition-colors hover:bg-elevated",
+                  on && "bg-elevated"
                 )}
               >
-                <GripVertical className="text-muted opacity-40 group-hover/toggle:opacity-70 group-data-[state=on]/toggle:opacity-70" />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-[11px] leading-none">{m.symbol}</span>
-                      <Badge variant={changeVariant(change)} className="leading-none">
-                        {formatPct(change)}
-                      </Badge>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {vol ? `${m.symbol} · 24h vol ${vol} · drag to reorder` : `${m.symbol} · drag to reorder`}
-                  </TooltipContent>
-                </Tooltip>
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
-      </ScrollArea>
+                <button
+                  type="button"
+                  onClick={() => onSymbolChange(m.symbol)}
+                  className="flex cursor-pointer items-center gap-1"
+                >
+                  <TokenMark symbol={m.symbol} className="size-4" />
+                  <span className="text-text">{m.symbol}</span>
+                  <span className="tabular-nums text-muted">{favPriceLabel(m)}</span>
+                  <span className={cn("tabular-nums", toneClass[tone])}>{formatPct(change)}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Reorder ${m.symbol}`}
+                  className="flex size-5 shrink-0 cursor-grab touch-none items-center justify-center text-muted hover:text-text active:cursor-grabbing"
+                  onPointerDown={(e) => onGripDown(e, m.symbol)}
+                >
+                  <GripVertical className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {fade.showRight ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          tabIndex={-1}
+          aria-hidden
+          className="absolute top-1/2 right-1 z-20 size-5 -translate-y-1/2 rounded-full"
+          onClick={() => rowRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
+        >
+          <ChevronRight data-icon />
+        </Button>
+      ) : null}
     </div>
   );
 });

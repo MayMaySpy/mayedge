@@ -66,6 +66,7 @@ class LighterGateway:
     async def start(self) -> None:
         self._client = lighter.ApiClient(Configuration(host=settings.base_url))
         store.init_db()
+        self._liqs.hydrate()
         await self._load_markets()
         await self._load_margin_assets()
         if self._current_market_index is None:
@@ -207,6 +208,7 @@ class LighterGateway:
                 rows = list(stats_blob.values())
         else:
             return
+        dirty: list[MarketMeta] = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -220,6 +222,7 @@ class LighterGateway:
             meta = self._markets.get(idx)
             if not meta:
                 continue
+            before = meta.quote_key()
             mark = to_float(row.get("mark_price"))
             last = to_float(row.get("last_trade_price"))
             if mark:
@@ -273,7 +276,11 @@ class LighterGateway:
             base_vol = row.get("daily_base_token_volume")
             if base_vol is not None:
                 meta.volume_base_24h = to_float(base_vol)
+            if meta.quote_key() != before:
+                dirty.append(meta)
             self._alerts.on_market_stats(meta)
+        if dirty:
+            self.broadcast({"type": "market_stats", "markets": [m.as_quote_dict() for m in dirty]})
         self._alerts.flush()
         from mayedge.lighter.account import account_service
 
@@ -372,23 +379,42 @@ class LighterGateway:
         by_t = {c.time: c for c in candles}
         return sorted(by_t.values(), key=lambda x: x.time)
 
+    def bind_market_ws(self, ws: Any) -> int:
+        """Attach the exchange socket; return the market this session must subscribe."""
+        market_index = self._current_market_index
+        if market_index is None:
+            default = self.get_market(settings.default_market_symbol)
+            market_index = default.market_index if default else next(iter(self._markets))
+            self._current_market_index = market_index
+        self._books.set_current_market(market_index)
+        self._ws = ws
+        self._ws_connected.set()
+        return market_index
+
+    def unbind_market_ws(self) -> None:
+        self._ws = None
+        self._ws_connected.clear()
+
     async def set_active_market(self, market_index: int) -> None:
         async with self._lock:
             prev = self._current_market_index
-            if prev == market_index:
+            same = prev == market_index
+            if same:
                 self._books.set_current_market(market_index)
-                return
-            self._current_market_index = market_index
-            self._books.set_current_market(market_index)
-            self._books.clear_pending()
-            self._prune_trade_buffers(keep=market_index)
+                if self._ws is None or self._books.has_book(market_index):
+                    return
+            else:
+                self._current_market_index = market_index
+                self._books.set_current_market(market_index)
+                self._books.clear_pending()
+                self._prune_trade_buffers(keep=market_index)
 
         ws = self._ws
         if ws is not None:
             self._focus_gate.clear()
             try:
                 async with self._send_lock:
-                    if prev is not None and prev not in self._pinned_books:
+                    if not same and prev is not None and prev not in self._pinned_books:
                         await ws_send(ws, {"type": "unsubscribe", "channel": f"order_book/{prev}"})
                         await ws_send(ws, {"type": "unsubscribe", "channel": f"candle/{prev}/1m"})
                     await ws_send(
@@ -403,13 +429,16 @@ class LighterGateway:
                 logger.exception("in-place market switch failed; reconnecting")
                 with contextlib.suppress(Exception):
                     await ws.close()
-                self._ws = None
+                self.unbind_market_ws()
             finally:
                 self._focus_gate.set()
 
-        self.broadcast({"type": "market_switch", "market_index": market_index})
+        if not same:
+            self.broadcast({"type": "market_switch", "market_index": market_index})
 
     async def wait_for_book(self, market_index: int) -> bool:
+        if not self._books.has_book(market_index):
+            await self._ws_connected.wait()
         while not self._books.has_book(market_index):
             await asyncio.sleep(0.03)
         return True

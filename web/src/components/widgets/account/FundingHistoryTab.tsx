@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { notifyErr } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -74,7 +74,7 @@ export function FundingHistoryTab({
         cursor: result.next_cursor,
       }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load funding");
+      notifyErr(e instanceof Error ? e.message : "Failed to load funding");
     } finally {
       setLoadingMore(false);
     }
@@ -97,7 +97,7 @@ export function FundingHistoryTab({
         });
       } catch (e) {
         if (cancelled) return;
-        toast.error(e instanceof Error ? e.message : "Failed to load funding");
+        notifyErr(e instanceof Error ? e.message : "Failed to load funding");
         setPage({ key: queryKey, rows: [], cursor: null });
       }
     })();

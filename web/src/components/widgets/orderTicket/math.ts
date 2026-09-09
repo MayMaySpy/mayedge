@@ -133,6 +133,19 @@ export function makerMinSize(minBase: number, minQuote: number, price: number | 
   return floor;
 }
 
+/** Ticket hint for venue min size. Warns once a typed qty is below the floor. */
+export function minSizeHint(
+  minSz: number,
+  decimals: number,
+  valueNum: number
+): { text: string; warn: boolean } | null {
+  if (!(minSz > 0)) return null;
+  const min = trimQty(minSz, decimals);
+  if (!min) return null;
+  const below = valueNum > 0 && valueNum + 1e-9 < minSz;
+  return below ? { text: `Below min ${min}`, warn: true } : { text: `min ${min}`, warn: false };
+}
+
 /**
  * Max base size the ticket can send.
  *
@@ -164,7 +177,7 @@ export function ticketBlockReason(opts: {
   feedReady: boolean;
   feedReason?: string | null;
   sizeNum: number;
-  maxSize: number;
+  maxSize?: number;
   symbol: string;
   decimals: number;
   kind: OrderKind;
@@ -173,14 +186,17 @@ export function ticketBlockReason(opts: {
   minSz: number;
   algo: string;
   twapSec: number | null;
+  twapSlip?: number | null;
   floorNum: number;
   ceilNum: number;
   clipNum: number;
+  twapAdvanced?: boolean;
+  twapFreqSec?: number | null;
 }): string | null {
   if (!opts.tradingEnabled) return "Trading not configured";
   if (!opts.feedReady) return opts.feedReason ?? "Feed not ready";
   if (opts.sizeNum <= 0) return "Enter size";
-  if (opts.maxSize > 0 && opts.sizeNum > opts.maxSize + 1e-9) {
+  if (opts.maxSize != null && opts.maxSize > 0 && opts.sizeNum > opts.maxSize + 1e-9) {
     return `Max ${trimQty(opts.maxSize, opts.decimals)} ${opts.symbol}`;
   }
   if (opts.kind === "limit" && !opts.price) return "Enter price";
@@ -188,7 +204,24 @@ export function ticketBlockReason(opts: {
     return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
   }
   if (opts.kind === "algo" && opts.algo === "twap" && opts.twapSec == null) {
-    return "Duration 1m–24h";
+    return "Running time 1m–30d";
+  }
+  if (
+    opts.kind === "algo" &&
+    opts.algo === "twap" &&
+    opts.twapAdvanced &&
+    (opts.twapFreqSec == null || opts.twapFreqSec < 2 || opts.twapFreqSec > 3600)
+  ) {
+    return "Slice 2s–1h";
+  }
+  if (
+    opts.kind === "algo" &&
+    opts.algo === "twap" &&
+    !opts.twapAdvanced &&
+    opts.twapSlip != null &&
+    opts.twapSlip > 0.05 + 1e-9
+  ) {
+    return "Max 5% from mark";
   }
   if (
     opts.kind === "algo" &&
@@ -197,12 +230,16 @@ export function ticketBlockReason(opts: {
   ) {
     return "Set floor / ceiling";
   }
-  if (
-    opts.kind === "algo" &&
-    opts.algo === "chase-iceberg" &&
-    (!(opts.clipNum > 0) || opts.clipNum > opts.sizeNum + 1e-9)
-  ) {
-    return opts.clipNum <= 0 ? "Enter clip size" : "Clip exceeds parent";
+  if (opts.kind === "algo" && opts.algo === "chase-iceberg") {
+    if (opts.minSz > 0 && opts.sizeNum + 1e-9 < opts.minSz) {
+      return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
+    }
+    if (!(opts.clipNum > 0) || opts.clipNum > opts.sizeNum + 1e-9) {
+      return opts.clipNum <= 0 ? "Enter clip size" : "Clip exceeds parent";
+    }
+    if (opts.minSz > 0 && opts.clipNum + 1e-9 < opts.minSz) {
+      return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
+    }
   }
   return null;
 }
@@ -213,7 +250,11 @@ export function orderCta(opts: {
   side: "buy" | "sell";
   base: string;
 }): string {
-  if (opts.kind === "algo" && opts.algo === "chase-iceberg") return "Start chase";
-  if (opts.kind === "algo" && opts.algo === "twap") return "Start TWAP";
-  return `${opts.side === "buy" ? "Buy" : "Sell"} ${opts.base}`;
+  if (opts.kind === "algo" && opts.algo === "chase-iceberg") {
+    return opts.side === "buy" ? "Chase buy" : "Chase sell";
+  }
+  if (opts.kind === "algo" && opts.algo === "twap") {
+    return opts.side === "buy" ? "TWAP buy" : "TWAP sell";
+  }
+  return opts.side === "buy" ? "Buy" : "Sell";
 }

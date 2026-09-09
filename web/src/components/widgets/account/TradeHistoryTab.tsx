@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { notifyErr } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -104,7 +104,7 @@ export function TradeHistoryTab({
         cursor: result.next_cursor,
       }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load trades");
+      notifyErr(e instanceof Error ? e.message : "Failed to load trades");
     } finally {
       setLoadingMore(false);
     }
@@ -127,7 +127,7 @@ export function TradeHistoryTab({
         });
       } catch (e) {
         if (cancelled) return;
-        toast.error(e instanceof Error ? e.message : "Failed to load trades");
+        notifyErr(e instanceof Error ? e.message : "Failed to load trades");
         setPage({ key: queryKey, rows: [], cursor: null });
       }
     })();

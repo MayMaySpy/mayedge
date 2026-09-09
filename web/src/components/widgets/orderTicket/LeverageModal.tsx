@@ -99,18 +99,18 @@ export function LeverageModal({
           ) : null}
           <ToggleGroup
             type="single"
-            variant="seg"
+            variant="outline"
             size="sm"
-            spacing={0}
+            spacing={2}
             value={String(snappedDraft ?? lev)}
             onValueChange={(v) => {
               if (v) onDraftChange(v);
             }}
-            className="grid w-full grid-cols-4 gap-1"
+            className="flex-wrap"
             disabled={loading || !tradingEnabled}
           >
             {anchors.map((x) => (
-              <ToggleGroupItem key={x} value={String(x)} className="h-8 justify-center text-[11px]">
+              <ToggleGroupItem key={x} value={String(x)}>
                 {x}x
               </ToggleGroupItem>
             ))}

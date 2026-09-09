@@ -94,6 +94,9 @@ class ChaseBook:
     def execution(self) -> ChaseExecution:
         return self._execution_fn()
 
+    def has(self, algo_id: str) -> bool:
+        return algo_id in self._jobs
+
     def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool:
         for job in self._jobs.values():
             if exclude and job.state.algo_id == exclude:

@@ -4,6 +4,7 @@ import { HeaderNumberInput } from "@/components/desk/HeaderNumberInput";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -12,12 +13,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { isSignificantLiq, liqUsd } from "@/lib/liqs";
 import { useLiveLiquidations, type LiquidationEvent } from "@/lib/liveData";
 import { liqIdentity, pairLabel } from "@/lib/venuePair";
 import { cn, formatPrice, formatSize } from "@/lib/utils";
 
 const MIN_USD_KEY = "mayedge-liqs-min-usd";
+const SIG_USD_KEY = "mayedge-liqs-sig-usd";
+const SIG_COLOR_KEY = "mayedge-liqs-sig-color";
 const DEFAULT_MIN_USD = 1000;
+const DEFAULT_SIG_USD = 25_000;
 const MAX_ROWS = 80;
 
 function loadMinUsd(): number {
@@ -29,13 +34,31 @@ function loadMinUsd(): number {
   }
 }
 
-function usdOf(l: LiquidationEvent): number {
-  const u = parseFloat(l.usd_amount ?? "");
-  if (Number.isFinite(u) && u > 0) return u;
-  const px = parseFloat(l.price);
-  const sz = parseFloat(l.size);
-  if (Number.isFinite(px) && Number.isFinite(sz)) return px * sz;
-  return 0;
+function loadSigUsd(): number {
+  try {
+    const n = parseFloat(localStorage.getItem(SIG_USD_KEY) ?? "");
+    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_SIG_USD;
+  } catch {
+    return DEFAULT_SIG_USD;
+  }
+}
+
+function loadSigColor(): boolean {
+  try {
+    const raw = localStorage.getItem(SIG_COLOR_KEY);
+    if (raw == null) return true;
+    return raw !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function persist(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
 }
 
 function formatUsd(n: number): string {
@@ -55,6 +78,13 @@ function formatTime(ts: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
+function sigRowClass(l: LiquidationEvent, tint: boolean): string | undefined {
+  if (!tint) return undefined;
+  if (l.side === "buy") return "bg-bid/15";
+  if (l.side === "sell") return "bg-ask/15";
+  return "bg-warn/15";
+}
+
 interface LiqsPanelProps {
   onOpenPair?: (symbol: string) => void;
   onClose?: () => void;
@@ -63,22 +93,13 @@ interface LiqsPanelProps {
 export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPanelProps) {
   const all = useLiveLiquidations();
   const [minUsd, setMinUsd] = useState(loadMinUsd);
+  const [sigUsd, setSigUsd] = useState(loadSigUsd);
+  const [sigColor, setSigColor] = useState(loadSigColor);
 
   const rows = useMemo(
-    () => all.filter((l) => usdOf(l) >= minUsd).slice(0, MAX_ROWS),
+    () => all.filter((l) => liqUsd(l) >= minUsd).slice(0, MAX_ROWS),
     [all, minUsd]
   );
-
-  const setMin = (raw: string) => {
-    const n = parseFloat(raw);
-    const next = Number.isFinite(n) && n >= 0 ? n : 0;
-    setMinUsd(next);
-    try {
-      localStorage.setItem(MIN_USD_KEY, String(next));
-    } catch {
-      /* ignore */
-    }
-  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -86,19 +107,53 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
         title="Liqs"
         onClose={onClose}
         trailing={
-          <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-            <FieldLabel htmlFor="liqs-min-usd" className="font-mono text-[10px] text-muted">
-              ≥$
-            </FieldLabel>
-            <HeaderNumberInput
-              id="liqs-min-usd"
-              min={0}
-              step={100}
-              value={minUsd}
-              widthClass="w-[4.75rem] text-right"
-              onChange={(n) => setMin(String(n))}
-            />
-          </Field>
+          <div className="flex items-center gap-2">
+            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
+              <FieldLabel htmlFor="liqs-min-usd" className="font-mono text-[10px] text-muted">
+                ≥$
+              </FieldLabel>
+              <HeaderNumberInput
+                id="liqs-min-usd"
+                min={0}
+                step={100}
+                value={minUsd}
+                widthClass="w-[4.25rem] text-right"
+                onChange={(n) => {
+                  setMinUsd(n);
+                  persist(MIN_USD_KEY, String(n));
+                }}
+              />
+            </Field>
+            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
+              <FieldLabel htmlFor="liqs-sig-usd" className="font-mono text-[10px] text-muted">
+                sig
+              </FieldLabel>
+              <HeaderNumberInput
+                id="liqs-sig-usd"
+                min={0}
+                step={1000}
+                value={sigUsd}
+                widthClass="w-[4.75rem] text-right"
+                onChange={(n) => {
+                  setSigUsd(n);
+                  persist(SIG_USD_KEY, String(n));
+                }}
+              />
+            </Field>
+            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
+              <FieldLabel htmlFor="liqs-sig-color" className="font-mono text-[10px] text-muted">
+                color
+              </FieldLabel>
+              <Switch
+                id="liqs-sig-color"
+                checked={sigColor}
+                onCheckedChange={(on) => {
+                  setSigColor(on);
+                  persist(SIG_COLOR_KEY, on ? "1" : "0");
+                }}
+              />
+            </Field>
+          </div>
         }
       />
 
@@ -125,13 +180,15 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
               </TableRow>
             ) : (
               rows.map((l) => {
-                const usd = usdOf(l);
+                const usd = liqUsd(l);
                 const kind = l.kind === "deleverage" ? "ADL" : "LIQ";
+                const significant = isSignificantLiq(usd, sigUsd);
+                const tint = sigColor && significant;
                 return (
                   <TableRow
                     key={liqIdentity(l.trade_id)}
-                    className="cursor-pointer"
-                    title={`${kind} ${pairLabel(l.symbol)}`}
+                    className={cn("cursor-pointer", sigRowClass(l, tint))}
+                    title={`${kind} ${pairLabel(l.symbol)}${significant ? " · significant" : ""}`}
                     onClick={() => onOpenPair?.(l.symbol)}
                   >
                     <TableCell className="text-muted">{formatTime(l.timestamp)}</TableCell>
@@ -143,7 +200,14 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                       {formatSize(l.size)}
                     </TableCell>
                     <TableCell className="text-right">{formatPrice(l.price)}</TableCell>
-                    <TableCell className="text-right text-muted">{formatUsd(usd)}</TableCell>
+                    <TableCell
+                      className={cn(
+                        "text-right",
+                        tint ? (l.side === "buy" ? "text-bid" : "text-ask") : "text-muted"
+                      )}
+                    >
+                      {formatUsd(usd)}
+                    </TableCell>
                   </TableRow>
                 );
               })

@@ -32,7 +32,7 @@ dev = ["ruff>=0.8.0", "basedpyright>=1.29.0"]
 pythonVersion = "3.11"
 venvPath = "."
 venv = ".venv"
-extraPaths = ["src"]
+extraPaths = ["src", "tests"]
 typeCheckingMode = "standard"
 reportMissingImports = true
 reportUndefinedVariable = true

@@ -1,15 +1,21 @@
-import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
 import {
-  ALGOS,
-  formatMinutesLabel,
-  TWAP_MINUTE_PRESETS,
+  formatTwapRuntime,
+  twapDurationSeconds,
+  twapFreqLabel,
+  twapOrderCount,
+  TWAP_DEFAULT_FREQ,
+  TWAP_INDEX_PCTS,
+  TWAP_MAX_PRICE_PCTS,
   type AlgoId,
+  type TwapStyle,
 } from "@/lib/algos";
 import type { Market } from "@/lib/api";
 import { parseDecimal } from "@/lib/numbers";
-import { CHASE_BAND_PCTS, chaseBandFromPct } from "../math";
-import { SlipControl, TicketField } from "../ui";
+import { formatPrice } from "@/lib/utils";
+import { CHASE_BAND_PCTS, chaseBandFromPct, trimQty } from "../math";
+import { TicketChips, TicketField } from "../ui";
 
 interface AlgoParamsProps {
   algo: AlgoId;
@@ -19,19 +25,71 @@ interface AlgoParamsProps {
   offsetBps: string;
   chaseFloor: string;
   chaseCeiling: string;
+  twapHours: string;
   twapMinutes: string;
-  slippagePct: string;
-  worst: number | null;
-  onAlgoChange: (id: AlgoId) => void;
+  twapMaxPrice: string;
+  twapAdvanced: boolean;
+  twapRandomize: boolean;
+  twapStyle: TwapStyle;
+  twapFreq: string;
+  twapIndexPct: string;
+  sizeNum: number;
   onDisplayQtyChange: (raw: string) => void;
   onOffsetBpsChange: (raw: string) => void;
   onChaseFloorChange: (raw: string) => void;
   onChaseCeilingChange: (raw: string) => void;
+  onTwapHoursChange: (raw: string) => void;
   onTwapMinutesChange: (raw: string) => void;
-  onSlipChange: (raw: string) => void;
+  onTwapMaxPriceChange: (raw: string) => void;
+  onTwapAdvancedChange: (on: boolean) => void;
+  onTwapRandomizeChange: (on: boolean) => void;
+  onTwapStyleChange: (style: TwapStyle) => void;
+  onTwapFreqChange: (raw: string) => void;
+  onTwapIndexPctChange: (raw: string) => void;
 }
 
 const OFFSETS = [1, 4, 8, 12];
+const digits = (raw: string) => raw.replace(/[^\d]/g, "");
+const STYLES: { value: TwapStyle; label: string }[] = [
+  { value: "passive", label: "Passive" },
+  { value: "neutral", label: "Neutral" },
+  { value: "aggressive", label: "Aggressive" },
+];
+
+function TwapRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex w-full justify-between gap-2 text-xs">
+      <span className="whitespace-nowrap text-muted">{label}</span>
+      <span className="font-mono tabular-nums text-text">{value}</span>
+    </div>
+  );
+}
+
+function ToggleRow({
+  id,
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onCheckedChange: (on: boolean) => void;
+}) {
+  return (
+    <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
+      <FieldLabel htmlFor={id} className="text-xs font-normal text-muted">
+        {label}
+      </FieldLabel>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={(v) => onCheckedChange(v === true)}
+        aria-label={label}
+      />
+    </Field>
+  );
+}
 
 export function AlgoParams({
   algo,
@@ -41,162 +99,225 @@ export function AlgoParams({
   offsetBps,
   chaseFloor,
   chaseCeiling,
+  twapHours,
   twapMinutes,
-  slippagePct,
-  worst,
-  onAlgoChange,
+  twapMaxPrice,
+  twapAdvanced,
+  twapRandomize,
+  twapStyle,
+  twapFreq,
+  twapIndexPct,
+  sizeNum,
   onDisplayQtyChange,
   onOffsetBpsChange,
   onChaseFloorChange,
   onChaseCeilingChange,
+  onTwapHoursChange,
   onTwapMinutesChange,
-  onSlipChange,
+  onTwapMaxPriceChange,
+  onTwapAdvancedChange,
+  onTwapRandomizeChange,
+  onTwapStyleChange,
+  onTwapFreqChange,
+  onTwapIndexPctChange,
 }: AlgoParamsProps) {
   const offsetNum = parseDecimal(offsetBps) ?? parseFloat(offsetBps);
   const offsetPreset = OFFSETS.includes(offsetNum) ? String(offsetNum) : "";
-  const twapNum = parseFloat(twapMinutes);
-  const twapPreset = TWAP_MINUTE_PRESETS.some((m) => m === twapNum) ? String(twapNum) : "";
+  const decimals = market.size_decimals ?? 4;
+  const priceDecimals = market.price_decimals ?? 4;
+  const twapSec = twapDurationSeconds(twapHours, twapMinutes);
+  const freqNum = parseDecimal(twapFreq) ?? TWAP_DEFAULT_FREQ;
+  const sliceSec = twapAdvanced ? freqNum : 30;
+  const orders = twapSec != null ? twapOrderCount(twapSec, sliceSec) : 0;
+  const slice =
+    twapSec != null && sizeNum > 0 && orders > 0 ? trimQty(sizeNum / orders, decimals) : "—";
+  const sliceLabel = twapAdvanced && twapRandomize && slice !== "—" ? `${slice} (±30%)` : slice;
+  const freqLabel = twapAdvanced
+    ? twapFreqLabel(freqNum > 0 ? freqNum : TWAP_DEFAULT_FREQ, twapRandomize)
+    : "30s";
+  const indexPreset = TWAP_INDEX_PCTS.includes(parseFloat(twapIndexPct) as (typeof TWAP_INDEX_PCTS)[number])
+    ? twapIndexPct
+    : "";
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <ToggleGroup
-        type="single"
-        variant="seg"
-        size="sm"
-        spacing={0}
-        value={algo}
-        onValueChange={(v) => {
-          if (v === "chase-iceberg" || v === "twap") onAlgoChange(v);
-        }}
-        className="w-full"
-      >
-        {ALGOS.map((a) => (
-          <ToggleGroupItem key={a.id} value={a.id} className="h-6 min-w-0 flex-1 px-1 text-[11px]">
-            {a.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-
+    <FieldGroup className="gap-3">
       {algo === "chase-iceberg" ? (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-end gap-1">
+          <FieldGroup className="grid grid-cols-2 items-start gap-3">
             <TicketField
               id="algo-clip"
               label="Clip"
               value={displayQty}
               inputMode="decimal"
-              placeholder="clip"
+              placeholder="0.00"
               onChange={onDisplayQtyChange}
             />
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[11px] font-medium text-muted">Offset</span>
-              <ToggleGroup
-                type="single"
-                variant="seg"
-                size="sm"
-                spacing={0}
-                value={offsetPreset}
-                onValueChange={(v) => {
-                  if (v) onOffsetBpsChange(v);
-                }}
-                className="w-full"
-                aria-label="Offset"
-              >
-                {OFFSETS.map((b) => (
-                  <ToggleGroupItem key={b} value={String(b)} className="h-8 min-w-0 flex-1 px-0.5 text-[11px]">
-                    {b}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[11px] font-medium text-muted">Band (work range)</span>
-            <ToggleGroup
-              type="single"
-              variant="seg"
-              size="sm"
-              spacing={0}
-              className="w-full"
-              aria-label="Band width"
-              onValueChange={(v) => {
-                const pct = parseFloat(v);
-                if (!Number.isFinite(pct) || pct <= 0) return;
-                const band = chaseBandFromPct(market, pct, bookMid);
-                onChaseFloorChange(band.floor);
-                onChaseCeilingChange(band.ceiling);
+            <TicketField
+              id="algo-offset"
+              label="Offset"
+              value={offsetBps}
+              inputMode="decimal"
+              placeholder="4"
+              addon="bp"
+              sanitize={(raw) => raw.replace(/[^\d.]/g, "")}
+              onChange={onOffsetBpsChange}
+              chips={{
+                ariaLabel: "Offset",
+                value: offsetPreset,
+                onValueChange: onOffsetBpsChange,
+                items: OFFSETS.map((b) => ({ value: String(b), label: String(b) })),
               }}
-            >
-              {CHASE_BAND_PCTS.map((pct) => (
-                <ToggleGroupItem
-                  key={pct}
-                  value={String(pct)}
-                  className="h-7 min-w-0 flex-1 px-0.5 text-[10px]"
-                >
-                  ±{pct}%
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            <span className="text-[10px] text-muted">Outside band — clips pull until price returns</span>
-          </div>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
-            <Input
+            />
+          </FieldGroup>
+          <FieldGroup className="grid grid-cols-2 gap-3">
+            <TicketField
               id="algo-floor"
+              label="Floor"
               value={chaseFloor}
               inputMode="decimal"
-              placeholder="floor"
-              aria-label="Floor"
-              onChange={(e) => onChaseFloorChange(e.target.value)}
-              className="h-8 font-mono text-sm tabular-nums"
+              placeholder="0.00"
+              onChange={onChaseFloorChange}
             />
-            <span className="text-[11px] text-muted">—</span>
-            <Input
+            <TicketField
               id="algo-ceil"
+              label="Ceiling"
               value={chaseCeiling}
               inputMode="decimal"
-              placeholder="ceil"
-              aria-label="Ceiling"
-              onChange={(e) => onChaseCeilingChange(e.target.value)}
-              className="h-8 font-mono text-sm tabular-nums"
+              placeholder="0.00"
+              onChange={onChaseCeilingChange}
             />
-          </div>
+          </FieldGroup>
+          <TicketChips
+            ariaLabel="Band"
+            onValueChange={(v) => {
+              const pct = parseFloat(v);
+              if (!Number.isFinite(pct) || pct <= 0) return;
+              const band = chaseBandFromPct(market, pct, bookMid);
+              onChaseFloorChange(band.floor);
+              onChaseCeilingChange(band.ceiling);
+            }}
+            items={CHASE_BAND_PCTS.map((pct) => ({
+              value: String(pct),
+              label: `±${pct}%`,
+              title: "Outside band — clips pull until price returns",
+            }))}
+          />
         </>
       ) : (
         <>
-          <div className="flex items-end gap-1">
-            <TicketField
-              id="algo-duration"
-              label="Duration"
-              value={twapMinutes}
-              inputMode="decimal"
-              placeholder="15"
-              addon="min"
-              className="min-w-0 flex-1"
-              sanitize={(raw) => raw.replace(/[^\d.]/g, "")}
-              onChange={onTwapMinutesChange}
-            />
-            <ToggleGroup
-              type="single"
-              variant="seg"
-              size="sm"
-              spacing={0}
-              value={twapPreset}
-              onValueChange={(v) => {
-                if (v) onTwapMinutesChange(v);
-              }}
-              className="mb-px min-w-0 flex-[1.2]"
-              aria-label="Duration preset"
-            >
-              {TWAP_MINUTE_PRESETS.map((m) => (
-                <ToggleGroupItem key={m} value={String(m)} className="h-8 min-w-0 flex-1 px-0.5 text-[11px]">
-                  {formatMinutesLabel(m)}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+          <ToggleRow
+            id="twap-advanced"
+            label="Advanced"
+            checked={twapAdvanced}
+            onCheckedChange={onTwapAdvancedChange}
+          />
+          <div className="flex flex-col gap-1">
+            <p className="text-xs text-muted">Running Time (1m – 30d)</p>
+            <FieldGroup className="grid grid-cols-2 gap-1">
+              <TicketField
+                id="twap-hours"
+                label="Hours"
+                value={twapHours}
+                inputMode="numeric"
+                placeholder="0"
+                sanitize={digits}
+                onChange={onTwapHoursChange}
+              />
+              <TicketField
+                id="twap-minutes"
+                label="Minutes"
+                value={twapMinutes}
+                inputMode="numeric"
+                placeholder="0"
+                sanitize={digits}
+                onChange={onTwapMinutesChange}
+              />
+            </FieldGroup>
           </div>
-          <SlipControl slippagePct={slippagePct} worst={worst} onChange={onSlipChange} />
+          {twapAdvanced ? (
+            <>
+              <ToggleRow
+                id="twap-randomize"
+                label="Randomize"
+                checked={twapRandomize}
+                onCheckedChange={onTwapRandomizeChange}
+              />
+              <TicketChips
+                label="Style"
+                ariaLabel="TWAP style"
+                value={twapStyle}
+                onValueChange={(v) => {
+                  if (v === "passive" || v === "neutral" || v === "aggressive") onTwapStyleChange(v);
+                }}
+                items={STYLES.map((s) => ({ value: s.value, label: s.label }))}
+              />
+              <TicketField
+                id="twap-freq"
+                label="Slice frequency"
+                value={twapFreq}
+                inputMode="numeric"
+                placeholder={String(TWAP_DEFAULT_FREQ)}
+                addon="s"
+                sanitize={digits}
+                onChange={onTwapFreqChange}
+              />
+            </>
+          ) : null}
+          <TicketField
+            id="twap-max-price"
+            label="Max Price"
+            value={twapMaxPrice}
+            inputMode="decimal"
+            placeholder="Optional"
+            addon="USDC"
+            onChange={onTwapMaxPriceChange}
+            chips={{
+              sticky: false,
+              ariaLabel: "Max price",
+              onValueChange: (v) => {
+                const pct = parseFloat(v);
+                if (!Number.isFinite(pct) || !(bookMid != null && bookMid > 0)) return;
+                onTwapMaxPriceChange(formatPrice(bookMid * (1 + pct / 100), priceDecimals));
+              },
+              items: TWAP_MAX_PRICE_PCTS.map((pct) => ({
+                value: String(pct),
+                label: `${pct}%`,
+              })),
+            }}
+          />
+          {twapAdvanced ? (
+            <TicketField
+              id="twap-index-pct"
+              label="Max % Past Index"
+              value={twapIndexPct}
+              inputMode="decimal"
+              placeholder="Optional"
+              addon="%"
+              onChange={onTwapIndexPctChange}
+              chips={{
+                sticky: false,
+                ariaLabel: "Max percent past index",
+                value: indexPreset,
+                onValueChange: onTwapIndexPctChange,
+                items: TWAP_INDEX_PCTS.map((pct) => ({
+                  value: String(pct),
+                  label: `${pct}%`,
+                })),
+              }}
+            />
+          ) : null}
+          <div className="flex flex-col gap-1.5">
+            <TwapRow
+              label="Order Size"
+              value={sizeNum > 0 ? `${trimQty(sizeNum, decimals)} ${market.symbol}` : "—"}
+            />
+            <TwapRow label="Frequency" value={freqLabel} />
+            <TwapRow label="Runtime" value={twapSec != null ? formatTwapRuntime(twapSec) : "—"} />
+            <TwapRow label="Number of Orders" value={orders > 0 ? String(orders) : "—"} />
+            <TwapRow label="Size per Suborder" value={sliceLabel} />
+          </div>
         </>
       )}
-    </div>
+    </FieldGroup>
   );
 }

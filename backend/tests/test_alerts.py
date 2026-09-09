@@ -85,6 +85,32 @@ class ApplyMarketStatsTest(unittest.TestCase):
         self.assertEqual(meta.funding_timestamp, 1786370400000)
         self.assertEqual(meta.daily_price_high, 2100.0)
         self.assertEqual(meta.volume_base_24h, 500.0)
+        self.assertEqual(meta.mark_price, 2000.0)
+
+    def test_apply_market_stats_broadcasts_changed_quotes(self) -> None:
+        gw = LighterGateway()
+        gw._markets[1] = _meta(mark_price=100.0)
+        msgs: list[dict] = []
+        gw.subscribe(msgs.append)
+        stats = {
+            "market_stats": {
+                "market_id": 1,
+                "mark_price": "2000",
+                "last_trade_price": "1999",
+                "open_interest": "5000000",
+                "current_funding_rate": "0.001",
+            }
+        }
+        gw._apply_market_stats(stats)
+        quotes = [m for m in msgs if m.get("type") == "market_stats"]
+        self.assertEqual(len(quotes), 1)
+        row = quotes[0]["markets"][0]
+        self.assertEqual(row["mark_price"], 2000.0)
+        self.assertEqual(row["open_interest"], 5_000_000.0)
+
+        msgs.clear()
+        gw._apply_market_stats(stats)
+        self.assertEqual([m for m in msgs if m.get("type") == "market_stats"], [])
 
 
 class ThresholdYamlTest(unittest.TestCase):

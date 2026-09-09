@@ -96,6 +96,37 @@ class MarketMeta:
             "daily_price_low": self.daily_price_low,
         }
 
+    def as_quote_dict(self) -> dict[str, Any]:
+        return {
+            "market_index": self.market_index,
+            "symbol": self.symbol,
+            "mark_price": self.mark_price,
+            "index_price": self.index_price,
+            "last_trade_price": self.last_trade_price,
+            "change_24h": self.change_24h,
+            "open_interest": self.open_interest,
+            "funding_rate": self.funding_rate,
+            "funding_apr": None if self.funding_rate is None else self.funding_rate * 24 * 365,
+            "volume_24h": self.volume_24h,
+            "best_bid_price": self.best_bid_price,
+            "best_ask_price": self.best_ask_price,
+            "mid_price": self.mid_price,
+        }
+
+    def quote_key(self) -> tuple[Any, ...]:
+        return (
+            self.mark_price,
+            self.last_trade_price,
+            self.index_price,
+            self.open_interest,
+            self.funding_rate,
+            self.change_24h,
+            self.volume_24h,
+            self.best_bid_price,
+            self.best_ask_price,
+            self.mid_price,
+        )
+
 
 @dataclass
 class OrderBookLevel:

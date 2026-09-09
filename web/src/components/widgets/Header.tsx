@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { toast } from "sonner";
+import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,8 @@ import { MarketPicker } from "@/components/widgets/MarketPicker";
 import type { Market } from "@/lib/api";
 import { preferPerpMarket, algoBlotter, algoIsWorking } from "@/lib/algos";
 import { api } from "@/lib/api";
-import { useFeedHealth, useLiveAccount, useLiveAlgos, useLiveBbo, setAlgo } from "@/lib/liveData";
+import { pushRecent } from "@/lib/recents";
+import { useFeedHealth, useLiveAccount, useLiveAlgos, useLiveBbo, useLiveQuotes, overlayQuote, setAlgo } from "@/lib/liveData";
 import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
 
 interface HeaderProps {
@@ -28,7 +29,6 @@ interface HeaderProps {
   network: string;
   connected: boolean;
   tradingEnabled: boolean;
-  markPrice?: number | null;
   editing: boolean;
   onEditToggle: () => void;
 }
@@ -96,16 +96,6 @@ function fundingTooltip(rate: number | null, apr: number | null): string | undef
   return parts.join(". ");
 }
 
-function oiTooltip(
-  oi: number | null,
-  cap: number | null,
-  util: number | null
-): string | undefined {
-  if (oi == null) return undefined;
-  if (util != null) return `${formatOi(oi)} open interest, ${formatOi(cap)} cap (${util.toFixed(0)}% used)`;
-  return `${formatOi(oi)} open interest`;
-}
-
 export function Header({
   markets,
   symbol,
@@ -113,13 +103,18 @@ export function Header({
   network,
   connected,
   tradingEnabled,
-  markPrice,
   editing,
   onEditToggle,
 }: HeaderProps) {
   const [killOpen, setKillOpen] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
-  const current = preferPerpMarket(markets, symbol) ?? null;
+
+  useEffect(() => {
+    if (symbol) pushRecent(symbol);
+  }, [symbol]);
+  const quotes = useLiveQuotes();
+  const selected = preferPerpMarket(markets, symbol) ?? null;
+  const current = selected ? overlayQuote(selected, quotes[selected.market_index]) : null;
   const account = useLiveAccount();
   const bbo = useLiveBbo();
   const health = useFeedHealth();
@@ -129,7 +124,7 @@ export function Header({
   const bid = parseFloat(bbo.bid ?? "");
   const ask = parseFloat(bbo.ask ?? "");
   const spot = bid > 0 && ask > 0 ? (bid + ask) / 2 : bid > 0 ? bid : ask > 0 ? ask : null;
-  const mark = markPrice ?? null;
+  const mark = current?.mark_price ?? null;
   const distPct =
     mark != null && spot != null && spot !== 0 ? ((mark - spot) / spot) * 100 : null;
 
@@ -190,8 +185,6 @@ export function Header({
   const fundingApr = current?.funding_apr ?? null;
   const fundingRate = current?.funding_rate ?? null;
   const oi = current?.open_interest ?? null;
-  const oiCap = current?.open_interest_limit ?? null;
-  const oiUtil = oi != null && oiCap != null && oiCap > 0 ? (oi / oiCap) * 100 : null;
 
   const openPositions = (account?.positions ?? []).filter((p) => parseFloat(p.size) !== 0);
   const usedMargin = openPositions.reduce((sum, p) => sum + num(p.allocated_margin), 0);
@@ -203,7 +196,6 @@ export function Header({
         ? `Mark ${formatPrice(mark)}`
         : undefined;
   const fundingTitle = fundingTooltip(fundingRate, fundingApr);
-  const oiTitle = oiTooltip(oi, oiCap, oiUtil);
   const statusTitle = [
     health.trade_subs_target ? `trade subs ${health.trade_subs}/${health.trade_subs_target}` : null,
     `market ${health.market_ws}`,
@@ -222,14 +214,6 @@ export function Header({
           : undefined;
   const fundingClass =
     fundingApr == null ? "text-muted" : fundingApr >= 0 ? "text-ask" : "text-bid";
-  const oiUtilClass =
-    oiUtil == null
-      ? undefined
-      : oiUtil >= 90
-        ? "text-ask"
-        : oiUtil >= 75
-          ? "text-warn"
-          : undefined;
 
   const runKill = async (flatten: boolean) => {
     setKillBusy(true);
@@ -237,15 +221,13 @@ export function Header({
       const res = await api.kill(flatten);
       if (res.algos) setAlgo(res.algos);
       if (res.status === "killed") {
-        toast.success(
-          flatten ? "Kill: algos stopped, orders cancelled, flatten sent" : "Kill: algos stopped, orders cancelled"
-        );
+        notifyOk(flatten ? "Kill: algos stopped, orders cancelled, flatten sent" : "Kill: algos stopped, orders cancelled");
       } else {
-        toast.warning("Kill partial — check positions and open orders");
+        notifyWarn("Kill partial", "Check positions and open orders");
       }
       setKillOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Kill failed");
+      notifyErr(e instanceof Error ? e.message : "Kill failed");
     } finally {
       setKillBusy(false);
     }
@@ -316,13 +298,7 @@ export function Header({
             title={fundingTitle}
           />
           <StatRule />
-          <HeaderStat
-            label="OI"
-            value={formatOi(oi)}
-            hint={oiUtil != null ? `${oiUtil.toFixed(0)}%` : undefined}
-            hintClass={oiUtilClass}
-            title={oiTitle}
-          />
+          <HeaderStat label="OI" value={formatOi(oi)} />
         </div>
 
         <div className="flex min-w-0 items-center justify-end gap-3 justify-self-end">

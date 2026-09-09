@@ -84,7 +84,7 @@ class ChaseRunnerPlaceTests(IsolatedChaseTestCase):
 
     async def test_no_market_pauses(self) -> None:
         boot = boot_job()
-        boot.gateway.market = None
+        boot.gateway.hide_market()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
         self.assertEqual(boot.job.state.quote_action, "pause")

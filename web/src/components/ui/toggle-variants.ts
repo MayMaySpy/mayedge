@@ -7,7 +7,7 @@ export const toggleVariants = cva(
       variant: {
         default: "rounded-sm text-xs hover:bg-elevated hover:text-text data-[state=on]:bg-elevated data-[state=on]:text-text",
         outline:
-          "rounded-sm border border-rule text-xs hover:bg-elevated data-[state=on]:bg-elevated data-[state=on]:text-text",
+          "rounded-lg border border-input bg-transparent text-xs text-muted hover:bg-elevated hover:text-text data-[state=on]:bg-elevated data-[state=on]:text-text",
         /* Desk text filters — type weight only, no pill chrome. */
         seg: "rounded-none bg-transparent font-mono text-[10px] text-muted hover:bg-transparent hover:text-text data-[state=on]:bg-transparent data-[state=on]:font-medium data-[state=on]:text-text",
       },

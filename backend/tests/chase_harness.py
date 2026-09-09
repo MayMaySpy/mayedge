@@ -31,29 +31,32 @@ class FakeClock:
         return self.now_ms
 
 
+def _eth_market() -> MarketMeta:
+    return MarketMeta(
+        market_index=1,
+        symbol="ETH",
+        price_decimals=2,
+        size_decimals=1,
+        min_base_amount=0.1,
+        min_quote_amount=0.0,
+    )
+
+
 @dataclass
 class FakeGateway:
-    market: MarketMeta | None = None
+    market: MarketMeta = field(default_factory=_eth_market)
     bid: str | None = "100"
     ask: str | None = "100.10"
     broadcasts: list[dict[str, Any]] = field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        if self.market is None:
-            self.market = MarketMeta(
-                market_index=1,
-                symbol="ETH",
-                price_decimals=2,
-                size_decimals=1,
-                min_base_amount=0.1,
-                min_quote_amount=0.0,
-            )
+    market_missing: bool = False
 
     def get_market_by_index(self, market_index: int) -> MarketMeta | None:
+        if self.market_missing:
+            return None
         extra = getattr(self, "markets", None)
         if extra and market_index in extra:
             return extra[market_index]
-        if self.market is None or self.market.market_index != market_index:
+        if self.market.market_index != market_index:
             return None
         return self.market
 
@@ -61,11 +64,9 @@ class FakeGateway:
         extra = getattr(self, "markets", None)
         if extra:
             return list(extra.values())
-        return [self.market] if self.market else []
+        return [self.market]
 
     def add_spot_pair(self, *, spot_index: int = 2) -> MarketMeta:
-        if self.market is None:
-            raise RuntimeError("no perp")
         self.market.market_type = "perp"
         spot = MarketMeta(
             market_index=spot_index,
@@ -85,15 +86,15 @@ class FakeGateway:
     def best_bid_ask(self, market_index: int) -> tuple[str | None, str | None]:
         if getattr(self, "spot_index", None) == market_index:
             return getattr(self, "spot_bid", self.bid), getattr(self, "spot_ask", self.ask)
-        if self.market is None or self.market.market_index != market_index:
+        if self.market.market_index != market_index:
             return None, None
         return self.bid, self.ask
 
     def is_book_synced(self, market_index: int) -> bool:
+        if self.market_missing:
+            return True
         if getattr(self, "spot_index", None) == market_index:
             return self.spot_bid is not None and self.spot_ask is not None
-        if self.market is None:
-            return True
         if self.market.market_index != market_index:
             return False
         return self.bid is not None and self.ask is not None
@@ -110,6 +111,10 @@ class FakeGateway:
         if getattr(self, "spot_index", None) is not None:
             self.spot_bid = bid
             self.spot_ask = ask
+
+    def hide_market(self) -> None:
+        """Lookups miss while the book still reports synced (same as market=None)."""
+        self.market_missing = True
 
 
 class FakeOrderService:
@@ -213,7 +218,35 @@ class FakeOrderService:
                 "order_index": idx,
             }
         )
-        return {"tx_hash": f"tx-{idx}", "client_order_index": coi}
+        return {"tx_hash": f"tx-{idx}", "client_order_index": coi, "order_index": idx}
+
+    async def create_market_order(
+        self,
+        market_index: int,
+        side: str,
+        size: str,
+        slippage: float = 0.01,
+        reduce_only: bool = False,
+        client_order_index: int | None = None,
+    ) -> dict[str, Any]:
+        if self.create_error is not None:
+            raise self.create_error
+        coi = int(client_order_index or 0)
+        idx = self._next_order_index
+        self._next_order_index += 1
+        self.creates.append(
+            {
+                "kind": "market",
+                "market_index": market_index,
+                "side": side,
+                "size": size,
+                "slippage": slippage,
+                "reduce_only": reduce_only,
+                "client_order_index": coi,
+                "order_index": idx,
+            }
+        )
+        return {"tx_hash": f"tx-{idx}", "client_order_index": coi, "order_index": idx}
 
     async def modify_order(
         self,
@@ -301,9 +334,6 @@ def make_execution(gateway: FakeGateway, orders: FakeOrderService) -> ChaseExecu
     async def _cancel_all(_market_index: int | None) -> dict[str, Any]:
         return {"ok": True}
 
-    async def _market_order(*_a: Any, **_k: Any) -> dict[str, Any]:
-        return {"ok": True}
-
     async def _ensure_book(_mi: int) -> bool:
         return True
 
@@ -313,7 +343,7 @@ def make_execution(gateway: FakeGateway, orders: FakeOrderService) -> ChaseExecu
         best_bid_ask=gateway.best_bid_ask,
         is_book_synced=gateway.is_book_synced,
         create_limit_order=orders.create_limit_order,
-        create_market_order=_market_order,
+        create_market_order=orders.create_market_order,
         modify_order=orders.modify_order,
         cancel_order=orders.cancel_order,
         cancel_all_orders=_cancel_all,

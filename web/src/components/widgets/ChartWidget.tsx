@@ -1,17 +1,24 @@
 import {
   createChart,
   CandlestickSeries,
+  HistogramSeries,
   CrosshairMode,
   type IChartApi,
   type ISeriesApi,
   type CandlestickData,
+  type HistogramData,
   type MouseEventParams,
-  type UTCTimestamp,
 } from "lightweight-charts";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { api, type Candle } from "@/lib/api";
+import {
+  foldMinute,
+  formatBarVolume,
+  mergeCandles,
+  toSeriesData,
+} from "@/lib/chartCandles";
 import {
   parseOverlayAction,
   TradingLinesPrimitive,
@@ -28,6 +35,7 @@ const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1h", "4h", "1d"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 
 const TF_KEY = "mayedge-chart-tf";
+const VOL_KEY = "mayedge-chart-vol";
 const RIGHT_OFFSET = 8;
 
 const TF_SECONDS: Record<Exclude<Timeframe, "1s">, number> = {
@@ -67,61 +75,52 @@ function loadTf(): Timeframe {
   return "1m";
 }
 
-/** LWC expects unique, strictly increasing unix seconds. */
-function candleTime(t: number): UTCTimestamp {
-  const sec = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
-  return sec as UTCTimestamp;
-}
-
-function toBar(c: Candle): CandlestickData {
-  return {
-    time: candleTime(c.time),
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-  };
-}
-
-/** Duplicate/non-monotonic times freeze lightweight-charts on setData. */
-function toBars(candles: Candle[]): CandlestickData[] {
-  const out: CandlestickData[] = [];
-  let prevT = -Infinity;
-  for (const c of candles) {
-    const bar = toBar(c);
-    const t = bar.time as number;
-    if (!Number.isFinite(t) || t <= 0) continue;
-    if (!Number.isFinite(bar.open) || !Number.isFinite(bar.high) || !Number.isFinite(bar.low) || !Number.isFinite(bar.close)) {
-      continue;
-    }
-    if (t === prevT && out.length) {
-      out[out.length - 1] = bar;
-      continue;
-    }
-    if (t < prevT) continue;
-    out.push(bar);
-    prevT = t;
+function loadVol(): boolean {
+  try {
+    return localStorage.getItem(VOL_KEY) === "1";
+  } catch {
+    return false;
   }
-  return out;
 }
 
 const EMPTY_CANDLES: Candle[] = [];
 
-type Ohlc = { open: number; high: number; low: number; close: number };
+type Ohlc = { open: number; high: number; low: number; close: number; volume?: number };
 
 function sameOhlc(a: Ohlc | null, b: Ohlc | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close;
+  return (
+    a.open === b.open &&
+    a.high === b.high &&
+    a.low === b.low &&
+    a.close === b.close &&
+    a.volume === b.volume
+  );
 }
 
-function ohlcOf(c: Candle | CandlestickData | Ohlc | null | undefined): Ohlc | null {
+function ohlcOf(c: Candle | CandlestickData | Ohlc | null | undefined, volume?: number): Ohlc | null {
   if (!c) return null;
   if (!Number.isFinite(c.open) || !Number.isFinite(c.close)) return null;
-  return { open: c.open, high: c.high, low: c.low, close: c.close };
+  const vol = volume ?? ("volume" in c && Number.isFinite(c.volume) ? c.volume : undefined);
+  return { open: c.open, high: c.high, low: c.low, close: c.close, volume: vol };
 }
 
-function OhlcReadout({ bar, decimals }: { bar: Ohlc | null; decimals: number }) {
+function applyVolumeLayout(series: ISeriesApi<"Candlestick">, on: boolean) {
+  series.priceScale().applyOptions({
+    scaleMargins: { top: 0.08, bottom: on ? 0.22 : 0.08 },
+  });
+}
+
+function OhlcReadout({
+  bar,
+  decimals,
+  showVolume,
+}: {
+  bar: Ohlc | null;
+  decimals: number;
+  showVolume?: boolean;
+}) {
   if (!bar) {
     return <span className="font-mono text-[11px] text-muted">—</span>;
   }
@@ -135,6 +134,12 @@ function OhlcReadout({ bar, decimals }: { bar: Ohlc | null; decimals: number }) 
       <OhlcField k="L" v={bar.low} decimals={decimals} className={tone} />
       <OhlcField k="C" v={bar.close} decimals={decimals} className={tone} />
       {chg != null && <span className={cn("shrink-0", tone)}>{formatPct(chg)}</span>}
+      {showVolume ? (
+        <span className="inline-flex shrink-0 items-baseline gap-1">
+          <span className="text-muted">V</span>
+          <span className="text-muted">{formatBarVolume(bar.volume ?? 0)}</span>
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -158,53 +163,6 @@ function OhlcField({
   );
 }
 
-/** REST history + live WS — live wins on the same timestamp. */
-function mergeCandles(hist: Candle[], live: Candle[]): Candle[] {
-  if (!live.length) return hist;
-  if (!hist.length) return live;
-  const byT = new Map<number, Candle>();
-  for (const c of hist) byT.set(candleTime(c.time) as number, { ...c, time: candleTime(c.time) as number });
-  for (const c of live) byT.set(candleTime(c.time) as number, { ...c, time: candleTime(c.time) as number });
-  return [...byT.values()].sort((a, b) => a.time - b.time);
-}
-
-function foldMinute(hist: Candle[], minute: Candle, tfSec: number): Candle[] {
-  const mt = candleTime(minute.time) as number;
-  const bucket = Math.floor(mt / tfSec) * tfSec;
-  if (!hist.length) {
-    return [{ ...minute, time: bucket }];
-  }
-  const last = hist[hist.length - 1];
-  const lastT = candleTime(last.time) as number;
-  if (lastT === bucket) {
-    return [
-      ...hist.slice(0, -1),
-      {
-        time: bucket,
-        open: last.open,
-        high: Math.max(last.high, minute.high),
-        low: Math.min(last.low, minute.low),
-        close: minute.close,
-        volume: last.volume,
-      },
-    ];
-  }
-  if (bucket > lastT) {
-    return [
-      ...hist,
-      {
-        time: bucket,
-        open: minute.open,
-        high: minute.high,
-        low: minute.low,
-        close: minute.close,
-        volume: minute.volume,
-      },
-    ];
-  }
-  return hist;
-}
-
 export const ChartWidget = memo(function ChartWidget({
   symbol,
   priceDecimals = 2,
@@ -214,6 +172,7 @@ export const ChartWidget = memo(function ChartWidget({
   children,
 }: ChartWidgetProps) {
   const [tf, setTf] = useState<Timeframe>(loadTf);
+  const [volOn, setVolOn] = useState(loadVol);
   const [hist, setHist] = useState<{ key: string; candles: Candle[] }>({
     key: "",
     candles: [],
@@ -225,9 +184,11 @@ export const ChartWidget = memo(function ChartWidget({
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const tradingLinesRef = useRef<TradingLinesPrimitive | null>(null);
   const overlaysRef = useRef(overlays);
   const onActionRef = useRef(onOverlayAction);
+  const volOnRef = useRef(volOn);
   const primedRef = useRef(false);
   const firstTimeRef = useRef<number | null>(null);
   const lastMetaRef = useRef<{ time: number; len: number } | null>(null);
@@ -247,6 +208,10 @@ export const ChartWidget = memo(function ChartWidget({
   useEffect(() => {
     onActionRef.current = onOverlayAction;
   }, [onOverlayAction]);
+
+  useEffect(() => {
+    volOnRef.current = volOn;
+  }, [volOn]);
 
   useEffect(() => {
     if (tf === "1s") return;
@@ -329,9 +294,20 @@ export const ChartWidget = memo(function ChartWidget({
       wickDownColor: theme.ask,
       priceFormat: priceFormat(priceDecimals),
     });
+    const vol = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale("").applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+    applyVolumeLayout(series, volOnRef.current);
 
     chartRef.current = chart;
     seriesRef.current = series;
+    volSeriesRef.current = vol;
     primedRef.current = false;
     lastMetaRef.current = null;
 
@@ -355,7 +331,12 @@ export const ChartWidget = memo(function ChartWidget({
       }
       const raw = param.seriesData.get(series);
       if (raw && "open" in raw && "close" in raw) {
-        const next = ohlcOf(raw as CandlestickData);
+        const rawVol = param.seriesData.get(vol);
+        const volVal =
+          volOnRef.current && rawVol && "value" in rawVol
+            ? (rawVol as HistogramData).value
+            : undefined;
+        const next = ohlcOf(raw as CandlestickData, volVal);
         setHover((prev) => {
           if (!next) return prev?.key === key ? null : prev;
           if (prev?.key === key && sameOhlc(prev.bar, next)) return prev;
@@ -386,6 +367,7 @@ export const ChartWidget = memo(function ChartWidget({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volSeriesRef.current = null;
       tradingLinesRef.current = null;
     };
     // Chart is created once; price format is applied in the effect below.
@@ -400,6 +382,7 @@ export const ChartWidget = memo(function ChartWidget({
     // Drop old bars before secondsVisible / tick regeneration — otherwise 1s ticks
     // over a 1d/4h range lock the main thread.
     seriesRef.current?.setData([]);
+    volSeriesRef.current?.setData([]);
     chartRef.current?.timeScale().applyOptions({
       secondsVisible: tf === "1s",
       rightOffset: RIGHT_OFFSET,
@@ -412,20 +395,30 @@ export const ChartWidget = memo(function ChartWidget({
 
   useEffect(() => {
     const series = seriesRef.current;
+    if (series) applyVolumeLayout(series, volOn);
+    if (!volOn) volSeriesRef.current?.setData([]);
+    primedRef.current = false;
+  }, [volOn]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+    const vol = volSeriesRef.current;
     const chart = chartRef.current;
     if (!series) return;
 
     if (display.length === 0) {
       series.setData([]);
+      vol?.setData([]);
       primedRef.current = false;
       firstTimeRef.current = null;
       lastMetaRef.current = null;
       return;
     }
 
-    const bars = toBars(display);
+    const { candles: bars, volume } = toSeriesData(display);
     if (bars.length === 0) {
       series.setData([]);
+      vol?.setData([]);
       primedRef.current = false;
       firstTimeRef.current = null;
       lastMetaRef.current = null;
@@ -433,6 +426,7 @@ export const ChartWidget = memo(function ChartWidget({
     }
     const first = bars[0].time as number;
     const last = bars[bars.length - 1];
+    const lastVol = volume[volume.length - 1];
     const lastT = last.time as number;
     const len = bars.length;
     const prev = lastMetaRef.current;
@@ -448,6 +442,7 @@ export const ChartWidget = memo(function ChartWidget({
 
     if (needsReset) {
       series.setData(bars);
+      vol?.setData(volOn ? volume : []);
       chart?.timeScale().applyOptions({
         secondsVisible: tf === "1s",
         rightOffset: RIGHT_OFFSET,
@@ -461,8 +456,9 @@ export const ChartWidget = memo(function ChartWidget({
 
     // Same length or +1 bar: incremental update (LWC appends when time is newer).
     series.update(last);
+    if (volOn && lastVol) vol?.update(lastVol);
     lastMetaRef.current = { time: lastT, len };
-  }, [display, tf]);
+  }, [display, tf, volOn]);
 
   useEffect(() => {
     const primitive = tradingLinesRef.current;
@@ -488,13 +484,37 @@ export const ChartWidget = memo(function ChartWidget({
   const lastBar = display.length ? ohlcOf(display[display.length - 1]) : null;
   const ohlc = hoverBar ?? lastBar;
 
+  const toggleVol = () => {
+    setVolOn((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem(VOL_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-7 shrink-0 items-center border-b border-rule">
         <div className="panel-drag flex min-w-0 flex-1 cursor-move items-center gap-2 px-2">
-          <OhlcReadout bar={ohlc} decimals={priceDecimals} />
+          <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
         </div>
         <div className="flex shrink-0 items-center gap-px pr-1">
+          <button
+            type="button"
+            aria-pressed={volOn}
+            title={volOn ? "Hide volume" : "Show volume"}
+            className={cn(
+              "h-5 rounded-sm px-1.5 font-mono text-[10px]",
+              volOn ? "bg-rule text-text" : "text-muted hover:text-text"
+            )}
+            onClick={toggleVol}
+          >
+            Vol
+          </button>
           <ToggleGroup
             type="single"
             size="sm"

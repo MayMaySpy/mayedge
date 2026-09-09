@@ -4,9 +4,9 @@ import { liqIdentity, pairLabel } from "@/lib/venuePair";
 import type { Market } from "@/lib/api";
 
 describe("pairLabel", () => {
-  it("prefixes Lighter as LIT", () => {
-    expect(pairLabel("LIT")).toBe("LIT-LIT");
-    expect(pairLabel("BTC")).toBe("LIT-BTC");
+  it("is the symbol — Lighter-only desk, no venue prefix", () => {
+    expect(pairLabel("LIT")).toBe("LIT");
+    expect(pairLabel("BTC")).toBe("BTC");
   });
 });
 

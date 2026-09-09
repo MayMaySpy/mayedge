@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
 import { chaseQuote, clipQty, roundPassive } from "@/lib/chaseIceberg";
-import { maxOrderSize, ticketBlockReason } from "@/components/widgets/orderTicket/math";
+import { maxOrderSize, minSizeHint, ticketBlockReason } from "@/components/widgets/orderTicket/math";
 
 describe("parseDecimal", () => {
   it("parses comma decimals", () => {
@@ -115,6 +115,24 @@ describe("maxOrderSize", () => {
   });
 });
 
+describe("minSizeHint", () => {
+  it("is silent when min is zero", () => {
+    expect(minSizeHint(0, 4, 1)).toBeNull();
+  });
+
+  it("shows min before a size is typed", () => {
+    expect(minSizeHint(10, 2, 0)).toEqual({ text: "min 10", warn: false });
+  });
+
+  it("warns when typed size is below min", () => {
+    expect(minSizeHint(10, 2, 5)).toEqual({ text: "Below min 10", warn: true });
+  });
+
+  it("stays quiet when size meets min", () => {
+    expect(minSizeHint(10, 2, 10)).toEqual({ text: "min 10", warn: false });
+  });
+});
+
 describe("ticketBlockReason", () => {
   const base = {
     tradingEnabled: true,
@@ -152,6 +170,10 @@ describe("ticketBlockReason", () => {
     expect(ticketBlockReason({ ...base, sizeNum: 20 })).toMatch(/^Max /);
   });
 
+  it("skips max when omitted", () => {
+    expect(ticketBlockReason({ ...base, maxSize: undefined, sizeNum: 99 })).toBeNull();
+  });
+
   it("blocks limit without price", () => {
     expect(ticketBlockReason({ ...base, kind: "limit", price: "" })).toBe("Enter price");
   });
@@ -163,7 +185,34 @@ describe("ticketBlockReason", () => {
   });
 
   it("blocks twap without duration", () => {
-    expect(ticketBlockReason({ ...base, kind: "algo", twapSec: null })).toBe("Duration 1m–24h");
+    expect(ticketBlockReason({ ...base, kind: "algo", twapSec: null })).toBe("Running time 1m–30d");
+  });
+
+  it("blocks twap max price beyond 5%", () => {
+    expect(ticketBlockReason({ ...base, kind: "algo", twapSlip: 0.06 })).toBe("Max 5% from mark");
+  });
+
+  it("allows advanced twap max price beyond 5%", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "algo",
+        twapAdvanced: true,
+        twapFreqSec: 5,
+        twapSlip: 0.08,
+      })
+    ).toBeNull();
+  });
+
+  it("blocks advanced twap without a valid slice frequency", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "algo",
+        twapAdvanced: true,
+        twapFreqSec: null,
+      })
+    ).toBe("Slice 2s–1h");
   });
 
   it("blocks chase without band", () => {
@@ -199,6 +248,47 @@ describe("ticketBlockReason", () => {
         clipNum: 2,
       })
     ).toBe("Clip exceeds parent");
+  });
+
+  it("blocks chase when parent is below min size", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "algo",
+        algo: "chase-iceberg",
+        sizeNum: 5,
+        clipNum: 5,
+        minSz: 10,
+      })
+    ).toBe("Min 10 ETH");
+  });
+
+  it("blocks chase when clip is below min size", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "algo",
+        algo: "chase-iceberg",
+        sizeNum: 20,
+        maxSize: 100,
+        clipNum: 5,
+        minSz: 10,
+      })
+    ).toBe("Min 10 ETH");
+  });
+
+  it("allows chase when clip meets min size", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "algo",
+        algo: "chase-iceberg",
+        sizeNum: 20,
+        maxSize: 100,
+        clipNum: 10,
+        minSz: 10,
+      })
+    ).toBeNull();
   });
 
   it("allows valid market order", () => {

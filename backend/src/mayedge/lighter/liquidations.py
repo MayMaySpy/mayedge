@@ -45,6 +45,26 @@ class LiquidationFeed:
             return ts * 1000
         return ts
 
+    def hydrate(self) -> None:
+        """Load the recent SQLite window into the ring so reconnects are not empty."""
+        if not self._persist or self._ring:
+            return
+        try:
+            rows = store.list_liquidations(limit=_LIQ_RING)
+        except Exception:
+            logger.exception("failed to hydrate liquidations")
+            return
+        if not rows:
+            return
+        self._ring = rows
+        seen: set[int] = set()
+        for row in rows:
+            try:
+                seen.add(int(row["trade_id"]))
+            except (TypeError, ValueError):
+                continue
+        self._seen_ids = seen
+
     def ingest(
         self,
         market_index: int,

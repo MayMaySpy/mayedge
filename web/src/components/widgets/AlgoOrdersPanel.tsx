@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { toast } from "sonner";
+import { notifyErr, notifyOk } from "@/lib/notify";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
@@ -89,12 +89,12 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
       setAlgo(book);
       const still = (book.working ?? []).find((a) => a.algo_id === algoId);
       if (still?.status === "error") {
-        toast.error(still.error || `${algoId} stop incomplete`);
+        notifyErr(still.error || `${algoId} stop incomplete`);
       } else {
-        toast.success(`${algoId} stopped`);
+        notifyOk(`${algoId} stopped`);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Stop failed");
+      notifyErr(err instanceof Error ? err.message : "Stop failed");
     } finally {
       setBusyId(null);
     }
@@ -106,9 +106,9 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     try {
       const book = await api.chasePause(algoId);
       setAlgo(book);
-      toast.success(`${algoId} paused`);
+      notifyOk(`${algoId} paused`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Pause failed");
+      notifyErr(err instanceof Error ? err.message : "Pause failed");
     } finally {
       setBusyId(null);
     }
@@ -120,9 +120,9 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     try {
       const book = await api.chaseUnpause(algoId);
       setAlgo(book);
-      toast.success(`${algoId} resumed`);
+      notifyOk(`${algoId} resumed`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Resume failed");
+      notifyErr(err instanceof Error ? err.message : "Resume failed");
     } finally {
       setBusyId(null);
     }
@@ -134,9 +134,9 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     try {
       await api.chaseStop(undefined);
       setAlgo(await api.algoStatus());
-      toast.success("All algos stopped");
+      notifyOk("All algos stopped");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Stop failed");
+      notifyErr(err instanceof Error ? err.message : "Stop failed");
     } finally {
       setBusyId(null);
     }

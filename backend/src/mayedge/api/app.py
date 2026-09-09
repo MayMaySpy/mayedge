@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from mayedge import db as store
 from mayedge import desk, feed_health
 from mayedge.algos.chase import ChaseIcebergParams
+from mayedge.algos.twap.plan import AdvancedTwapParams
 from mayedge.api.schemas import (
+    AdvancedTwapStartRequest,
     CancelAllRequest,
     CancelOrderRequest,
     ChaseStartRequest,
@@ -35,10 +37,16 @@ from mayedge.numbers import parse_decimal
 logger = logging.getLogger(__name__)
 
 
+class _AllAlgos:
+    async def stop(self) -> None:
+        await desk.chase_book.stop()
+        await desk.twap_book.stop()
+
+
 async def run_kill(*, flatten: bool) -> KillResult:
     return await kill(
         flatten=flatten,
-        chase=desk.chase_book,
+        chase=_AllAlgos(),
         orders=order_service,
         get_account_summary=order_service.get_account_summary,
     )
@@ -244,12 +252,14 @@ def create_app() -> FastAPI:
     async def cancel_all(req: CancelAllRequest) -> dict[str, Any]:
         _require_trading()
         await desk.chase_book.pause_for_market(req.market_index)
+        await desk.twap_book.pause_for_market(req.market_index)
         return await _trade(lambda: order_service.cancel_all_orders(req.market_index))
 
     @app.post("/api/orders/cancel-all/{market_index}")
     async def cancel_all_market(market_index: int) -> dict[str, Any]:
         _require_trading()
         await desk.chase_book.pause_for_market(market_index)
+        await desk.twap_book.pause_for_market(market_index)
         return await _trade(lambda: order_service.cancel_all_orders(market_index))
 
     @app.post("/api/leverage")
@@ -287,36 +297,56 @@ def create_app() -> FastAPI:
             )
         except (ValueError, ArithmeticError) as e:
             raise HTTPException(400, str(e)) from e
-        return book.to_dict()
+        return desk.algo_book()
 
     @app.post("/api/algos/chase-iceberg/stop")
     async def stop_chase(req: ChaseStopRequest = ChaseStopRequest()) -> dict[str, Any]:
-        await desk.chase_book.stop(algo_id=(req.algo_id if req else None))
-        return desk.chase_book.to_dict()
+        return await desk.stop_algo(req.algo_id if req else None)
 
     @app.post("/api/algos/chase-iceberg/pause")
     async def pause_chase(req: ChaseStopRequest) -> dict[str, Any]:
         _require_trading()
         if not req.algo_id:
             raise HTTPException(400, "algo_id required")
-        book = desk.chase_book
         try:
-            await book.pause(req.algo_id)
+            return await desk.pause_algo(req.algo_id)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        return book.to_dict()
 
     @app.post("/api/algos/chase-iceberg/unpause")
     async def unpause_chase(req: ChaseStopRequest) -> dict[str, Any]:
         _require_trading()
         if not req.algo_id:
             raise HTTPException(400, "algo_id required")
-        book = desk.chase_book
         try:
-            await book.unpause(req.algo_id)
+            return await desk.unpause_algo(req.algo_id)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        return book.to_dict()
+
+    @app.post("/api/algos/advanced-twap/start")
+    async def start_advanced_twap(req: AdvancedTwapStartRequest) -> dict[str, Any]:
+        _require_trading()
+        try:
+            max_price = parse_decimal(req.max_price) if req.max_price else None
+            max_index = parse_decimal(req.max_index_pct) if req.max_index_pct else None
+            params = AdvancedTwapParams(
+                side=req.side,
+                qty=parse_decimal(req.qty),
+                duration_seconds=req.duration_seconds,
+                frequency_seconds=req.frequency_seconds,
+                style=req.style,
+                randomize=req.randomize,
+                max_price=max_price,
+                max_index_pct=max_index,
+            )
+            await desk.twap_book.start(
+                market_index=req.market_index,
+                params=params,
+                reduce_only=req.reduce_only,
+            )
+        except (ValueError, ArithmeticError) as e:
+            raise HTTPException(400, str(e)) from e
+        return desk.algo_book()
 
     @app.post("/api/kill")
     async def kill_switch(req: KillRequest) -> dict[str, Any]:

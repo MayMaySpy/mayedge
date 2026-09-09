@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { notifyDesk } from "@/lib/notify";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { HeaderNumberInput } from "@/components/desk/HeaderNumberInput";
 import { Badge } from "@/components/ui/badge";
@@ -119,14 +119,11 @@ export const AlertsPanel = memo(function AlertsPanel({
       if (eventMs(ev.ts) < mountedAtRef.current - 1_000) continue;
       seenToastRef.current.add(ev.id);
       n += 1;
-      toast(pairLabel(ev.symbol), {
+      notifyDesk({
+        title: pairLabel(ev.symbol),
         description: `${KIND_LABEL[ev.kind] ?? ev.kind}: ${ev.note}`,
-        action: onOpenPair
-          ? {
-              label: "Open",
-              onClick: () => onOpenPair(ev.symbol),
-            }
-          : undefined,
+        tone: "warn",
+        symbol: ev.symbol,
       });
     }
     if (seenToastRef.current.size > 400) {

@@ -46,49 +46,49 @@ async def run_ws_loop(gw: LighterGateway) -> None:
         except Exception:
             logger.exception("ws loop error, reconnecting in 3s")
             feed_health.set_market_ws("reconnecting", trade_subs=0)
-            gw._ws = None
+            gw.unbind_market_ws()
             gw._trade_subs.clear()
             await asyncio.sleep(3)
 
 
 async def connect_and_stream(gw: LighterGateway) -> None:
-    market_index = gw._current_market_index
-    if market_index is None:
-        default = gw.get_market(settings.default_market_symbol)
-        market_index = default.market_index if default else next(iter(gw._markets))
-        gw._current_market_index = market_index
-    gw._books.set_current_market(market_index)
-
     gw._refresh_trade_targets()
     async with websockets.connect(settings.ws_url) as ws:
-        gw._ws = ws
-        gw._ws_connected.set()
-        gw._last_msg_at = time.monotonic()
-        feed_health.set_market_ws(
-            "live",
-            last_msg_at=int(time.time() * 1000),
-            trade_subs=0,
-            trade_subs_target=len(gw._trade_subs_target),
-        )
-
-        await ws_send(ws, {"type": "subscribe", "channel": f"order_book/{market_index}"})
-        await ws_send(ws, {"type": "subscribe", "channel": f"candle/{market_index}/1m"})
-        for pinned in list(gw._pinned_books):
-            if pinned != market_index:
-                await ws_send(ws, {"type": "subscribe", "channel": f"order_book/{pinned}"})
-        await ws_send(ws, {"type": "subscribe", "channel": "market_stats/all"})
-        gw._trade_subs_target.add(market_index)
+        sub_task: asyncio.Task[None] | None = None
+        ping_task: asyncio.Task[None] | None = None
+        watch_task: asyncio.Task[None] | None = None
         try:
-            await ws_send(ws, {"type": "subscribe", "channel": f"trade/{market_index}"})
-            gw._trade_subs.add(market_index)
-            logger.info("active market trade/%s subscribed", market_index)
-        except Exception:
-            logger.exception("active trade subscribe failed")
+            async with gw._lock:
+                market_index = gw.bind_market_ws(ws)
+                gw._last_msg_at = time.monotonic()
+                feed_health.set_market_ws(
+                    "live",
+                    last_msg_at=int(time.time() * 1000),
+                    trade_subs=0,
+                    trade_subs_target=len(gw._trade_subs_target),
+                )
+                async with gw._send_lock:
+                    await ws_send(
+                        ws, {"type": "subscribe", "channel": f"order_book/{market_index}"}
+                    )
+                    await ws_send(ws, {"type": "subscribe", "channel": f"candle/{market_index}/1m"})
+                    for pinned in list(gw._pinned_books):
+                        if pinned != market_index:
+                            await ws_send(
+                                ws, {"type": "subscribe", "channel": f"order_book/{pinned}"}
+                            )
+                    await ws_send(ws, {"type": "subscribe", "channel": "market_stats/all"})
+                    gw._trade_subs_target.add(market_index)
+                    try:
+                        await ws_send(ws, {"type": "subscribe", "channel": f"trade/{market_index}"})
+                        gw._trade_subs.add(market_index)
+                        logger.info("active market trade/%s subscribed", market_index)
+                    except Exception:
+                        logger.exception("active trade subscribe failed")
 
-        sub_task = asyncio.create_task(pace_trade_subs(gw, ws))
-        ping_task = asyncio.create_task(ping_loop(gw, ws))
-        watch_task = asyncio.create_task(silence_watchdog(gw, ws))
-        try:
+            sub_task = asyncio.create_task(pace_trade_subs(gw, ws))
+            ping_task = asyncio.create_task(ping_loop(gw, ws))
+            watch_task = asyncio.create_task(silence_watchdog(gw, ws))
             async for raw in ws:
                 gw._last_msg_at = time.monotonic()
                 feed_health.touch_market_msg()
@@ -104,8 +104,10 @@ async def connect_and_stream(gw: LighterGateway) -> None:
                     continue
                 await handle_ws_message(gw, msg)
         finally:
-            gw._ws = None
+            gw.unbind_market_ws()
             for task in (sub_task, ping_task, watch_task):
+                if task is None:
+                    continue
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task

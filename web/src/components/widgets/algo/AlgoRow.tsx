@@ -1,6 +1,6 @@
 import { ChevronDown, Pause, Play } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { notifyOk } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -34,7 +34,7 @@ function venueRef(row: {
 
 function copyId(id: string) {
   void navigator.clipboard.writeText(id).then(
-    () => toast.success(`${id} copied`),
+    () => notifyOk(`${id} copied`),
     () => {}
   );
 }
@@ -89,7 +89,9 @@ export function AlgoRow({
   const kind =
     algo.algo_type === "chase-iceberg" || algo.id === "chase-iceberg"
       ? "Chase"
-      : (algo.algo_type ?? algo.id ?? "Algo");
+      : algo.algo_type === "advanced-twap" || algo.id === "advanced-twap" || algo.id === "twap"
+        ? "TWAP"
+        : (algo.algo_type ?? algo.id ?? "Algo");
 
   const badgeVariant =
     phase.tone === "bid"

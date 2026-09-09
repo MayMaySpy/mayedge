@@ -8,9 +8,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        /* Secondary chrome: type only — no fill competing with data. */
         default: "text-muted hover:text-text",
-        outline: "text-muted hover:text-text",
+        outline: "border border-input bg-transparent text-muted hover:bg-elevated hover:text-text",
         ghost: "text-muted hover:text-text",
         /* Primary desk actions: solid bid/ask for at-a-glance. */
         buy: "bg-bid text-canvas font-semibold hover:brightness-110",

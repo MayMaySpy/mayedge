@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { toast } from "sonner";
+import { notifyErr, notifyOk } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
@@ -23,7 +23,14 @@ import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api, isLongPosition, type Market, type Position } from "@/lib/api";
 import { algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
 import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
-import { cn, formatPct, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+import {
+  nextPosSort,
+  positionNotional,
+  sortPositionRows,
+  type PosSort,
+  type PosSortKey,
+} from "@/lib/positionsTable";
+import { cn, formatPct, formatPrice, formatSigned, formatSize, formatUsdCompact } from "@/lib/utils";
 
 interface PositionsPanelProps {
   market: Market | null;
@@ -83,6 +90,43 @@ function pnlClass(value: number) {
   return "text-muted";
 }
 
+function formatNotional(value: number): string {
+  if (!(value > 0)) return "—";
+  return formatUsdCompact(value) || `$${value.toFixed(0)}`;
+}
+
+function SortHead({
+  label,
+  column,
+  sort,
+  onSort,
+  title,
+}: {
+  label: string;
+  column: PosSortKey;
+  sort: PosSort;
+  onSort: (key: PosSortKey) => void;
+  title?: string;
+}) {
+  const active = sort.key === column;
+  return (
+    <TableHead className="text-right">
+      <button
+        type="button"
+        title={title ?? `Sort by ${label}`}
+        onClick={() => onSort(column)}
+        className={cn(
+          "ml-auto inline-flex items-center gap-0.5 hover:text-text",
+          active && "text-text"
+        )}
+      >
+        {label}
+        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
+      </button>
+    </TableHead>
+  );
+}
+
 export function PositionsPanel({
   market,
   markets = [],
@@ -97,17 +141,18 @@ export function PositionsPanel({
   const [tab, setTab] = useState("positions");
   const [orderScope, setOrderScope] = useState<"all" | "pair">("all");
   const [busy, setBusy] = useState<string | null>(null);
+  const [posSort, setPosSort] = useState<PosSort>({ key: "notional", dir: "desc" });
 
   const cancelOrder = async (marketIndex: number, orderIndex: string | number) => {
     if (!tradingEnabled) {
-      toast.error("Trading not configured");
+      notifyErr("Trading not configured");
       return;
     }
     try {
       await api.cancelOrder(marketIndex, orderIndex);
-      toast.success("Order cancelled");
+      notifyOk("Order cancelled");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Cancel failed");
+      notifyErr(e instanceof Error ? e.message : "Cancel failed");
     }
   };
 
@@ -115,37 +160,37 @@ export function PositionsPanel({
     if (!market) return;
     try {
       await api.cancelAll(market.market_index);
-      toast.success(`Cancelled ${market.symbol} orders`);
+      notifyOk(`Cancelled ${market.symbol} orders`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Cancel pair failed");
+      notifyErr(e instanceof Error ? e.message : "Cancel pair failed");
     }
   };
 
   const cancelAll = async () => {
     try {
       await api.cancelAll(null);
-      toast.success("Cancelled all orders");
+      notifyOk("Cancelled all orders");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Cancel all failed");
+      notifyErr(e instanceof Error ? e.message : "Cancel all failed");
     }
   };
 
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     if (!tradingEnabled) {
-      toast.error("Trading not configured");
+      notifyErr("Trading not configured");
       return false;
     }
     if (!feed.ready) {
-      toast.error(feed.reason ?? "Feed not ready");
+      notifyErr(feed.reason ?? "Feed not ready");
       return false;
     }
     setBusy(key);
     try {
       await fn();
-      toast.success(ok);
+      notifyOk(ok);
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Order failed");
+      notifyErr(e instanceof Error ? e.message : "Order failed");
       return false;
     } finally {
       setBusy(null);
@@ -201,11 +246,28 @@ export function PositionsPanel({
   const liveSpot =
     bid > 0 && ask > 0 ? (bid + ask) / 2 : bid > 0 ? bid : ask > 0 ? ask : null;
 
-  const liveRows = openPositions.map((p) => {
-    const mark = liveMark(p, market, liveSpot, markets);
-    const pnl = livePnl(p, mark);
-    return { p, mark, pnl };
-  });
+  const liveRows = useMemo(() => {
+    return openPositions.map((p) => {
+      const mark = liveMark(p, market, liveSpot, markets);
+      const pnl = livePnl(p, mark);
+      const sizeAbs = Math.abs(n(p.size));
+      return {
+        p,
+        mark,
+        pnl,
+        marketIndex: p.market_index,
+        sizeAbs,
+        notional: positionNotional(n(p.size), mark, n(p.entry_price)),
+        roe: roePct(p, pnl),
+      };
+    });
+  }, [openPositions, market, liveSpot, markets]);
+
+  const sortedRows = useMemo(
+    () => sortPositionRows(liveRows, posSort, market?.market_index ?? null),
+    [liveRows, posSort, market]
+  );
+
   const usedMargin = openPositions.reduce((sum, p) => sum + n(p.allocated_margin), 0);
   const totalPnl = liveRows.reduce((sum, r) => sum + r.pnl, 0);
   const accountRoe = usedMargin > 0 ? (totalPnl / usedMargin) * 100 : null;
@@ -266,19 +328,41 @@ export function PositionsPanel({
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-2.5">Market</TableHead>
-                    <TableHead className="text-right">Size</TableHead>
+                    <SortHead
+                      label="Size"
+                      column="size"
+                      sort={posSort}
+                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
+                    />
+                    <SortHead
+                      label="Notional"
+                      column="notional"
+                      sort={posSort}
+                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
+                    />
                     <TableHead className="text-right">Entry</TableHead>
                     <TableHead className="text-right">Liq</TableHead>
-                    <TableHead className="text-right">uPnL</TableHead>
-                    <TableHead className="text-right">Fund</TableHead>
+                    <SortHead
+                      label="uPnL"
+                      column="pnl"
+                      sort={posSort}
+                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
+                    />
+                    <SortHead
+                      label="uPnL%"
+                      column="roe"
+                      sort={posSort}
+                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
+                      title="Sort by unrealized PnL %"
+                    />
+                    <TableHead className="text-right">Funding</TableHead>
                     <TableHead className="text-right" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {liveRows.map(({ p, mark, pnl }) => {
+                  {sortedRows.map(({ p, mark, pnl, notional, roe }) => {
                     const long = isLongPosition(p);
                     const fund = n(p.funding_paid);
-                    const roe = roePct(p, pnl);
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
                     const rowBusy = busy === `close-${p.market_index}`;
@@ -319,6 +403,9 @@ export function PositionsPanel({
                         <TableCell className={cn("text-right", long ? "text-bid" : "text-ask")}>
                           {formatSize(Math.abs(n(p.size)))}
                         </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatNotional(notional)}
+                        </TableCell>
                         <TableCell className="text-right">{formatPrice(p.entry_price)}</TableCell>
                         <TableCell className="text-right">
                           {liq > 0 ? formatPrice(p.liquidation_price) : "—"}
@@ -335,9 +422,9 @@ export function PositionsPanel({
                         </TableCell>
                         <TableCell className={cn("text-right", pnlClass(pnl))}>
                           {formatSigned(pnl)}
-                          {roe != null && (
-                            <span className="ml-1 opacity-80">({formatPct(roe, 1)})</span>
-                          )}
+                        </TableCell>
+                        <TableCell className={cn("text-right", roe != null ? pnlClass(roe) : "text-muted")}>
+                          {roe != null ? formatPct(roe, 1) : "—"}
                         </TableCell>
                         <TableCell className={cn("text-right", pnlClass(fund))}>
                           {formatSigned(p.funding_paid)}

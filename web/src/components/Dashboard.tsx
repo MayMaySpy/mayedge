@@ -6,7 +6,7 @@ import GridLayout, {
 } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { toast } from "sonner";
+import { notifyErr, notifyOk } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { ChartWidget, type ChartOverlay, type OverlayAction } from "@/components/widgets/ChartWidget";
@@ -364,27 +364,27 @@ export function Dashboard() {
           try {
             const book = await api.chaseStop(overlay.algoId);
             setAlgo(book);
-            toast.success(overlay.algoId ? `${overlay.algoId} stopped` : "Algo stopped");
+            notifyOk(overlay.algoId ? `${overlay.algoId} stopped` : "Algo stopped");
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Stop failed");
+            notifyErr(e instanceof Error ? e.message : "Stop failed");
           }
           return;
         }
         if (overlay.marketIndex == null || overlay.orderIndex == null) return;
         try {
           await api.cancelOrder(overlay.marketIndex, overlay.orderIndex);
-          toast.success("Order cancelled");
+          notifyOk("Order cancelled");
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Cancel failed");
+          notifyErr(e instanceof Error ? e.message : "Cancel failed");
         }
         return;
       }
       if (!tradingEnabled) {
-        toast.error("Trading not configured");
+        notifyErr("Trading not configured");
         return;
       }
       if (!feed.ready) {
-        toast.error(feed.reason ?? "Feed not ready");
+        notifyErr(feed.reason ?? "Feed not ready");
         return;
       }
       if (overlay.marketIndex == null || overlay.size == null || overlay.size <= 0 || !overlay.side) {
@@ -404,7 +404,7 @@ export function Dashboard() {
               reduce_only: true,
             },
           );
-          toast.success("Position closed");
+          notifyOk("Position closed");
         } else if (action.action === "reverse") {
           try {
             await api.placeMarketOrder(
@@ -417,7 +417,7 @@ export function Dashboard() {
               },
             );
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Close leg failed");
+            notifyErr(e instanceof Error ? e.message : "Close leg failed");
             return;
           }
           try {
@@ -430,13 +430,13 @@ export function Dashboard() {
                 reduce_only: false,
               },
             );
-            toast.success("Position reversed");
+            notifyOk("Position reversed");
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Closed — reverse open failed");
+            notifyErr(e instanceof Error ? e.message : "Closed — reverse open failed");
           }
         }
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Order failed");
+        notifyErr(e instanceof Error ? e.message : "Order failed");
       }
     },
     [feed.ready, feed.reason, slipFrac, tradingEnabled]
@@ -448,7 +448,7 @@ export function Dashboard() {
     setVisible(allVisible);
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(DEFAULT_LAYOUT));
     localStorage.setItem(VISIBILITY_KEY, JSON.stringify(allVisible));
-    toast.success("Layout reset");
+    notifyOk("Layout reset");
   };
 
   return (
@@ -460,7 +460,6 @@ export function Dashboard() {
         network={ws.network}
         connected={ws.connected}
         tradingEnabled={deskTradingEnabled}
-        markPrice={market?.mark_price}
         editing={editing}
         onEditToggle={() => setEditing((open) => !open)}
       />

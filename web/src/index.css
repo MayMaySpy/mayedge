@@ -16,7 +16,7 @@
   --color-warn: #e8b84a;
   --color-text: #f2f5f8;
   /* Desk muted text (not shadcn surface — use text-muted / text-muted-foreground). */
-  --color-muted: #9aa3ae;
+  --color-muted: #b4bcc6;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-heading: "IBM Plex Sans", system-ui, sans-serif;
@@ -76,7 +76,7 @@
   --secondary: #1a1f27;
   --secondary-foreground: #f2f5f8;
   --muted: #1a1f27;
-  --muted-foreground: #9aa3ae;
+  --muted-foreground: #b4bcc6;
   --accent: #1a1f27;
   --accent-foreground: #f2f5f8;
   --destructive: #ff4d5e;
@@ -117,13 +117,14 @@ body {
   font-family: var(--font-sans);
   background: var(--color-canvas);
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
 
 .font-mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 .panel {
@@ -173,6 +174,24 @@ body {
 
 .react-grid-placeholder {
   background: rgba(46, 204, 113, 0.1) !important;
+}
+
+[data-fade="x"] {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fade-l, 0px),
+    #000 calc(100% - var(--fade-r, 0px)),
+    transparent 100%
+  );
+}
+
+.scroll-hide {
+  scrollbar-width: none;
+}
+
+.scroll-hide::-webkit-scrollbar {
+  display: none;
 }
 
 ::-webkit-scrollbar {

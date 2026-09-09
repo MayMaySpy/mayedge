@@ -10,6 +10,8 @@ from mayedge import feed_health
 from mayedge.algos.chase import HISTORY_CAP
 from mayedge.algos.chase.book import ChaseBook
 from mayedge.algos.chase.execution import ChaseExecution
+from mayedge.algos.twap.book import AdvancedTwapBook
+from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 from mayedge.lighter.account import account_service
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
@@ -74,13 +76,20 @@ chase_book = ChaseBook(
     coi_base=8_000_000_000,
     coi_end=9_000_000_000,
 )
+twap_book = AdvancedTwapBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=TWAP_COI_BASE,
+    coi_end=TWAP_COI_END,
+)
 
 
 def algo_book() -> dict[str, Any]:
     chase = chase_book.to_dict()
-    working = _book_rows(chase, "working")
+    twap = twap_book.to_dict()
+    working = _book_rows(chase, "working") + _book_rows(twap, "working")
     working.sort(key=_created_at, reverse=True)
-    history = _book_rows(chase, "history")
+    history = _book_rows(chase, "history") + _book_rows(twap, "history")
     history.sort(key=_created_at, reverse=True)
     history = history[:HISTORY_CAP]
     return {
@@ -89,6 +98,32 @@ def algo_book() -> dict[str, Any]:
         "working": working,
         "history": history,
     }
+
+
+async def stop_algo(algo_id: str | None = None) -> dict[str, Any]:
+    await chase_book.stop(algo_id)
+    await twap_book.stop(algo_id)
+    return algo_book()
+
+
+async def pause_algo(algo_id: str) -> dict[str, Any]:
+    if chase_book.has(algo_id):
+        await chase_book.pause(algo_id)
+    elif twap_book.has(algo_id):
+        await twap_book.pause(algo_id)
+    else:
+        raise ValueError(f"unknown algo_id {algo_id}")
+    return algo_book()
+
+
+async def unpause_algo(algo_id: str) -> dict[str, Any]:
+    if chase_book.has(algo_id):
+        await chase_book.unpause(algo_id)
+    elif twap_book.has(algo_id):
+        await twap_book.unpause(algo_id)
+    else:
+        raise ValueError(f"unknown algo_id {algo_id}")
+    return algo_book()
 
 
 def set_broadcast(fn: Callable[[dict[str, Any]], None] | None) -> None:
@@ -104,6 +139,7 @@ def _on_gateway(msg: dict[str, Any]) -> None:
     if _broadcast:
         _broadcast(msg)
     chase_book.on_gateway(msg)
+    twap_book.on_gateway(msg)
 
 
 async def start() -> None:
@@ -113,11 +149,14 @@ async def start() -> None:
 
 async def stop() -> None:
     await chase_book.drain_for_shutdown()
+    await twap_book.drain_for_shutdown()
     await chase_book.flush()
+    await twap_book.flush()
     await order_service.stop()
     await gateway.stop()
 
 
 async def restore() -> None:
     await chase_book.restore()
+    await twap_book.restore()
     _publish_algo_book({})

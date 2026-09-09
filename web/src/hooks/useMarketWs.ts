@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { preferPerpMarket, sameMarketIndex } from "@/lib/algos";
 import { api, type AccountTrade, type Candle, type Market } from "@/lib/api";
+import { armFillToasts, consumeLiveFills } from "@/lib/fillNotice";
+import { notifyOrder } from "@/lib/notify";
 import {
   applyBookDelta,
   applyBookSnapshot,
+  applyMarketQuotes,
   clearBook,
   clearMinuteCandles,
   clearTrades,
@@ -20,6 +23,7 @@ import {
   setFeedHealth,
   setMinuteCandles,
   upsertMinuteCandle,
+  type MarketQuote,
 } from "@/lib/liveData";
 
 export type { OrderBookLevel, Trade } from "@/lib/liveData";
@@ -145,6 +149,7 @@ export function useMarketWs(symbol: string) {
           return;
         }
         setState((s) => ({ ...s, connected: true }));
+        armFillToasts();
         subscribe(ws);
         api.account().then((a) => setAccount(a)).catch(() => {});
         api
@@ -176,6 +181,7 @@ export function useMarketWs(symbol: string) {
               trading_enabled: Boolean(msg.trading_enabled ?? s.trading_enabled),
               markets: (msg.markets as Market[]) ?? s.markets,
             }));
+            applyMarketQuotes((msg.markets as Market[]) ?? []);
             break;
           }
           case "market_switch":
@@ -219,6 +225,9 @@ export function useMarketWs(symbol: string) {
           case "feed_health":
             setFeedHealth(msg);
             break;
+          case "market_stats":
+            applyMarketQuotes((msg.markets as MarketQuote[]) ?? []);
+            break;
           case "candles":
             if (!isActiveMarket(msg)) break;
             setMinuteCandles((msg.candles ?? []) as Candle[]);
@@ -242,9 +251,12 @@ export function useMarketWs(symbol: string) {
               open_orders: (msg.open_orders as import("@/lib/api").OpenOrder[]) ?? [],
             });
             break;
-          case "account_trades":
-            prependAccountTrades((msg.trades ?? []) as AccountTrade[]);
+          case "account_trades": {
+            const trades = (msg.trades ?? []) as AccountTrade[];
+            prependAccountTrades(trades);
+            for (const notice of consumeLiveFills(trades)) notifyOrder(notice);
             break;
+          }
           case "algo":
             setAlgo(msg as unknown as import("@/lib/api").AlgoBook);
             break;

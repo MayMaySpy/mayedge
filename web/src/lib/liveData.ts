@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Account, AccountTrade, AlgoBook, AlgoState, Candle, AlertEvent } from "@/lib/api";
+import type { Account, AccountTrade, AlgoBook, AlgoState, Candle, AlertEvent, Market } from "@/lib/api";
 import { algoIsWorking } from "@/lib/algos";
 import { liqIdentity } from "@/lib/venuePair";
 
@@ -202,6 +202,87 @@ const tradesNotify = makeThrottledNotify(100);
 const candle1sNotify = makeThrottledNotify(100);
 const minuteCandleNotify = makeThrottledNotify(100);
 const accountNotify = makeThrottledNotify(150);
+const quoteNotify = makeThrottledNotify(100);
+
+export type MarketQuote = {
+  market_index: number;
+  mark_price?: number | null;
+  last_trade_price?: number | null;
+  index_price?: number | null;
+  change_24h?: number | null;
+  open_interest?: number | null;
+  funding_rate?: number | null;
+  funding_apr?: number | null;
+  volume_24h?: number | null;
+  best_bid_price?: number | null;
+  best_ask_price?: number | null;
+  mid_price?: number | null;
+};
+
+const emptyQuotes: Record<number, MarketQuote> = {};
+let quotes: Record<number, MarketQuote> = emptyQuotes;
+
+export function overlayQuote(m: Market, q?: MarketQuote | null): Market {
+  if (!q) return m;
+  return {
+    ...m,
+    mark_price: q.mark_price ?? m.mark_price,
+    last_trade_price: q.last_trade_price ?? m.last_trade_price,
+    index_price: q.index_price ?? m.index_price,
+    change_24h: q.change_24h ?? m.change_24h,
+    open_interest: q.open_interest ?? m.open_interest,
+    funding_rate: q.funding_rate ?? m.funding_rate,
+    funding_apr: q.funding_apr ?? m.funding_apr,
+    volume_24h: q.volume_24h ?? m.volume_24h,
+    best_bid_price: q.best_bid_price ?? m.best_bid_price,
+    best_ask_price: q.best_ask_price ?? m.best_ask_price,
+    mid_price: q.mid_price ?? m.mid_price,
+  };
+}
+
+export function applyMarketQuotes(rows: MarketQuote[]) {
+  if (!rows.length) return;
+  let changed = false;
+  const next = { ...quotes };
+  for (const row of rows) {
+    if (row.market_index == null) continue;
+    const prev = next[row.market_index];
+    const merged = prev ? { ...prev, ...row } : row;
+    if (
+      prev &&
+      prev.mark_price === merged.mark_price &&
+      prev.last_trade_price === merged.last_trade_price &&
+      prev.open_interest === merged.open_interest &&
+      prev.funding_rate === merged.funding_rate &&
+      prev.change_24h === merged.change_24h &&
+      prev.index_price === merged.index_price
+    ) {
+      continue;
+    }
+    next[row.market_index] = merged;
+    changed = true;
+  }
+  if (!changed) return;
+  quotes = next;
+  quoteNotify.notify();
+}
+
+export function getMarketQuotes() {
+  return quotes;
+}
+
+export function clearMarketQuotes() {
+  quotes = emptyQuotes;
+  quoteNotify.notifyNow();
+}
+
+export function subscribeMarketQuotes(onChange: () => void) {
+  return quoteNotify.subscribe(onChange);
+}
+
+export function useLiveQuotes() {
+  return useSyncExternalStore(subscribeMarketQuotes, getMarketQuotes, getMarketQuotes);
+}
 
 
 export function subscribeBook(onChange: () => void) {

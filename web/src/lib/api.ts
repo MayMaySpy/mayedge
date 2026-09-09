@@ -325,6 +325,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  twapStart: (body: Record<string, unknown>) =>
+    request<AlgoBook>("/algos/advanced-twap/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   chaseStop: (algo_id?: string | null) =>
     request<AlgoBook>("/algos/chase-iceberg/stop", {
       method: "POST",

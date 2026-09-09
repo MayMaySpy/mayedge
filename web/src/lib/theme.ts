@@ -4,7 +4,7 @@ export const theme = {
   panel: "#0e1116",
   elevated: "#1a1f27",
   rule: "#252b34",
-  muted: "#9aa3ae",
+  muted: "#b4bcc6",
   bid: "#2ecc71",
   ask: "#ff4d5e",
   warn: "#e8b84a",

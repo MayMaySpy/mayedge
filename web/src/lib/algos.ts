@@ -12,7 +12,7 @@ export interface AlgoDef {
 
 /** Add a row here, then a sheet under `orderTicket/kinds/AlgoParams`. Shared size/side/RO stay on the ticket. */
 export const ALGOS: readonly AlgoDef[] = [
-  { id: "twap", label: "TWAP", intent: "Work size evenly over a window" },
+  { id: "twap", label: "TWAP", intent: "Time-weighted slices over the running time" },
   {
     id: "chase-iceberg",
     label: "Chase",
@@ -20,23 +20,57 @@ export const ALGOS: readonly AlgoDef[] = [
   },
 ];
 
-export const TWAP_MINUTE_PRESETS = [5, 15, 30, 60] as const;
+export const TWAP_SLICE_SECONDS = 30;
 export const TWAP_MIN_SECONDS = 60;
-export const TWAP_MAX_SECONDS = 86_400;
+export const TWAP_MAX_SECONDS = 30 * 24 * 60 * 60;
+export const TWAP_MAX_PRICE_PCTS = [0.1, 0.5, 1, 5] as const;
+export const TWAP_INDEX_PCTS = [0.1, 0.25, 0.5, 1] as const;
+export const TWAP_MIN_FREQ = 2;
+export const TWAP_MAX_FREQ = 3600;
+export const TWAP_DEFAULT_FREQ = 5;
+export type TwapStyle = "passive" | "neutral" | "aggressive";
 
-export function minutesToTwapSeconds(raw: string): number | null {
-  const m = parseDecimal(raw);
-  if (m == null || m <= 0) return null;
-  const sec = Math.round(m * 60);
+export function twapDurationSeconds(hours: string, minutes: string): number | null {
+  const h = parseDecimal(hours) ?? 0;
+  const m = parseDecimal(minutes) ?? 0;
+  if (h < 0 || m < 0) return null;
+  if (h === 0 && m === 0) return null;
+  const sec = Math.round(h * 3600 + m * 60);
   if (sec < TWAP_MIN_SECONDS || sec > TWAP_MAX_SECONDS) return null;
   return sec;
 }
 
-export function formatMinutesLabel(minutes: number): string {
-  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60}h`;
-  if (minutes < 1) return `${Math.round(minutes * 60)}s`;
-  const rounded = Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1).replace(/\.0$/, "");
-  return `${rounded}m`;
+export function twapOrderCount(durationSec: number, sliceSec: number = TWAP_SLICE_SECONDS): number {
+  if (!(durationSec > 0) || !(sliceSec > 0)) return 0;
+  return Math.floor(durationSec / sliceSec) + 1;
+}
+
+export function twapFreqSeconds(raw: string): number | null {
+  const n = parseDecimal(raw);
+  if (n == null) return null;
+  const sec = Math.round(n);
+  if (sec < TWAP_MIN_FREQ || sec > TWAP_MAX_FREQ) return null;
+  return sec;
+}
+
+export function twapFreqLabel(freqSec: number, randomize: boolean): string {
+  return randomize ? `${freqSec}s (±40%)` : `${freqSec}s`;
+}
+
+export function formatTwapRuntime(sec: number): string {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const parts: string[] = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m || parts.length === 0) parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
+export function twapSlipFromMaxPrice(maxPrice: number, spot: number): number | null {
+  if (!(spot > 0) || !(maxPrice > 0)) return null;
+  return Math.abs(maxPrice - spot) / spot;
 }
 
 export function algoById(id: AlgoId): AlgoDef {
@@ -62,6 +96,11 @@ const PAUSE_COPY: Record<string, string> = {
   trades_reconcile_failed: "Trade sync failed — resume to retry",
   user_paused: "Paused",
   child_still_open: "Child still on book",
+  above_max_price: "Above max price",
+  below_max_price: "Below max price",
+  past_index: "Past index",
+  no_mark: "Waiting for mark",
+  deadline: "Duration ended",
 };
 
 export function algoReasonLabel(reason: string | null | undefined): string {
@@ -149,9 +188,11 @@ export function algoIsLive(status: string | null | undefined): boolean {
   return algoIsWorking(status);
 }
 
-/** Chase clips use client_order_index in [8e9, 9e9). Never show them as naked limits. */
+/** Chase clips use [8e9, 9e9). Advanced TWAP uses [7e9, 8e9). */
 export const CHASE_COI_BASE = 8_000_000_000;
 export const CHASE_COI_END = 9_000_000_000;
+export const TWAP_COI_BASE = 7_000_000_000;
+export const TWAP_COI_END = 8_000_000_000;
 
 export function isChaseClientOrder(coi: string | number | null | undefined): boolean {
   if (coi == null || coi === "") return false;
@@ -159,12 +200,19 @@ export function isChaseClientOrder(coi: string | number | null | undefined): boo
   return Number.isFinite(n) && n >= CHASE_COI_BASE && n < CHASE_COI_END;
 }
 
-export function isAlgoClientOrder(coi: string | number | null | undefined): boolean {
-  return isChaseClientOrder(coi);
+export function isTwapClientOrder(coi: string | number | null | undefined): boolean {
+  if (coi == null || coi === "") return false;
+  const n = typeof coi === "number" ? coi : Number(coi);
+  return Number.isFinite(n) && n >= TWAP_COI_BASE && n < TWAP_COI_END;
 }
 
-export function algoOrderKind(coi: string | number | null | undefined): "Chase" | null {
+export function isAlgoClientOrder(coi: string | number | null | undefined): boolean {
+  return isChaseClientOrder(coi) || isTwapClientOrder(coi);
+}
+
+export function algoOrderKind(coi: string | number | null | undefined): "Chase" | "TWAP" | null {
   if (isChaseClientOrder(coi)) return "Chase";
+  if (isTwapClientOrder(coi)) return "TWAP";
   return null;
 }
 
