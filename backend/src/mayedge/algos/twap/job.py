@@ -265,7 +265,7 @@ class AdvancedTwapRunner:
         meta = self.execution().get_market_by_index(market_index)
         if not meta:
             raise ValueError("Unknown market")
-        bid, ask, mid, mark, _index = self._quotes(market_index)
+        _bid, _ask, mid, mark, _index = self._quotes(market_index)
         ref = mid or mark
         if ref is None or ref <= 0:
             raise ValueError("Cannot price TWAP — no reference price")
@@ -491,9 +491,7 @@ class AdvancedTwapRunner:
         quote = slice_quote(p.style, p.side, bid=bid, ask=ask, mid=mid, mark=mark)
         if p.max_price is not None and quote.get("price"):
             px = Decimal(str(quote["price"]))
-            if p.side == "buy" and px > p.max_price:
-                quote = {**quote, "price": str(p.max_price)}
-            elif p.side == "sell" and px < p.max_price:
+            if (p.side == "buy" and px > p.max_price) or (p.side == "sell" and px < p.max_price):
                 quote = {**quote, "price": str(p.max_price)}
         await self._place(qty, quote, mark)
         p.slices_done += 1
@@ -530,7 +528,7 @@ class AdvancedTwapRunner:
         )
         self.rest_qty = qty
         self.rest_price = px if px > 0 else None
-        self.quote_action = "rest" if kind != "market" else "rest"
+        self.quote_action = "rest"
         self.reason = None
         ex = self.execution()
         if kind == "market":

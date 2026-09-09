@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, cast
+from typing import cast
 
 from mayedge import db as store
 from mayedge.algos.chase.config import HISTORY_CAP
