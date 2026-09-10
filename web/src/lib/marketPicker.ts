@@ -55,11 +55,11 @@ export function sortPickerMarkets(markets: Market[], sort: PickerSort, dir: Sort
   });
 }
 
+/** Lighter 1h funding is already a percent (0.0012 → +0.0012%/hr). */
 export function formatFundingPct(rate: number | null | undefined): string {
   if (rate == null || Number.isNaN(rate)) return "—";
-  const pct = rate * 100;
-  const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toFixed(4)}%`;
+  const sign = rate > 0 ? "+" : "";
+  return `${sign}${rate.toFixed(4)}%`;
 }
 
 export function tokenIconUrl(symbol: string): string {

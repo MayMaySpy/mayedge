@@ -65,6 +65,36 @@ class TestOrderBookCurrentMarket(unittest.IsolatedAsyncioTestCase):
         await feed.handle_message(_SNAP)
         self.assertFalse(feed.has_book(120))
 
+    async def test_unparsed_channel_does_not_fall_back_to_current(self) -> None:
+        feed = OrderBookFeed(lambda _msg: None)
+        feed.set_current_market(120)
+        await feed.handle_message(
+            {
+                "type": "subscribed/order_book",
+                "channel": "order_book",
+                "order_book": {
+                    "bids": [{"price": "1", "size": "2"}],
+                    "asks": [{"price": "3", "size": "4"}],
+                },
+            }
+        )
+        self.assertFalse(feed.has_book(120))
+
+    async def test_tier2_channel_is_the_market_index(self) -> None:
+        feed = OrderBookFeed(lambda _msg: None)
+        feed.set_current_market(120)
+        await feed.handle_message(
+            {
+                "type": "subscribed/order_book",
+                "channel": "order_book@tier2/120",
+                "order_book": {
+                    "bids": [{"price": "1", "size": "2"}],
+                    "asks": [{"price": "3", "size": "4"}],
+                },
+            }
+        )
+        self.assertTrue(feed.has_book(120))
+
     async def test_snapshot_stored_when_current_matches(self) -> None:
         feed = OrderBookFeed(lambda _msg: None)
         feed.set_current_market(120)

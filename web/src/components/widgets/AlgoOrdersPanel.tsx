@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { notifyErr, notifyOk } from "@/lib/notify";
+import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AlgoRow } from "@/components/widgets/algo/AlgoRow";
-import { algoBlotter } from "@/lib/algos";
+import { algoBlotter, algoResumeNotice } from "@/lib/algos";
 import { api, type AlgoState } from "@/lib/api";
 import { setAlgo, useLiveAlgos } from "@/lib/liveData";
 
@@ -120,7 +120,11 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     try {
       const book = await api.chaseUnpause(algoId);
       setAlgo(book);
-      notifyOk(`${algoId} resumed`);
+      const still = (book.working ?? []).find((a) => a.algo_id === algoId);
+      const notice = algoResumeNotice(still ?? { algo_id: algoId, status: "running" });
+      if (notice.tone === "err") notifyErr(notice.description, notice.title);
+      else if (notice.tone === "warn") notifyWarn(notice.title, notice.description);
+      else notifyOk(notice.title, notice.description || undefined);
     } catch (err) {
       notifyErr(err instanceof Error ? err.message : "Resume failed");
     } finally {

@@ -11,7 +11,7 @@ import websockets
 
 from mayedge import feed_health
 from mayedge.config import settings
-from mayedge.lighter.channels import message_market_index, parse_channel_market
+from mayedge.lighter.channels import message_market_index, parse_channel_market, split_ws_type
 from mayedge.lighter.liquidations import LiquidationFeed
 from mayedge.lighter.models import Trade
 
@@ -202,18 +202,19 @@ async def pace_trade_subs(gw: LighterGateway, ws: Any) -> None:
 
 
 async def handle_ws_message(gw: LighterGateway, msg: dict[str, Any]) -> None:
-    msg_type = msg.get("type", "")
-    if msg_type in ("subscribed/order_book", "update/order_book"):
+    action, kind = split_ws_type(msg.get("type"))
+    if kind == "order_book":
         await gw._books.handle_message(msg)
-    elif msg_type in ("subscribed/trade", "update/trade"):
-        await handle_trades(gw, msg, live=msg_type.startswith("update/"))
-    elif msg_type in ("subscribed/candle", "update/candle"):
+    elif kind == "trade":
+        # Official UI uses trade_fe; public JSON still uses trade. Both map here.
+        await handle_trades(gw, msg, snapshot=action == "subscribed")
+    elif kind == "candle":
         await handle_candle(gw, msg)
-    elif msg_type in ("subscribed/market_stats", "update/market_stats"):
+    elif kind == "market_stats":
         gw._apply_market_stats(msg)
 
 
-async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, live: bool = True) -> None:
+async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bool = False) -> None:
     market_index = message_market_index(msg, "trade")
     if market_index is None:
         return
@@ -223,25 +224,25 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, live: bool =
         trades_raw = [trades_raw]
 
     liq_kinds = LiquidationFeed.liq_kinds()
-    if live:
-        liq_raw = msg.get("liquidation_trades") or []
-        if isinstance(liq_raw, dict):
-            liq_raw = [liq_raw]
-        liq_candidates: list[Any] = list(liq_raw)
-        for t in trades_raw:
-            if isinstance(t, dict) and str(t.get("type") or "") in liq_kinds:
-                liq_candidates.append(t)
-        if liq_candidates:
-            gw._liqs.ingest(
-                market_index,
-                liq_candidates,
-                get_market=gw.get_market_by_index,
-            )
+    liq_raw = msg.get("liquidation_trades") or []
+    if isinstance(liq_raw, dict):
+        liq_raw = [liq_raw]
+    liq_candidates: list[Any] = list(liq_raw)
+    for t in trades_raw:
+        if isinstance(t, dict) and str(t.get("type") or "") in liq_kinds:
+            liq_candidates.append(t)
+    if liq_candidates:
+        gw._liqs.ingest(
+            market_index,
+            liq_candidates,
+            get_market=gw.get_market_by_index,
+        )
 
     if market_index != gw._current_market_index:
         return
 
-    if not live and gw._recent_trades.get(market_index):
+    # Fan-out prepends; a late subscribed/* dump must not clobber live prints.
+    if snapshot and gw._recent_trades.get(market_index):
         return
 
     new_trades: list[Trade] = []
@@ -274,34 +275,64 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, live: bool =
         gw.broadcast(payload)
 
 
+_MAX_MINUTE_CANDLES = 2000
+
+
+def _ws_candle(raw: Any) -> dict[str, float | int] | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        t = int(raw.get("timestamp", raw.get("t", 0)) or 0)
+        if t > 1e12:
+            t //= 1000
+        if t <= 0:
+            return None
+        t = (t // 60) * 60
+        return {
+            "time": t,
+            "open": float(raw.get("open", raw.get("o", 0))),
+            "high": float(raw.get("high", raw.get("h", 0))),
+            "low": float(raw.get("low", raw.get("l", 0))),
+            "close": float(raw.get("close", raw.get("c", 0))),
+            "volume": float(raw.get("volume", raw.get("v", 0))),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
 async def handle_candle(gw: LighterGateway, msg: dict[str, Any]) -> None:
     market_index = parse_channel_market(msg.get("channel"), "candle")
-    if market_index is None:
-        market_index = gw._current_market_index
     if market_index is None or market_index != gw._current_market_index:
         return
 
     candles_raw = msg.get("candles") or []
     if not candles_raw and "candlestick" in msg:
         candles_raw = [msg.get("candlestick")]
-    for c in candles_raw:
-        if not c:
+    seen: dict[int, dict[str, float | int]] = {}
+    for raw in candles_raw:
+        bar = _ws_candle(raw)
+        if bar is None:
             continue
-        gw.broadcast(
-            {
-                "type": "candle",
-                "market_index": market_index,
-                "candle": {
-                    "time": int(
-                        c.get("timestamp", c.get("t", 0)) // 1000
-                        if c.get("timestamp", c.get("t", 0)) > 1e12
-                        else c.get("timestamp", c.get("t", 0))
-                    ),
-                    "open": float(c.get("open", c.get("o", 0))),
-                    "high": float(c.get("high", c.get("h", 0))),
-                    "low": float(c.get("low", c.get("l", 0))),
-                    "close": float(c.get("close", c.get("c", 0))),
-                    "volume": float(c.get("volume", c.get("v", 0))),
-                },
-            }
-        )
+        seen[int(bar["time"])] = bar
+    parsed = sorted(seen.values(), key=lambda b: int(b["time"]))
+    if not parsed:
+        return
+    parsed = parsed[-_MAX_MINUTE_CANDLES:]
+    action, _ = split_ws_type(msg.get("type"))
+    # subscribed/* replaces; update/* merges. Typeless frames keep the old
+    # length heuristic (1–2 bars = forming/rollover upsert).
+    if action == "subscribed":
+        snapshot = True
+    elif action == "update":
+        snapshot = False
+    else:
+        snapshot = len(parsed) > 2
+    if snapshot:
+        gw.broadcast({"type": "candles", "market_index": market_index, "candles": parsed})
+        return
+    payload: dict[str, Any] = {"type": "candle", "market_index": market_index}
+    if len(parsed) == 1:
+        payload["candle"] = parsed[0]
+    else:
+        payload["candles"] = parsed
+    gw.broadcast(payload)

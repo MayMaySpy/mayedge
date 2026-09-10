@@ -12,6 +12,7 @@ from mayedge.algos.chase import (
     decide,
     round_passive,
 )
+from mayedge.algos.chase.iceberg import leftover_is_dust
 
 D = Decimal
 TICK = D("0.01")
@@ -97,6 +98,12 @@ class TestGoldenVectors(unittest.TestCase):
         q = decide(buy_params(), mkt("100", "100.10"), remaining=D("0.5"))
         self.assertEqual(q.action, Action.PAUSE)
         self.assertEqual(q.reason, "below_min_qty")
+
+    def test_leftover_is_dust(self) -> None:
+        self.assertTrue(leftover_is_dust(D("0.92"), D("1")))
+        self.assertFalse(leftover_is_dust(D("1"), D("1")))
+        self.assertFalse(leftover_is_dust(D("0"), D("1")))
+        self.assertFalse(leftover_is_dust(D("0.5"), D("0")))
 
     def test_last_clip_uses_remaining(self) -> None:
         q = decide(buy_params(), mkt("100", "100.10"), remaining=D("1"))

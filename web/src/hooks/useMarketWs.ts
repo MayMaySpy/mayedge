@@ -232,10 +232,18 @@ export function useMarketWs(symbol: string) {
             if (!isActiveMarket(msg)) break;
             setMinuteCandles((msg.candles ?? []) as Candle[]);
             break;
-          case "candle":
+          case "candle": {
             if (!isActiveMarket(msg)) break;
-            if (msg.candle) upsertMinuteCandle(msg.candle as Candle);
+            const rows = (
+              Array.isArray(msg.candles) && msg.candles.length
+                ? msg.candles
+                : msg.candle
+                  ? [msg.candle]
+                  : []
+            ) as Candle[];
+            for (const row of rows) upsertMinuteCandle(row);
             break;
+          }
           case "book_sync":
             if (!isActiveMarket(msg)) break;
             setBookSynced(Boolean(msg.synced));

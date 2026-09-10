@@ -28,7 +28,7 @@ premium:
 dislocation:
   bps: [50, 120]
 funding:
-  # Percent per hour (0.20 = 0.20%/hr). Converted from Lighter's hourly rate.
+  # Percent per hour (0.20 = 0.20%/hr), same units as Lighter's 1h print.
   hourly_pct: [0.20, 0.60]
 liq_cluster:
   count: [5, 12]

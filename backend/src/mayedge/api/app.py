@@ -140,7 +140,8 @@ def create_app() -> FastAPI:
     @app.get("/api/candles/{symbol}")
     async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
         idx = gateway.resolve_market_index(symbol)
-        candles = await gateway.get_candles(idx, resolution, count)
+        n = min(max(int(count), 1), 3600)
+        candles = await gateway.get_candles(idx, resolution, n)
         return [
             {
                 "time": c.time,

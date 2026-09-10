@@ -67,6 +67,11 @@ def _clip_qty(remaining: Decimal, display_qty: Decimal, step: Decimal) -> Decima
     return clip
 
 
+def leftover_is_dust(remaining: Decimal, min_qty: Decimal) -> bool:
+    """Leftover cannot rest at venue min size — drop it, do not invent-fill."""
+    return min_qty > 0 and remaining > 0 and remaining < min_qty
+
+
 def decide(
     params: ChaseIcebergParams,
     market: MarketView,

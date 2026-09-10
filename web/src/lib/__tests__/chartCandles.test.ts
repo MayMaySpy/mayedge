@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { foldMinute, formatBarVolume, toSeriesData } from "@/lib/chartCandles";
+import {
+  foldMinute,
+  foldMinutes,
+  formatBarVolume,
+  mergeCandles,
+  shouldReplaceChartData,
+  toSeriesData,
+} from "@/lib/chartCandles";
 import type { Candle } from "@/lib/api";
 
 function c(partial: Partial<Candle> & { time: number }): Candle {
@@ -36,6 +43,16 @@ describe("toSeriesData", () => {
   });
 });
 
+describe("mergeCandles", () => {
+  it("caps combined history so the chart cannot grow without bound", () => {
+    const hist = Array.from({ length: 2000 }, (_, i) => c({ time: i * 60 }));
+    const live = Array.from({ length: 2000 }, (_, i) => c({ time: (i + 1500) * 60, close: 99 }));
+    const merged = mergeCandles(hist, live);
+    expect(merged.length).toBeLessThanOrEqual(2500);
+    expect(merged[merged.length - 1].close).toBe(99);
+  });
+});
+
 describe("foldMinute", () => {
   it("sums volume into the open higher-tf bucket", () => {
     const first = foldMinute([], c({ time: 300, volume: 2, high: 11, low: 9, close: 10 }), 300);
@@ -45,6 +62,40 @@ describe("foldMinute", () => {
     expect(next[0].volume).toBe(7);
     expect(next[0].high).toBe(12);
     expect(next[0].close).toBe(9);
+  });
+});
+
+describe("foldMinutes", () => {
+  it("closes the REST bucket and opens a new higher-tf candle", () => {
+    const hist = [c({ time: 300, open: 10, high: 11, low: 9, close: 10.5, volume: 10 })];
+    const live = [
+      c({ time: 300, volume: 2, high: 11, low: 9, close: 10 }),
+      c({ time: 360, volume: 5, high: 12, low: 8, close: 9 }),
+      c({ time: 600, volume: 3, open: 9, high: 9.5, low: 8.5, close: 9.2 }),
+      c({ time: 660, volume: 4, open: 9.2, high: 10, low: 9, close: 9.8 }),
+    ];
+    const next = foldMinutes(hist, live, 300);
+    expect(next.map((b) => b.time)).toEqual([300, 600]);
+    expect(next[0].close).toBe(9);
+    expect(next[0].high).toBe(12);
+    expect(next[1].open).toBe(9);
+    expect(next[1].high).toBe(10);
+    expect(next[1].close).toBe(9.8);
+    expect(next[1].volume).toBe(7);
+  });
+});
+
+describe("shouldReplaceChartData", () => {
+  const prev = { first: 0, time: 100, len: 10 };
+
+  it("keeps incremental updates for the forming bar or a single append", () => {
+    expect(shouldReplaceChartData(prev, { first: 0, time: 100, len: 10 }, true)).toBe(false);
+    expect(shouldReplaceChartData(prev, { first: 0, time: 160, len: 11 }, true)).toBe(false);
+  });
+
+  it("resets when the last bar's time jumps without a new length", () => {
+    expect(shouldReplaceChartData(prev, { first: 0, time: 160, len: 10 }, true)).toBe(true);
+    expect(shouldReplaceChartData(prev, { first: 0, time: 280, len: 12 }, true)).toBe(true);
   });
 });
 

@@ -348,3 +348,15 @@ class DeskAccountPositionsTests(TestCase):
         self.assertEqual(set(by_mi), {1, 2})
         self.assertEqual(by_mi[1]["size"], "1")
         self.assertEqual(by_mi[2]["size"], "2")
+
+    def test_positions_fe_type_is_the_same_channel(self) -> None:
+        self.svc.handle_account_ws(
+            {
+                "type": "subscribed/account_all_positions_fe",
+                "channel": "account_all_positions_fe/1",
+                "positions": {1: _lighter_position(1, "BTC", "0.5")},
+            }
+        )
+        by_mi = self._desk_positions()
+        self.assertEqual(set(by_mi), {1})
+        self.assertEqual(by_mi[1]["size"], "0.5")

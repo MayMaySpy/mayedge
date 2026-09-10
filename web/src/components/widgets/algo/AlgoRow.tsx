@@ -5,8 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  algoCanResume,
   algoFillProgress,
-  algoIsPaused,
   algoIsWorking,
   algoPhase,
   algoReasonLabel,
@@ -41,7 +41,9 @@ function copyId(id: string) {
 
 function statusLine(algo: AlgoState): string | null {
   const phase = algoPhase(algo);
-  if (algo.status === "error") return algo.error || "Error";
+  if (algo.status === "error") {
+    return algoReasonLabel(algo.error || algo.reason) || algo.error || "Error";
+  }
   if (algo.status === "done") return "Filled";
   if (algo.status === "stopped") return "Stopped";
   if (algo.status === "paused") return "Paused — clips pulled";
@@ -77,7 +79,7 @@ export function AlgoRow({
   const buy = algo.side === "buy";
   const { filled, remaining, total, pct } = algoFillProgress(algo);
   const working = algoIsWorking(algo.status);
-  const paused = algoIsPaused(algo.status);
+  const canResume = algoCanResume(algo.status);
   const phase = algoPhase(algo);
   const master = formatSize(total || algo.qty);
   const status = statusLine(algo);
@@ -149,7 +151,7 @@ export function AlgoRow({
         </div>
         {tradingEnabled && working && (
           <div className="flex shrink-0 items-center gap-0.5">
-            {paused
+            {canResume
               ? onResume && (
                   <Button
                     type="button"

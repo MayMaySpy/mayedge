@@ -14,9 +14,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { api, type Candle } from "@/lib/api";
 import {
-  foldMinute,
+  foldMinutes,
   formatBarVolume,
   mergeCandles,
+  shouldReplaceChartData,
   toSeriesData,
 } from "@/lib/chartCandles";
 import {
@@ -25,7 +26,7 @@ import {
   type ChartOverlay,
   type OverlayAction,
 } from "@/lib/chartTradingLines";
-import { seedCandles1s, useLiveCandles1s, useLiveMinuteCandles } from "@/lib/liveData";
+import { rollLiveCandles, seedCandles1s, useLiveCandles1s, useLiveMinuteCandles } from "@/lib/liveData";
 import { theme } from "@/lib/theme";
 import { cn, formatPct, formatPrice } from "@/lib/utils";
 
@@ -190,8 +191,8 @@ export const ChartWidget = memo(function ChartWidget({
   const onActionRef = useRef(onOverlayAction);
   const volOnRef = useRef(volOn);
   const primedRef = useRef(false);
-  const firstTimeRef = useRef<number | null>(null);
-  const lastMetaRef = useRef<{ time: number; len: number } | null>(null);
+  const lastMetaRef = useRef<{ first: number; time: number; len: number } | null>(null);
+  const [paintGen, setPaintGen] = useState(0);
   const seriesKey = `${symbol}:${tf}`;
   const seriesKeyRef = useRef(seriesKey);
   const histBars = hist.key === seriesKey ? hist.candles : EMPTY_CANDLES;
@@ -248,10 +249,7 @@ export const ChartWidget = memo(function ChartWidget({
     if (tf === "1s") return candles1s;
     // 1m: never drop REST history when a short live stream arrives.
     if (tf === "1m") return mergeCandles(histBars, minuteCandles);
-    if (!histBars.length) return histBars;
-    const lastMin = minuteCandles[minuteCandles.length - 1];
-    if (!lastMin) return histBars;
-    return foldMinute(histBars, lastMin, TF_SECONDS[tf]);
+    return foldMinutes(histBars, minuteCandles, TF_SECONDS[tf]);
   }, [tf, candles1s, minuteCandles, histBars]);
 
   useEffect(() => {
@@ -389,9 +387,25 @@ export const ChartWidget = memo(function ChartWidget({
     });
     chartRef.current?.timeScale().resetTimeScale();
     primedRef.current = false;
-    firstTimeRef.current = null;
     lastMetaRef.current = null;
   }, [symbol, tf]);
+
+  useEffect(() => {
+    const tick = () => rollLiveCandles();
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      primedRef.current = false;
+      setPaintGen((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -410,7 +424,6 @@ export const ChartWidget = memo(function ChartWidget({
       series.setData([]);
       vol?.setData([]);
       primedRef.current = false;
-      firstTimeRef.current = null;
       lastMetaRef.current = null;
       return;
     }
@@ -420,7 +433,6 @@ export const ChartWidget = memo(function ChartWidget({
       series.setData([]);
       vol?.setData([]);
       primedRef.current = false;
-      firstTimeRef.current = null;
       lastMetaRef.current = null;
       return;
     }
@@ -429,18 +441,10 @@ export const ChartWidget = memo(function ChartWidget({
     const lastVol = volume[volume.length - 1];
     const lastT = last.time as number;
     const len = bars.length;
+    const nextMeta = { first, time: lastT, len };
     const prev = lastMetaRef.current;
 
-    // Full reset when history is replaced, shrinks, jumps backward, or gains many bars.
-    const needsReset =
-      !primedRef.current ||
-      prev == null ||
-      first !== firstTimeRef.current ||
-      len < prev.len ||
-      lastT < prev.time ||
-      len > prev.len + 1;
-
-    if (needsReset) {
+    if (shouldReplaceChartData(prev, nextMeta, primedRef.current)) {
       series.setData(bars);
       vol?.setData(volOn ? volume : []);
       chart?.timeScale().applyOptions({
@@ -449,16 +453,18 @@ export const ChartWidget = memo(function ChartWidget({
       });
       chart?.timeScale().scrollToRealTime();
       primedRef.current = true;
-      firstTimeRef.current = first;
-      lastMetaRef.current = { time: lastT, len };
+      lastMetaRef.current = nextMeta;
       return;
     }
 
-    // Same length or +1 bar: incremental update (LWC appends when time is newer).
+    if (prev && len === prev.len + 1 && bars.length >= 2) {
+      series.update(bars[bars.length - 2]);
+      if (volOn && volume.length >= 2) vol?.update(volume[volume.length - 2]);
+    }
     series.update(last);
     if (volOn && lastVol) vol?.update(lastVol);
-    lastMetaRef.current = { time: lastT, len };
-  }, [display, tf, volOn]);
+    lastMetaRef.current = nextMeta;
+  }, [display, tf, volOn, paintGen]);
 
   useEffect(() => {
     const primitive = tradingLinesRef.current;

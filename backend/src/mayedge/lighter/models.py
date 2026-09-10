@@ -15,6 +15,23 @@ def normalize_market_type(raw: Any) -> str:
     return "perp"
 
 
+def funding_apr(hourly_pct: float | None) -> float | None:
+    """Annualize Lighter's 1h funding percent (0.0012 → 10.512)."""
+    if hourly_pct is None:
+        return None
+    return hourly_pct * 24 * 365
+
+
+def open_interest_usd(one_sided_quote: float) -> float:
+    """Convert Lighter one-sided quote OI to the official two-sided USD figure.
+
+    REST ``open_interest`` is base size; WS ``market_stats.open_interest`` is
+    already quote notional (base × mark). Both are one-sided. The official UI
+    shows long OI + short OI, i.e. 2×.
+    """
+    return one_sided_quote * 2.0
+
+
 @dataclass
 class MarketMeta:
     market_index: int
@@ -26,7 +43,7 @@ class MarketMeta:
     market_type: str = "perp"
     mark_price: float | None = None
     index_price: float | None = None
-    funding_rate: float | None = None
+    funding_rate: float | None = None  # 1h rate in percent (0.0012 = 0.0012%/hr)
     last_trade_price: float | None = None
     min_initial_margin_fraction: int = 500
     default_initial_margin_fraction: int = 500
@@ -84,7 +101,7 @@ class MarketMeta:
             "volume_base_24h": self.volume_base_24h,
             "change_24h": self.change_24h,
             "funding_rate": self.funding_rate,
-            "funding_apr": None if self.funding_rate is None else self.funding_rate * 24 * 365,
+            "funding_apr": funding_apr(self.funding_rate),
             "open_interest": self.open_interest,
             "open_interest_limit": self.open_interest_limit,
             "best_bid_price": self.best_bid_price,
@@ -106,7 +123,7 @@ class MarketMeta:
             "change_24h": self.change_24h,
             "open_interest": self.open_interest,
             "funding_rate": self.funding_rate,
-            "funding_apr": None if self.funding_rate is None else self.funding_rate * 24 * 365,
+            "funding_apr": funding_apr(self.funding_rate),
             "volume_24h": self.volume_24h,
             "best_bid_price": self.best_bid_price,
             "best_ask_price": self.best_ask_price,

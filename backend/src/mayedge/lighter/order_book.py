@@ -282,8 +282,6 @@ class OrderBookFeed:
 
     async def handle_message(self, msg: dict[str, Any]) -> None:
         market_index = message_market_index(msg, "order_book")
-        if market_index is None:
-            market_index = self._current_market_index
         if market_index is None or not self._watched(market_index):
             logger.debug(
                 "drop order_book market=%s current=%s pinned=%s type=%s",

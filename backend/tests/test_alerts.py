@@ -14,7 +14,7 @@ from mayedge.alerts import (
     thresholds_from_dict,
 )
 from mayedge.lighter.gateway import LighterGateway
-from mayedge.lighter.models import MarketMeta
+from mayedge.lighter.models import MarketMeta, open_interest_usd
 
 # Fast tests: no warmup, short cooldowns, low bars.
 _TEST_THR = ExploitThresholds(
@@ -77,7 +77,7 @@ class ApplyMarketStatsTest(unittest.TestCase):
         )
 
         meta = gw._markets[1]
-        self.assertEqual(meta.open_interest, 5_000_000.0)
+        self.assertEqual(meta.open_interest, 10_000_000.0)
         self.assertEqual(meta.best_bid_price, 1998.0)
         self.assertEqual(meta.best_ask_price, 2002.0)
         self.assertEqual(meta.mid_price, 2000.0)
@@ -86,6 +86,28 @@ class ApplyMarketStatsTest(unittest.TestCase):
         self.assertEqual(meta.daily_price_high, 2100.0)
         self.assertEqual(meta.volume_base_24h, 500.0)
         self.assertEqual(meta.mark_price, 2000.0)
+
+    def test_open_interest_usd_matches_official_two_sided(self) -> None:
+        # Live LIT: WS one-sided quote ~$54.1M; official UI shows both sides.
+        self.assertEqual(open_interest_usd(54_100_000), 108_200_000)
+        # REST is base size; convert via mark first, then double.
+        self.assertAlmostEqual(open_interest_usd(11_900_000 * 4.547), 108_218_600.0)
+
+    def test_prefer_current_funding_rate_as_percent(self) -> None:
+        gw = LighterGateway()
+        gw._markets[1] = _meta()
+        gw._apply_market_stats(
+            {
+                "market_stats": {
+                    "market_id": 1,
+                    "current_funding_rate": "0.0012",
+                    "funding_rate": "-0.0032",
+                }
+            }
+        )
+        meta = gw._markets[1]
+        self.assertEqual(meta.funding_rate, 0.0012)
+        self.assertAlmostEqual(meta.as_public_dict()["funding_apr"], 0.0012 * 24 * 365)
 
     def test_apply_market_stats_broadcasts_changed_quotes(self) -> None:
         gw = LighterGateway()
@@ -106,7 +128,7 @@ class ApplyMarketStatsTest(unittest.TestCase):
         self.assertEqual(len(quotes), 1)
         row = quotes[0]["markets"][0]
         self.assertEqual(row["mark_price"], 2000.0)
-        self.assertEqual(row["open_interest"], 5_000_000.0)
+        self.assertEqual(row["open_interest"], 10_000_000.0)
 
         msgs.clear()
         gw._apply_market_stats(stats)

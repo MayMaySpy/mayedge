@@ -92,8 +92,8 @@ const PAUSE_COPY: Record<string, string> = {
   book_unsynced: "Book syncing",
   account_unsynced: "Account feed syncing",
   shutdown: "Shutdown — waiting",
-  unproven_missing_clip: "Clip vanished — resume to retry",
-  trades_reconcile_failed: "Trade sync failed — resume to retry",
+  unproven_missing_clip: "Clip vanished — retrying",
+  trades_reconcile_failed: "Trade sync failed — retrying",
   user_paused: "Paused",
   child_still_open: "Child still on book",
   above_max_price: "Above max price",
@@ -114,6 +114,30 @@ export function algoIsWorking(status: string | null | undefined): boolean {
 
 export function algoIsPaused(status: string | null | undefined): boolean {
   return status === "paused";
+}
+
+export function algoCanResume(status: string | null | undefined): boolean {
+  return status === "paused" || status === "error";
+}
+
+const RESUME_RETRY_REASONS = new Set(["unproven_missing_clip", "trades_reconcile_failed"]);
+
+export function algoResumeNotice(algo: {
+  status?: string | null;
+  error?: string | null;
+  reason?: string | null;
+  algo_id?: string | null;
+} | undefined): { tone: "ok" | "err" | "warn"; title: string; description: string } {
+  const id = algo?.algo_id || "Algo";
+  if (!algo || algo.status === "error") {
+    const detail =
+      algoReasonLabel(algo?.error || algo?.reason) || algo?.error || "Resume failed";
+    return { tone: "err", title: "Resume failed", description: detail };
+  }
+  if (algo.reason && RESUME_RETRY_REASONS.has(algo.reason)) {
+    return { tone: "warn", title: id, description: algoReasonLabel(algo.reason) };
+  }
+  return { tone: "ok", title: `${id} resumed`, description: "" };
 }
 
 export function algoPhase(algo: {

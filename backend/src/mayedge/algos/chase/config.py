@@ -16,6 +16,10 @@ STOP_CANCEL_TRIES = 3
 STOP_CANCEL_GAP_S = 0.2
 # Wait for trades / cache catch-up before treating a vanished child as missing.
 MISSING_FILL_GRACE_MS = 800
+# After REST says the child is gone with no fill, wait then credit again and rest.
+UNPROVEN_RETRY_MS = 2_000
+# Hydrated ERROR jobs that should continue quoting without an operator click.
+AUTO_RESUME_ERRORS = frozenset({"unproven_missing_clip", "trades_reconcile_failed"})
 # Restore: wait for book + account before requoting after process start.
 RESTORE_FEED_TIMEOUT_S = 30.0
 # Rearm trade credit: paginate REST trades (fail closed if cap hit).

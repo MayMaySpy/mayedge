@@ -13,6 +13,7 @@ import websockets
 
 from mayedge import feed_health
 from mayedge.config import settings
+from mayedge.lighter.channels import split_ws_type
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
 from mayedge.lighter.parse import (
@@ -264,22 +265,28 @@ class AccountService:
                 tg.create_task(self._ws_ping(ws, deadline))
                 tg.create_task(recv())
 
-    @staticmethod
-    def _ws_kind(msg: dict[str, Any]) -> tuple[str, str]:
-        blob = f"{msg.get('type', '')} {msg.get('channel', '')}"
-        action = "subscribed" if "subscribed" in blob else "update"
-        for kind in (
+    _ACCOUNT_KINDS = frozenset(
+        {
             "account_all_orders",
             "account_all_positions",
             "account_all_trades",
             "account_all_assets",
             "user_stats",
-        ):
-            if kind in blob:
-                return action, kind
-        raw = str(msg.get("type", ""))
-        a, _, rest = raw.partition("/")
-        return a, rest.split(":")[0]
+        }
+    )
+
+    @staticmethod
+    def _ws_kind(msg: dict[str, Any]) -> tuple[str, str]:
+        action, kind = split_ws_type(msg.get("type"))
+        if kind in AccountService._ACCOUNT_KINDS:
+            return action or "update", kind
+        head = str(msg.get("channel") or "").replace(":", "/").split("/")[0]
+        _, ch_kind = split_ws_type(f"update/{head}")
+        if ch_kind in AccountService._ACCOUNT_KINDS:
+            if action not in ("subscribed", "update"):
+                action = "update"
+            return action, ch_kind
+        return action, kind
 
     def _apply_collateral(self, msg: dict[str, Any]) -> None:
         self._remember_assets(msg.get("assets"))

@@ -11,12 +11,14 @@ from mayedge.algos.chase.config import (
     REST_TRADES_MAX_PAGES,
     REST_TRADES_PAGE_LIMIT,
     STALE_ACK_MS,
+    UNPROVEN_RETRY_MS,
 )
 from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.iceberg import Action
+from mayedge.algos.chase.iceberg import Action, leftover_is_dust
 from mayedge.algos.chase.state import ChaseBookView, ChaseState, ChaseStatus
 from mayedge.algos.chase.util import _dec
 from mayedge.algos.ledger import Clip, Ledger
+from mayedge.lighter.models import maker_min_base
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,9 @@ def may_invent_fill(
 ) -> bool:
     """Invent-fill only when trade or open-sync evidence already credits the clip.
 
-    Accumulate/distribute: never invent a full clip from silence alone — stall
-    with ``unproven_missing_clip`` instead of risking overshoot.
+    Accumulate/distribute: never invent a full clip from silence alone — cancel
+    the ledger row and auto-rest after ``UNPROVEN_RETRY_MS`` instead of
+    inventing a fill.
     """
     if not orders_hydrated:
         return False
@@ -48,6 +51,7 @@ class ChaseFillMixin:
     _pending_trades: list[dict[str, Any]]
     _canceling: bool
     _missing_refreshed: set[int]
+    _unproven_retry_at: int
 
     def _exec(self) -> ChaseExecution: ...
     def _publish(self) -> None: ...
@@ -60,6 +64,23 @@ class ChaseFillMixin:
             orders_hydrated=self._exec().orders_hydrated(),
             grace_ms=self._book.missing_fill_grace_ms,
         )
+
+    def _clip_min_qty(self) -> Decimal:
+        meta = self._exec().get_market_by_index(self._state.market_index)
+        if not meta:
+            return Decimal("0")
+        bid_s, ask_s = self._exec().best_bid_ask(self._state.market_index)
+        px = _dec(bid_s) if bid_s else (_dec(ask_s) if ask_s else Decimal("0"))
+        min_qty = maker_min_base(
+            meta.min_base_amount, meta.min_quote_amount, px if px > 0 else None
+        )
+        qty_step = Decimal(10) ** -meta.size_decimals
+        if min_qty <= 0:
+            min_qty = qty_step
+        return min_qty
+
+    def _clip_is_dust(self, clip: Clip) -> bool:
+        return leftover_is_dust(clip.remaining, self._clip_min_qty())
 
     def _reconcile_master(self) -> None:
         """Master filled/remaining follow per-clip filled (capped).
@@ -180,11 +201,13 @@ class ChaseFillMixin:
                 out.append(row)
         return out
 
-    def _fail_unproven_missing(self, clip: Clip, *, now: int) -> None:
+    def _abandon_unproven_missing(self, clip: Clip, *, now: int) -> None:
+        """Child is gone with no fill proof — cancel ledger, auto-rest after wait."""
         self._state.ledger.close_missing(clip, canceling=True, now=now)
         self._reconcile_master()
-        self._state.status = ChaseStatus.ERROR
-        self._state.error = "unproven_missing_clip"
+        self._unproven_retry_at = now + UNPROVEN_RETRY_MS
+        self._state.status = ChaseStatus.RUNNING
+        self._state.error = None
         self._state.quote_action = Action.PAUSE.value
         self._state.reason = "unproven_missing_clip"
         self._state.rest_price = None
@@ -212,7 +235,7 @@ class ChaseFillMixin:
                 )
                 if trades:
                     self._pending_trades.extend(trades)
-                    self._drain_trades()
+                self._drain_trades()
                 next_cursor = (
                     resp.get("next_cursor")
                     if isinstance(resp, dict)
@@ -232,7 +255,7 @@ class ChaseFillMixin:
             return False
 
     async def _resolve_vanished_clip(self, clip: Clip, *, now: int) -> None:
-        """Clip absent from WS cache — REST truth, then credit or ERROR."""
+        """Clip absent from WS cache — REST truth, then credit or auto-rest."""
         rest_rows = await self._refresh_open_orders()
         found = self._find_in_rows(rest_rows, clip.client_order_index)
         if found is not None:
@@ -252,17 +275,30 @@ class ChaseFillMixin:
             self._close_missing_clip(clip, now=now, assume_fill=True)
             self._reconcile_master()
             return
-        if not await self._credit_rest_trades():
-            self._fail_unproven_missing(clip, now=now)
-            return
+        credited = await self._credit_rest_trades()
         if self._may_invent_fill(clip, now):
             self._close_missing_clip(clip, now=now, assume_fill=True)
             self._reconcile_master()
             return
+        if self._clip_is_dust(clip):
+            # Sub-min leftover cannot fill or rest — drop it and let evaluate
+            # place a full clip (or pause below_min_qty). Do not hold on REST trades.
+            self._close_missing_clip(clip, now=now, assume_fill=False)
+            self._reconcile_master()
+            self._unproven_retry_at = 0
+            return
+        if not credited:
+            self._state.quote_action = Action.PAUSE.value
+            self._state.reason = "trades_reconcile_failed"
+            self._state.rest_price = None
+            self._state.rest_qty = None
+            self._reconcile_master()
+            self._publish()
+            return
         if not self._exec().orders_hydrated():
             self._reconcile_master()
             return
-        self._fail_unproven_missing(clip, now=now)
+        self._abandon_unproven_missing(clip, now=now)
 
     async def _sync_fills(self) -> None:
         self._drain_trades()

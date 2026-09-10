@@ -15,6 +15,7 @@ from mayedge.algos.chase.config import (
     RATE_LIMIT_COOLDOWN_MS,
     STOP_CANCEL_GAP_S,
     STOP_CANCEL_TRIES,
+    UNPROVEN_RETRY_MS,
 )
 from mayedge.algos.chase.fills import ChaseFillMixin
 from mayedge.algos.chase.iceberg import (
@@ -32,8 +33,8 @@ from mayedge.algos.chase.util import (
     _is_min_size,
     _is_order_not_found,
     _is_rate_limit,
+    _is_would_cross,
 )
-from mayedge.lighter.models import maker_min_base
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class ChasePlaceMixin(ChaseFillMixin):
     _last_tx_ms: int
     _backoff_until: int
     _backoff_reason: str | None
+    _unproven_retry_at: int
 
     def _publish(self) -> None: ...
     def _finish(self) -> None: ...
@@ -73,12 +75,7 @@ class ChasePlaceMixin(ChaseFillMixin):
         ask = _dec(ask_s) if ask_s else None
         tick = Decimal(10) ** -meta.price_decimals
         qty_step = Decimal(10) ** -meta.size_decimals
-        px = bid or ask or Decimal("0")
-        min_qty = maker_min_base(
-            meta.min_base_amount, meta.min_quote_amount, px if px > 0 else None
-        )
-        if min_qty <= 0:
-            min_qty = qty_step
+        min_qty = self._clip_min_qty()
         return MarketView(bid=bid, ask=ask, tick=tick, min_qty=min_qty, qty_step=qty_step)
 
     def _account_ready(self) -> bool:
@@ -176,8 +173,12 @@ class ChasePlaceMixin(ChaseFillMixin):
                 client_order_index=coi,
             )
         except ValueError as e:
-            text = str(e).lower()
-            if "post" in text or "cross" in text or "2170" in text:
+            if _is_min_size(e):
+                self._state.quote_action = Action.PAUSE.value
+                self._state.reason = "below_min_qty"
+                self._publish()
+                return
+            if _is_would_cross(e):
                 self._state.quote_action = Action.PAUSE.value
                 self._state.reason = "would_cross"
                 self._publish()
@@ -186,6 +187,11 @@ class ChasePlaceMixin(ChaseFillMixin):
                 return
             raise
         except Exception as e:
+            if _is_min_size(e):
+                self._state.quote_action = Action.PAUSE.value
+                self._state.reason = "below_min_qty"
+                self._publish()
+                return
             if self._handle_tx_err(e):
                 return
             raise
@@ -244,8 +250,7 @@ class ChasePlaceMixin(ChaseFillMixin):
                 size=size,
             )
         except ValueError as e:
-            text = str(e).lower()
-            if "post" in text or "cross" in text or "2170" in text:
+            if _is_would_cross(e):
                 # Keep the resting clip — the current price is still valid.
                 self._hold_clip("would_cross")
                 return
@@ -308,7 +313,7 @@ class ChasePlaceMixin(ChaseFillMixin):
                     await self._exec().cancel_order(mi, oid)
                     self._last_tx_ms = util.now_ms()
                 except Exception as e:
-                    if _is_order_not_found(e):
+                    if _is_order_not_found(e) or _is_min_size(e):
                         pass
                     elif self._handle_tx_err(e):
                         return
@@ -436,10 +441,11 @@ class ChasePlaceMixin(ChaseFillMixin):
     async def _rearm_from_venue(self) -> bool:
         """Credit REST trades, pull venue children, close live ledger clips."""
         if not await self._credit_rest_trades():
-            self._state.status = ChaseStatus.ERROR
-            self._state.error = "trades_reconcile_failed"
+            self._state.status = ChaseStatus.RUNNING
+            self._state.error = None
             self._state.quote_action = Action.PAUSE.value
             self._state.reason = "trades_reconcile_failed"
+            self._unproven_retry_at = util.now_ms() + UNPROVEN_RETRY_MS
             self._state.rest_price = None
             self._state.rest_qty = None
             self._publish()
@@ -476,6 +482,33 @@ class ChasePlaceMixin(ChaseFillMixin):
             if self._state.status == ChaseStatus.ERROR:
                 return
 
+            now = util.now_ms()
+            if self._unproven_retry_at:
+                if self._state.ledger.working() is not None:
+                    self._unproven_retry_at = 0
+                elif now < self._unproven_retry_at:
+                    self._state.quote_action = Action.PAUSE.value
+                    if self._state.reason != "trades_reconcile_failed":
+                        self._state.reason = "unproven_missing_clip"
+                    self._state.rest_price = None
+                    self._state.rest_qty = None
+                    self._publish()
+                    return
+                else:
+                    if not await self._credit_rest_trades():
+                        self._unproven_retry_at = now + UNPROVEN_RETRY_MS
+                        self._state.quote_action = Action.PAUSE.value
+                        self._state.reason = "trades_reconcile_failed"
+                        self._state.rest_price = None
+                        self._state.rest_qty = None
+                        self._publish()
+                        return
+                    self._unproven_retry_at = 0
+                    self._reconcile_master()
+                    if self._state.remaining <= 0:
+                        await self._finish_done()
+                        return
+
             if not self._exec().is_book_synced(self._state.market_index):
                 await self._pull_and_wait("book_unsynced")
                 return
@@ -500,7 +533,6 @@ class ChasePlaceMixin(ChaseFillMixin):
                 await self._finish_done()
                 return
 
-            now = util.now_ms()
             must_pull = live is not None and self._working_crosses(
                 live.price, view, self._state.params.side
             )

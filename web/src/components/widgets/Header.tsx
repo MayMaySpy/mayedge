@@ -21,6 +21,7 @@ import { api } from "@/lib/api";
 import { pushRecent } from "@/lib/recents";
 import { useFeedHealth, useLiveAccount, useLiveAlgos, useLiveBbo, useLiveQuotes, overlayQuote, setAlgo } from "@/lib/liveData";
 import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
+import { formatFundingPct } from "@/lib/marketPicker";
 
 interface HeaderProps {
   markets: Market[];
@@ -89,7 +90,7 @@ function StatRule() {
 
 function fundingTooltip(rate: number | null, apr: number | null): string | undefined {
   if (rate == null) return undefined;
-  const parts = [`${(rate * 100).toFixed(4)}% per hour`];
+  const parts = [`${formatFundingPct(rate)} per hour`, `${formatFundingPct(rate * 8)} / 8h`];
   if (apr != null && apr > 0) parts.push("longs pay shorts");
   else if (apr != null && apr < 0) parts.push("shorts pay longs");
   if (apr != null) parts.push(`${formatApr(apr)} APR`);

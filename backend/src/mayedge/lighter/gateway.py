@@ -23,6 +23,7 @@ from mayedge.lighter.models import (
     Trade,
     multi_asset_haircut_usd,
     normalize_market_type,
+    open_interest_usd,
     to_float,
 )
 from mayedge.lighter.order_book import OrderBookFeed
@@ -151,17 +152,23 @@ class LighterGateway:
             for d in detail_resp.order_book_details or []:
                 idx = d.market_id
                 if idx in self._markets:
-                    self._markets[idx].mark_price = to_float(getattr(d, "last_trade_price", None))
+                    last = to_float(getattr(d, "last_trade_price", None))
+                    mark = to_float(getattr(d, "mark_price", None)) or last
+                    self._markets[idx].mark_price = mark
                     self._markets[idx].index_price = to_float(
                         getattr(d, "market_config", None)
                         and getattr(d.market_config, "index_price", None)
                     )
-                    self._markets[idx].last_trade_price = to_float(
-                        getattr(d, "last_trade_price", None)
-                    )
+                    self._markets[idx].last_trade_price = last
                     self._markets[idx].volume_24h = to_float(
                         getattr(d, "daily_quote_token_volume", None)
                     )
+                    raw_oi = getattr(d, "open_interest", None)
+                    if raw_oi is not None and mark:
+                        # REST OI is base size; convert to two-sided quote notional.
+                        self._markets[idx].open_interest = open_interest_usd(
+                            to_float(raw_oi) * mark
+                        )
                     change = getattr(d, "daily_price_change", None)
                     self._markets[idx].change_24h = None if change is None else to_float(change)
                     min_imf = int(getattr(d, "min_initial_margin_fraction", 0) or 0)
@@ -238,14 +245,17 @@ class LighterGateway:
             idx_px = to_float(row.get("index_price"))
             if idx_px:
                 meta.index_price = idx_px
-            fr = row.get("funding_rate")
+            # Wire units are percent (0.0012 = 0.0012%/hr). Prefer the upcoming
+            # estimate; funding_rate is the last settled print.
+            fr = row.get("current_funding_rate")
             if fr is None:
-                fr = row.get("current_funding_rate")
+                fr = row.get("funding_rate")
             if fr is not None:
                 meta.funding_rate = to_float(fr)
             oi = row.get("open_interest")
             if oi is not None:
-                meta.open_interest = to_float(oi)
+                # WS OI is already one-sided quote notional.
+                meta.open_interest = open_interest_usd(to_float(oi))
             oi_lim = row.get("open_interest_limit")
             if oi_lim is not None:
                 meta.open_interest_limit = to_float(oi_lim)

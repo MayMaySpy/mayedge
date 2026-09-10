@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from mayedge.algos.chase import util
+from mayedge.algos.chase.config import AUTO_RESUME_ERRORS
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.fills import may_invent_fill
 from mayedge.algos.chase.iceberg import (
@@ -62,6 +63,7 @@ class ChaseIcebergRunner(ChasePlaceMixin):
         self._backoff_reason: str | None = None
         self._pending_trades: list[dict[str, Any]] = []
         self._missing_refreshed: set[int] = set()
+        self._unproven_retry_at = 0
 
     @property
     def state(self) -> ChaseState:
@@ -163,6 +165,7 @@ class ChaseIcebergRunner(ChasePlaceMixin):
         self._canceling = False
         self._pending_trades.clear()
         self._missing_refreshed.clear()
+        self._unproven_retry_at = 0
         self._reconcile_master()
 
     async def resume(self) -> None:
@@ -181,6 +184,30 @@ class ChaseIcebergRunner(ChasePlaceMixin):
             return
 
         if self._state.status == ChaseStatus.ERROR:
+            if self._state.error in AUTO_RESUME_ERRORS:
+                self._state.status = ChaseStatus.RUNNING
+                self._state.reason = None
+                self._state.error = None
+                if self._task is None or self._task.done():
+                    self._task = asyncio.create_task(self._run())
+                try:
+                    await self._evaluate()
+                except Exception:
+                    logger.exception(
+                        "chase auto-resume evaluate failed for %s", self._state.algo_id
+                    )
+                    self._state.status = ChaseStatus.ERROR
+                    self._state.error = "resume evaluate failed"
+                    self._publish()
+                    return
+                logger.info(
+                    "auto-resumed chase job %s market=%s remaining=%s",
+                    self._state.algo_id,
+                    self._state.symbol or self._state.market_index,
+                    self._state.remaining,
+                )
+                self._publish()
+                return
             if self._task is None or self._task.done():
                 self._task = asyncio.create_task(self._run())
             logger.info(
@@ -244,6 +271,11 @@ class ChaseIcebergRunner(ChasePlaceMixin):
         if self._state.status not in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
             raise ValueError(f"cannot unpause status={self._state.status}")
         if not await self._rearm_from_venue():
+            if self._task is None or self._task.done():
+                self._task = asyncio.create_task(self._run())
+            else:
+                self._wake.set()
+            self._publish()
             return
         self._state.status = ChaseStatus.RUNNING
         self._state.reason = None
@@ -268,7 +300,7 @@ class ChaseIcebergRunner(ChasePlaceMixin):
         return coi
 
     def on_gateway(self, msg: dict[str, Any]) -> None:
-        if self._state.status != ChaseStatus.RUNNING:
+        if self._state.status not in ACTIVE_STATUSES:
             return
         kind = msg.get("type")
         if kind == "account_trades":
@@ -276,6 +308,8 @@ class ChaseIcebergRunner(ChasePlaceMixin):
             if trades:
                 self._pending_trades.extend(trades)
                 self._wake.set()
+            return
+        if self._state.status != ChaseStatus.RUNNING:
             return
         book = (
             kind
@@ -329,6 +363,7 @@ class ChaseIcebergRunner(ChasePlaceMixin):
         self._canceling = False
         self._pending_trades.clear()
         self._missing_refreshed.clear()
+        self._unproven_retry_at = 0
         try:
             await self._evaluate()
         except Exception:
@@ -389,6 +424,17 @@ class ChaseIcebergRunner(ChasePlaceMixin):
                 self._wake.clear()
                 if self._stop.is_set():
                     break
+                if (
+                    self._state.status == ChaseStatus.ERROR
+                    and self._state.error in AUTO_RESUME_ERRORS
+                ):
+                    try:
+                        await self.unpause()
+                    except Exception:
+                        logger.exception(
+                            "chase auto-resume failed for %s", self._state.algo_id
+                        )
+                    continue
                 if self._state.status in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
                     continue
                 try:

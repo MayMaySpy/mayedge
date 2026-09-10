@@ -58,7 +58,7 @@ function changeClass(change: number | null | undefined) {
 
 function fundingClass(rate: number | null | undefined) {
   if (rate == null || rate === 0) return "text-text";
-  return rate > 0 ? "text-bid" : "text-ask";
+  return rate > 0 ? "text-ask" : "text-bid";
 }
 
 const COLS: { key: PickerSort; label: string; align: "start" | "end"; width: string }[] = [

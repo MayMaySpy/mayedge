@@ -21,6 +21,7 @@ from mayedge.algos.chase.config import (
     MISSING_FILL_GRACE_MS,
     RATE_LIMIT_COOLDOWN_MS,
     STALE_ACK_MS,
+    UNPROVEN_RETRY_MS,
 )
 from mayedge.config import settings
 
@@ -265,7 +266,7 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
         self.assertEqual(boot.orders.cancels, [])
         self.assertEqual(boot.orders.modifies, [])
 
-    async def test_unacked_past_stale_ack_rest_gone_errors_no_replace(self) -> None:
+    async def test_unacked_past_stale_ack_rest_gone_auto_replaces(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
@@ -278,12 +279,18 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
             live.order_index = None
             boot.clock.advance(STALE_ACK_MS + 1)
             await boot.job._evaluate()
-        clip = boot.job.state.ledger.find_clip(client_order_index=coi)
-        assert clip is not None
-        self.assertEqual(clip.status, "cancelled")
-        self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
-        self.assertEqual(boot.job.state.error, "unproven_missing_clip")
-        self.assertEqual(len(boot.orders.creates), 1)
+            clip = boot.job.state.ledger.find_clip(client_order_index=coi)
+            assert clip is not None
+            self.assertEqual(clip.status, "cancelled")
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            self.assertIsNone(boot.job.state.error)
+            self.assertEqual(boot.job.state.reason, "unproven_missing_clip")
+            self.assertEqual(len(boot.orders.creates), 1)
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertNotEqual(boot.orders.creates[1]["client_order_index"], coi)
 
     async def test_unacked_past_stale_ack_rest_still_open_acks(self) -> None:
         boot = boot_job()
@@ -404,6 +411,18 @@ class ChaseRunnerCrossAndErrorsTests(IsolatedChaseTestCase):
         self.assertEqual(boot.job.state.reason, "would_cross")
         self.assertIsNone(boot.job.state.ledger.working())
 
+    async def test_create_min_size_pauses_below_min_qty(self) -> None:
+        boot = boot_job()
+        boot.orders.create_error = ValueError(
+            "invalid order, failed to meet the constraint of min base or quote amount (code 21706)"
+        )
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.quote_action, "pause")
+        self.assertEqual(boot.job.state.reason, "below_min_qty")
+        self.assertIsNone(boot.job.state.ledger.working())
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+
     async def test_create_rate_limit_sets_backoff(self) -> None:
         boot = boot_job()
         boot.orders.create_error = RuntimeError("429 too many requests")
@@ -507,7 +526,57 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
             self.assertEqual(live.status, "live")
             self.assertEqual(boot.job.state.filled, D("0"))
 
-    async def test_vanish_after_grace_errors_without_evidence(self) -> None:
+    async def test_vanish_dust_leftover_rests_new_clip_not_trade_sync(self) -> None:
+        """Sub-min leftover that vanishes is dropped — rest a full clip, no trade-sync hold."""
+        gateway = FakeGateway()
+        assert gateway.market is not None
+        gateway.market.min_base_amount = 0.5
+        boot = boot_job(gateway=gateway)
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            coi = boot.orders.creates[0]["client_order_index"]
+            await boot.job._evaluate()
+            boot.orders.set_remaining(coi, "0.4", filled="0.6")
+            await boot.job._evaluate()
+            boot.orders.remove_by_coi(coi)
+            await boot.job._evaluate()
+            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.filled, D("0.6"))
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertIsNone(boot.job.state.error)
+        self.assertNotEqual(boot.job.state.reason, "trades_reconcile_failed")
+        self.assertNotEqual(boot.job.state.reason, "unproven_missing_clip")
+        clip = boot.job.state.ledger.find_clip(client_order_index=coi)
+        assert clip is not None
+        self.assertEqual(clip.status, "cancelled")
+        self.assertEqual(len(boot.orders.creates), 2)
+        live = boot.job.state.ledger.working()
+        assert live is not None
+        self.assertNotEqual(live.client_order_index, coi)
+        self.assertEqual(live.qty, D("1"))
+
+    async def test_vanish_dust_leftover_places_even_when_trades_fail(self) -> None:
+        gateway = FakeGateway()
+        assert gateway.market is not None
+        gateway.market.min_base_amount = 0.5
+        boot = boot_job(gateway=gateway)
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            coi = boot.orders.creates[0]["client_order_index"]
+            await boot.job._evaluate()
+            boot.orders.set_remaining(coi, "0.4", filled="0.6")
+            await boot.job._evaluate()
+            boot.orders.remove_by_coi(coi)
+            await boot.job._evaluate()
+            boot.orders.trades_error = ValueError("trades down")
+            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.filled, D("0.6"))
+        self.assertNotEqual(boot.job.state.reason, "trades_reconcile_failed")
+        self.assertEqual(len(boot.orders.creates), 2)
+
+    async def test_vanish_after_grace_auto_replaces_without_evidence(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
@@ -517,13 +586,19 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
             await boot.job._evaluate()
-        clip = boot.job.state.ledger.find_clip(client_order_index=coi)
-        assert clip is not None
-        self.assertEqual(clip.status, "cancelled")
-        self.assertEqual(clip.filled, D("0"))
-        self.assertEqual(boot.job.state.filled, D("0"))
-        self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
-        self.assertEqual(boot.job.state.error, "unproven_missing_clip")
+            clip = boot.job.state.ledger.find_clip(client_order_index=coi)
+            assert clip is not None
+            self.assertEqual(clip.status, "cancelled")
+            self.assertEqual(clip.filled, D("0"))
+            self.assertEqual(boot.job.state.filled, D("0"))
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            self.assertIsNone(boot.job.state.error)
+            self.assertEqual(len(boot.orders.creates), 1)
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertNotEqual(boot.orders.creates[1]["client_order_index"], coi)
 
     async def test_vanish_ws_lag_rest_still_open_does_not_error(self) -> None:
         """WS cache drop is not a fill when REST still lists the child."""
@@ -981,7 +1056,7 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
         self.assertEqual(boot.job.state.remaining, D("10"))
         self.assertEqual(boot.job.state.filled, D("0"))
 
-    async def test_unpause_credits_missed_fill_before_quote(self) -> None:
+    async def test_auto_resume_credits_missed_fill_before_quote(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
@@ -991,9 +1066,10 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
             await boot.job._evaluate()
-            self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
-            self.assertEqual(boot.job.state.error, "unproven_missing_clip")
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            self.assertIsNone(boot.job.state.error)
             self.assertEqual(boot.job.state.remaining, D("10"))
+            self.assertEqual(len(boot.orders.creates), 1)
             boot.orders.trades_response = [
                 trade_print(
                     market_index=1,
@@ -1003,27 +1079,15 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
                     bid_client_id=coi,
                 )
             ]
-            await boot.job.unpause()
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
         self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
         self.assertEqual(boot.job.state.remaining, D("9"))
         self.assertEqual(boot.job.state.filled, D("1"))
         self.assertEqual(len(boot.orders.creates), 2)
         self.assertEqual(boot.orders.creates[1]["size"], "1")
 
-    async def test_error_restore_pulls_leftover_no_quote(self) -> None:
-        boot = boot_job()
-        with patch_chase(boot.clock, boot.gateway, boot.orders):
-            await boot.job._evaluate()
-            coi = boot.orders.creates[0]["client_order_index"]
-            row = self._persist_row(boot, status="error")
-            row["error"] = "unproven_missing_clip"
-            boot.job.hydrate_from_row(row)
-            await boot.job.resume()
-        self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
-        self.assertEqual(len(boot.orders.creates), 1)
-        self.assertIsNone(boot.orders.find_by_coi(coi))
-
-    async def test_unpause_trades_fail_stays_error(self) -> None:
+    async def test_auto_resume_without_fill_replaces_vanished_clip(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
@@ -1033,12 +1097,104 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
             await boot.job._evaluate()
-            self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
+            self.assertEqual(boot.job.state.reason, "unproven_missing_clip")
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertIsNone(boot.job.state.error)
+        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertNotEqual(boot.orders.creates[1]["client_order_index"], coi)
+        self.assertEqual(boot.job.state.remaining, D("10"))
+        self.assertEqual(boot.job.state.filled, D("0"))
+
+    async def test_auto_resume_credits_ws_trade_received_during_hold(self) -> None:
+        boot = boot_job()
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            coi = boot.orders.creates[0]["client_order_index"]
+            oid = boot.orders.creates[0]["order_index"]
+            await boot.job._evaluate()
+            boot.orders.remove_by_coi(coi)
+            await boot.job._evaluate()
+            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
+            await boot.job._evaluate()
+            self.assertEqual(boot.job.state.reason, "unproven_missing_clip")
+            boot.job.on_gateway(
+                {
+                    "type": "account_trades",
+                    "trades": [
+                        trade_print(
+                            market_index=1,
+                            size="1",
+                            price="99.96",
+                            trade_id=7,
+                            bid_client_id=coi,
+                            bid_id=oid,
+                        )
+                    ],
+                }
+            )
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(boot.job.state.filled, D("1"))
+        self.assertEqual(boot.job.state.remaining, D("9"))
+        self.assertEqual(len(boot.orders.creates), 2)
+
+    async def test_error_restore_unproven_auto_resumes(self) -> None:
+        boot = boot_job()
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            coi = boot.orders.creates[0]["client_order_index"]
+            row = self._persist_row(boot, status="error")
+            row["error"] = "unproven_missing_clip"
+            boot.job.hydrate_from_row(row)
+            await boot.job.resume()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertIsNone(boot.job.state.error)
+        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertIsNone(boot.orders.find_by_coi(coi))
+
+    async def test_auto_resume_trades_fail_retries_then_places(self) -> None:
+        boot = boot_job()
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            coi = boot.orders.creates[0]["client_order_index"]
+            await boot.job._evaluate()
+            boot.orders.remove_by_coi(coi)
+            await boot.job._evaluate()
+            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
+            await boot.job._evaluate()
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            boot.orders.trades_error = ValueError("trades down")
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            self.assertEqual(boot.job.state.reason, "trades_reconcile_failed")
+            self.assertEqual(len(boot.orders.creates), 1)
+            boot.orders.trades_error = None
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(len(boot.orders.creates), 2)
+
+    async def test_unpause_trades_fail_stays_running_retries(self) -> None:
+        boot = boot_job()
+        with patch_chase(boot.clock, boot.gateway, boot.orders):
+            await boot.job._evaluate()
+            await boot.job.pause()
             boot.orders.trades_error = ValueError("trades down")
             await boot.job.unpause()
-        self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
-        self.assertEqual(boot.job.state.error, "trades_reconcile_failed")
-        self.assertEqual(len(boot.orders.creates), 1)
+            self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+            self.assertIsNone(boot.job.state.error)
+            self.assertEqual(boot.job.state.reason, "trades_reconcile_failed")
+            self.assertEqual(len(boot.orders.creates), 1)
+            boot.orders.trades_error = None
+            boot.clock.advance(UNPROVEN_RETRY_MS + 1)
+            await boot.job._evaluate()
+        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
+        self.assertNotEqual(boot.job.state.reason, "trades_reconcile_failed")
+        self.assertEqual(len(boot.orders.creates), 2)
 
 
 class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
@@ -1085,7 +1241,7 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
             await boot.job._place_working(q)
         self.assertEqual(len(boot.orders.creates), 2)
 
-    async def test_unpause_credits_trade_from_second_page(self) -> None:
+    async def test_auto_resume_credits_trade_from_second_page(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
             await boot.job._evaluate()
@@ -1093,9 +1249,6 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             boot.orders.remove_by_coi(coi)
             await boot.job._evaluate()
-            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
-            await boot.job._evaluate()
-            self.assertEqual(boot.job.state.status, ChaseStatus.ERROR)
             boot.orders.trades_pages = [
                 [],
                 [
@@ -1108,10 +1261,12 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
                     )
                 ],
             ]
-            await boot.job.unpause()
+            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
+            await boot.job._evaluate()
         self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
         self.assertEqual(boot.job.state.filled, D("1"))
         self.assertEqual(boot.job.state.remaining, D("9"))
+        self.assertEqual(len(boot.orders.creates), 2)
         self.assertGreaterEqual(boot.orders.trades_calls, 2)
 
     async def test_credit_rest_trades_page_cap_fails_closed(self) -> None:

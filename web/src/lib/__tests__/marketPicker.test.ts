@@ -58,9 +58,9 @@ describe("lastPrice", () => {
 });
 
 describe("formatFundingPct", () => {
-  it("renders hourly rate as percent", () => {
-    expect(formatFundingPct(0.000032)).toBe("+0.0032%");
-    expect(formatFundingPct(-0.002616)).toBe("-0.2616%");
+  it("renders hourly rate as percent without scaling", () => {
+    expect(formatFundingPct(0.0012)).toBe("+0.0012%");
+    expect(formatFundingPct(-0.0032)).toBe("-0.0032%");
   });
 });
 

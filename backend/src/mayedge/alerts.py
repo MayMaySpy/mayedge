@@ -562,7 +562,7 @@ class ExploitDetector:
             )
             self._mark_cooldown(mi, "dislocation")
 
-        funding_pct_hr = abs(snap.funding) * 100.0
+        funding_pct_hr = abs(snap.funding)
         if funding_pct_hr >= self._thr.funding_hourly_pct.sev2 and self._cooldown_ok(mi, "funding"):
             sev = _severity_from_thresholds(funding_pct_hr, self._thr.funding_hourly_pct)
             direction = "long_pays" if snap.funding > 0 else "short_pays"
@@ -578,7 +578,7 @@ class ExploitDetector:
                     value=funding_pct_hr if snap.funding >= 0 else -funding_pct_hr,
                     baseline=None,
                     unit="pct_hr",
-                    note=f"Funding {snap.funding * 100:.4f}%/hr",
+                    note=f"Funding {snap.funding:.4f}%/hr",
                 )
             )
             self._mark_cooldown(mi, "funding")

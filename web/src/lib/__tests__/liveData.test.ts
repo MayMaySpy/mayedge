@@ -6,9 +6,18 @@ import {
   applyMarketQuotes,
   clearBook,
   clearMarketQuotes,
+  clearMinuteCandles,
+  clearTrades,
+  getCandles1s,
   getMarketQuotes,
+  getMinuteCandles,
   isBookSynced,
   overlayQuote,
+  prependTrades,
+  rollLiveCandles,
+  setMinuteCandles,
+  upsertMinuteCandle,
+  upsertMinuteCandles,
 } from "@/lib/liveData";
 
 describe("applyBookDelta", () => {
@@ -45,6 +54,81 @@ describe("overlayQuote", () => {
 
   it("keeps snapshot fields when the quote omits them", () => {
     expect(overlayQuote(m, { market_index: 1, mark_price: 2000 }).open_interest).toBe(1e6);
+  });
+});
+
+describe("minute candles", () => {
+  afterEach(() => {
+    clearMinuteCandles();
+    clearTrades();
+  });
+
+  it("buckets unique seconds into one 1m bar", () => {
+    upsertMinuteCandle({ time: 1700000040, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+    upsertMinuteCandle({ time: 1700000050, open: 2, high: 3, low: 1, close: 2, volume: 1 });
+    const bars = getMinuteCandles();
+    expect(bars).toHaveLength(1);
+    expect(bars[0].time).toBe(1700000040);
+    expect(bars[0].close).toBe(2);
+  });
+
+  it("keeps history when a closed bar and a new bar arrive together", () => {
+    const t0 = 1_700_000_040;
+    setMinuteCandles(
+      [0, 1, 2].map((i) => ({
+        time: t0 + i * 60,
+        open: 1,
+        high: 1,
+        low: 1,
+        close: 1,
+        volume: 1,
+      }))
+    );
+    upsertMinuteCandles([
+      { time: t0 + 120, open: 1, high: 2, low: 1, close: 1.5, volume: 3 },
+      { time: t0 + 180, open: 1.5, high: 1.5, low: 1.5, close: 1.5, volume: 0.2 },
+    ]);
+    const bars = getMinuteCandles();
+    expect(bars).toHaveLength(4);
+    expect(bars[2].close).toBe(1.5);
+    expect(bars[3].time).toBe(t0 + 180);
+  });
+
+  it("opens a new 1m bar after the minute elapses without a trade", () => {
+    upsertMinuteCandle({ time: 1_700_000_040, open: 1, high: 1, low: 1, close: 2, volume: 1 });
+    rollLiveCandles(1_700_000_040 + 70);
+    const bars = getMinuteCandles();
+    expect(bars).toHaveLength(2);
+    expect(bars[1].time).toBe(1_700_000_100);
+    expect(bars[1].open).toBe(2);
+    expect(bars[1].close).toBe(2);
+    expect(bars[1].volume).toBe(0);
+  });
+
+  it("opens a new 1s bar after the second elapses without a trade", () => {
+    prependTrades([{ price: "10", size: "1", side: "buy", timestamp: 1_700_000_000 }]);
+    rollLiveCandles(1_700_000_003);
+    const bars = getCandles1s();
+    expect(bars.map((b) => b.time)).toEqual([
+      1_700_000_000, 1_700_000_001, 1_700_000_002, 1_700_000_003,
+    ]);
+    expect(bars[3].open).toBe(10);
+    expect(bars[3].volume).toBe(0);
+  });
+
+  it("caps the live 1m series", () => {
+    const bars = Array.from({ length: 2500 }, (_, i) => ({
+      time: 1_700_000_000 + i * 60,
+      open: 1,
+      high: 1,
+      low: 1,
+      close: 1,
+      volume: 1,
+    }));
+    setMinuteCandles(bars);
+    const t0 = Math.floor(1_700_000_000 / 60) * 60;
+    expect(getMinuteCandles()).toHaveLength(2000);
+    expect(getMinuteCandles()[0].time).toBe(t0 + 500 * 60);
   });
 });
 

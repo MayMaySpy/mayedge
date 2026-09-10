@@ -67,6 +67,14 @@ def _is_min_size(err: BaseException) -> bool:
     return "21706" in text or "min " in text or "base or quote amount" in text
 
 
+def _is_would_cross(err: BaseException) -> bool:
+    """Post-only would-cross (2170). Do not match 21701 / 21706."""
+    text = str(err).lower()
+    if "21701" in text or "21706" in text:
+        return False
+    return "post" in text or "cross" in text or "2170" in text
+
+
 def _is_invalid_nonce(err: BaseException | str | None) -> bool:
     text = str(err or "").lower()
     return "21104" in text or "invalid nonce" in text

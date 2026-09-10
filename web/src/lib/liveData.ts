@@ -21,6 +21,8 @@ export type Bbo = { bid: string | null; ask: string | null };
 
 const MAX_TRADES = 200;
 const MAX_1S = 3600;
+/** 1m live series — uncapped upserts were growing the chart until the tab OOMed. */
+const MAX_MINUTE = 2000;
 const BOOK_DEPTH = 40;
 
 let book: Book = { bids: [], asks: [] };
@@ -444,30 +446,59 @@ export function getMinuteCandles() {
   return candlesMin;
 }
 
+function capMinute(next: Candle[]): Candle[] {
+  return next.length > MAX_MINUTE ? next.slice(-MAX_MINUTE) : next;
+}
+
+function minuteBar(c: Candle): Candle | null {
+  const t = unixSec(c.time);
+  if (!t) return null;
+  return { ...c, time: Math.floor(t / 60) * 60 };
+}
+
 export function setMinuteCandles(next: Candle[]) {
-  candlesMin = next;
+  const byT = new Map<number, Candle>();
+  for (const raw of next) {
+    const bar = minuteBar(raw);
+    if (bar) byT.set(bar.time, bar);
+  }
+  candlesMin = capMinute([...byT.values()].sort((a, b) => a.time - b.time));
   minuteCandleNotify.notifyNow();
 }
 
+export function upsertMinuteCandles(rows: Candle[]) {
+  if (!rows.length) return;
+  for (const row of rows) upsertMinuteCandle(row);
+}
+
 export function upsertMinuteCandle(c: Candle) {
+  const bar = minuteBar(c);
+  if (!bar) return;
   const candles = candlesMin;
   const last = candles[candles.length - 1];
-  if (last && last.time === c.time) {
+  if (last && last.time === bar.time) {
     const next = candles.slice();
-    next[next.length - 1] = c;
+    next[next.length - 1] = bar;
     candlesMin = next;
     minuteCandleNotify.notify();
     return;
   }
-  const idx = candles.findIndex((x) => x.time === c.time);
+  const idx = candles.findIndex((x) => x.time === bar.time);
   if (idx >= 0) {
     const next = candles.slice();
-    next[idx] = c;
+    next[idx] = bar;
     candlesMin = next;
     minuteCandleNotify.notify();
     return;
   }
-  candlesMin = [...candles, c];
+  if (last && bar.time < last.time) {
+    candlesMin = capMinute(
+      [...candles, bar].sort((a, b) => a.time - b.time)
+    );
+    minuteCandleNotify.notify();
+    return;
+  }
+  candlesMin = capMinute([...candles, bar]);
   minuteCandleNotify.notify();
 }
 
@@ -475,6 +506,45 @@ export function clearMinuteCandles() {
   if (!candlesMin.length) return;
   candlesMin = [];
   minuteCandleNotify.notifyNow();
+}
+
+function emptyBar(time: number, px: number): Candle {
+  return { time, open: px, high: px, low: px, close: px, volume: 0 };
+}
+
+const MAX_1S_FILL = 5;
+const MAX_MIN_FILL = 2;
+
+/** Close the forming bar when the period elapses, even if no trade arrived. */
+export function rollLiveCandles(nowSec = Math.floor(Date.now() / 1000)) {
+  if (!Number.isFinite(nowSec) || nowSec <= 0) return;
+  const now = Math.floor(nowSec);
+
+  if (candles1s.length) {
+    const last = candles1s[candles1s.length - 1];
+    if (now > last.time) {
+      const gap = now - last.time;
+      const start = gap > MAX_1S_FILL ? now : last.time + 1;
+      const add: Candle[] = [];
+      for (let t = start; t <= now; t++) add.push(emptyBar(t, last.close));
+      candles1s = [...candles1s, ...add];
+      if (candles1s.length > MAX_1S) candles1s = candles1s.slice(-MAX_1S);
+      candle1sNotify.notify();
+    }
+  }
+
+  if (candlesMin.length) {
+    const bucket = Math.floor(now / 60) * 60;
+    const last = candlesMin[candlesMin.length - 1];
+    if (bucket > last.time) {
+      const gapMin = (bucket - last.time) / 60;
+      const start = gapMin > MAX_MIN_FILL ? bucket : last.time + 60;
+      const add: Candle[] = [];
+      for (let t = start; t <= bucket; t += 60) add.push(emptyBar(t, last.close));
+      candlesMin = capMinute([...candlesMin, ...add]);
+      minuteCandleNotify.notify();
+    }
+  }
 }
 
 export function useLiveBook() {
@@ -851,4 +921,22 @@ export function setFeedHealth(next: Partial<FeedHealth> & { type?: string }) {
 
 export function useFeedHealth() {
   return useSyncExternalStore(subscribeFeedHealth, getFeedHealth, getFeedHealth);
+}
+
+function flushLiveUi() {
+  rollLiveCandles();
+  tradesNotify.notifyNow();
+  candle1sNotify.notifyNow();
+  minuteCandleNotify.notifyNow();
+  accountNotify.notifyNow();
+  quoteNotify.notifyNow();
+  liqNotify.notifyNow();
+  alertNotify.notifyNow();
+  accountTradesNotify.notifyNow();
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") flushLiveUi();
+  });
 }

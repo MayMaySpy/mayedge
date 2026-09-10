@@ -64,14 +64,17 @@ export function toSeriesData(candles: Candle[]): ChartSeriesData {
   return { candles: out, volume };
 }
 
+const MAX_CHART_BARS = 2500;
+
 /** REST history + live WS — live wins on the same timestamp. */
 export function mergeCandles(hist: Candle[], live: Candle[]): Candle[] {
-  if (!live.length) return hist;
-  if (!hist.length) return live;
+  if (!live.length) return hist.length > MAX_CHART_BARS ? hist.slice(-MAX_CHART_BARS) : hist;
+  if (!hist.length) return live.length > MAX_CHART_BARS ? live.slice(-MAX_CHART_BARS) : live;
   const byT = new Map<number, Candle>();
   for (const c of hist) byT.set(candleTime(c.time) as number, { ...c, time: candleTime(c.time) as number });
   for (const c of live) byT.set(candleTime(c.time) as number, { ...c, time: candleTime(c.time) as number });
-  return [...byT.values()].sort((a, b) => a.time - b.time);
+  const out = [...byT.values()].sort((a, b) => a.time - b.time);
+  return out.length > MAX_CHART_BARS ? out.slice(-MAX_CHART_BARS) : out;
 }
 
 export function foldMinute(hist: Candle[], minute: Candle, tfSec: number): Candle[] {
@@ -110,4 +113,93 @@ export function foldMinute(hist: Candle[], minute: Candle, tfSec: number): Candl
     ];
   }
   return hist;
+}
+
+/** Bucket 1m (or any finer) bars into `tfSec` candles. */
+export function aggregateCandles(src: Candle[], tfSec: number): Candle[] {
+  if (tfSec <= 0) return src;
+  const out: Candle[] = [];
+  for (const raw of src) {
+    const t = candleTime(raw.time) as number;
+    if (!Number.isFinite(t) || t <= 0) continue;
+    const bucket = Math.floor(t / tfSec) * tfSec;
+    const vol = Number.isFinite(raw.volume) ? raw.volume : 0;
+    const last = out[out.length - 1];
+    if (last && last.time === bucket) {
+      last.high = Math.max(last.high, raw.high);
+      last.low = Math.min(last.low, raw.low);
+      last.close = raw.close;
+      last.volume += vol;
+      continue;
+    }
+    if (last && bucket < last.time) continue;
+    out.push({
+      time: bucket,
+      open: raw.open,
+      high: raw.high,
+      low: raw.low,
+      close: raw.close,
+      volume: vol,
+    });
+  }
+  return out;
+}
+
+/**
+ * REST higher-tf history + all live 1m bars.
+ * Overlapping last REST bucket is extended; newer buckets become new candles.
+ */
+export function foldMinutes(hist: Candle[], minutes: Candle[], tfSec: number): Candle[] {
+  if (!minutes.length) return hist.length > MAX_CHART_BARS ? hist.slice(-MAX_CHART_BARS) : hist;
+  const liveTf = aggregateCandles(minutes, tfSec);
+  if (!hist.length) return liveTf.length > MAX_CHART_BARS ? liveTf.slice(-MAX_CHART_BARS) : liveTf;
+
+  const last = hist[hist.length - 1];
+  const lastT = candleTime(last.time) as number;
+  let overlap: Candle | null = null;
+  const newer: Candle[] = [];
+  for (const b of liveTf) {
+    const t = candleTime(b.time) as number;
+    if (t === lastT) overlap = b;
+    else if (t > lastT) newer.push(b);
+  }
+
+  let out = hist;
+  if (overlap) {
+    const histVol = Number.isFinite(last.volume) ? last.volume : 0;
+    out = [
+      ...hist.slice(0, -1),
+      {
+        time: lastT,
+        open: last.open,
+        high: Math.max(last.high, overlap.high),
+        low: Math.min(last.low, overlap.low),
+        close: overlap.close,
+        volume: Math.max(histVol, overlap.volume),
+      },
+    ];
+  }
+  if (newer.length) out = [...out, ...newer];
+  return out.length > MAX_CHART_BARS ? out.slice(-MAX_CHART_BARS) : out;
+}
+
+export interface ChartBarMeta {
+  first: number;
+  time: number;
+  len: number;
+}
+
+/** Incremental LWC `update()` is only safe for same last time, or exactly one new bar. */
+export function shouldReplaceChartData(
+  prev: ChartBarMeta | null,
+  next: ChartBarMeta,
+  primed: boolean
+): boolean {
+  if (!primed || prev == null) return true;
+  if (next.first !== prev.first) return true;
+  if (next.len < prev.len) return true;
+  if (next.time < prev.time) return true;
+  if (next.len > prev.len + 1) return true;
+  if (next.len === prev.len && next.time !== prev.time) return true;
+  return false;
 }
