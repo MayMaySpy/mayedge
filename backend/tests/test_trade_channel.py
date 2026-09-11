@@ -132,7 +132,7 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
         )
         rows = self.gw._liqs.recent()
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["trade_id"], "99")
+        self.assertEqual(rows[0]["trade_id"], "1:liquidation:t99")
 
     async def test_trade_fe_update_routes_to_tape(self) -> None:
         await handle_ws_message(

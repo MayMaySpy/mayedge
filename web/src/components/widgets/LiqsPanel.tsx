@@ -188,7 +188,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                   <TableRow
                     key={liqIdentity(l.trade_id)}
                     className={cn("cursor-pointer", sigRowClass(l, tint))}
-                    title={`${kind} ${pairLabel(l.symbol)}${significant ? " · significant" : ""}`}
+                    title={`${kind} ${pairLabel(l.symbol)}${l.fill_count != null && l.fill_count > 1 ? ` · ${l.fill_count} fills` : ""}${significant ? " · significant" : ""}`}
                     onClick={() => onOpenPair?.(l.symbol)}
                   >
                     <TableCell className="text-muted">{formatTime(l.timestamp)}</TableCell>
@@ -198,6 +198,9 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                     <TableCell className="text-muted">{kind}</TableCell>
                     <TableCell className="text-right text-muted">
                       {formatSize(l.size)}
+                      {l.fill_count != null && l.fill_count > 1 ? (
+                        <span className="ml-1 text-[10px]">×{l.fill_count}</span>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right">{formatPrice(l.price)}</TableCell>
                     <TableCell

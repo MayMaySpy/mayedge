@@ -108,8 +108,9 @@ export interface OpenOrder {
 export interface Account {
   collateral: string;
   available: string;
-  /** USDC free + haircut multi-asset margin — use for max order size. */
+  /** Venue available_balance — use for max order size. */
   trade_available?: string;
+  portfolio_margin?: string;
   unrealized_pnl: string;
   positions: Position[];
   open_orders: OpenOrder[];
@@ -224,6 +225,7 @@ export interface LiquidationEvent {
   price: string;
   size: string;
   usd_amount: string | null;
+  fill_count?: number;
   timestamp: number;
 }
 

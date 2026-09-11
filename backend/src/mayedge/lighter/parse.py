@@ -386,10 +386,18 @@ def asset_rows(assets: Any) -> list[dict[str, Any]]:
 
 
 def merge_account_assets(prev: Any, incoming: Any) -> list[dict[str, Any]]:
+    """Field-wise merge so a WS balance tick does not drop REST margin_mode."""
     old_rows = {r["symbol"]: r for r in asset_rows(prev)}
     new_rows = {r["symbol"]: r for r in asset_rows(incoming)}
     if not new_rows:
         return list(old_rows.values())
     merged = dict(old_rows)
-    merged.update(new_rows)
+    for sym, row in new_rows.items():
+        prev_row = merged.get(sym, {})
+        combined = dict(prev_row)
+        for key, value in row.items():
+            if value is None or value == "":
+                continue
+            combined[key] = value
+        merged[sym] = combined
     return list(merged.values())

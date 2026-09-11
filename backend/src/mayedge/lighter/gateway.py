@@ -18,10 +18,8 @@ from mayedge.lighter.liquidations import LiquidationFeed
 from mayedge.lighter.market_ws import run_ws_loop, ws_send
 from mayedge.lighter.models import (
     Candle,
-    MarginAssetMeta,
     MarketMeta,
     Trade,
-    multi_asset_haircut_usd,
     normalize_market_type,
     open_interest_usd,
     to_float,
@@ -55,7 +53,6 @@ class LighterGateway:
         self._focus_gate = asyncio.Event()
         self._focus_gate.set()
         self._max_1s = 3600
-        self._margin_assets: dict[str, MarginAssetMeta] = {}
         self._ws: Any | None = None
         self._trade_subs: set[int] = set()
         self._trade_subs_target: set[int] = set()
@@ -69,7 +66,6 @@ class LighterGateway:
         store.init_db()
         self._liqs.hydrate()
         await self._load_markets()
-        await self._load_margin_assets()
         if self._current_market_index is None:
             default = self.get_market(settings.default_market_symbol)
             if default:
@@ -180,29 +176,6 @@ class LighterGateway:
         except Exception:
             logger.exception("failed to load order book details")
 
-    async def _load_margin_assets(self) -> None:
-        if not self._client:
-            return
-        try:
-            order_api = lighter.OrderApi(self.client)
-            resp = await order_api.asset_details()
-            rows = getattr(resp, "asset_details", None) or []
-            out: dict[str, MarginAssetMeta] = {}
-            for row in rows:
-                sym = str(getattr(row, "symbol", "") or "").upper()
-                if not sym:
-                    continue
-                out[sym] = MarginAssetMeta(
-                    symbol=sym,
-                    loan_to_value=to_float(getattr(row, "loan_to_value", 0)),
-                    index_price=to_float(getattr(row, "index_price", 0)),
-                    margin_mode=str(getattr(row, "margin_mode", "") or "").lower(),
-                )
-            if out:
-                self._margin_assets = out
-        except Exception:
-            logger.exception("failed to load asset details")
-
     def _apply_market_stats(self, msg: dict[str, Any]) -> None:
         stats_blob = msg.get("market_stats")
         if not stats_blob:
@@ -295,14 +268,6 @@ class LighterGateway:
         from mayedge.lighter.account import account_service
 
         account_service.touch_marks()
-
-    def margin_asset_details(self) -> dict[str, MarginAssetMeta]:
-        return self._margin_assets
-
-    def trade_available_usd(self, available_balance: str | float, assets: Any) -> str:
-        base = to_float(available_balance)
-        extra = multi_asset_haircut_usd(assets, self._margin_assets)
-        return f"{max(0.0, base + extra):.6f}"
 
     def list_markets(self) -> list[MarketMeta]:
         return list(self._markets.values())

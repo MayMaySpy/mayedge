@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { algoCanResume, algoIsPaused, algoReasonLabel, algoResumeNotice } from "@/lib/algos";
+import {
+  algoAvgFillPrice,
+  algoCanResume,
+  algoIsPaused,
+  algoReasonLabel,
+  algoResumeNotice,
+} from "@/lib/algos";
+
+describe("algoAvgFillPrice", () => {
+  it("is null with no priced fills", () => {
+    expect(algoAvgFillPrice(undefined)).toBeNull();
+    expect(algoAvgFillPrice([])).toBeNull();
+    expect(algoAvgFillPrice([{ price: "0", qty: "10" }])).toBeNull();
+  });
+
+  it("is the size-weighted average of fills", () => {
+    expect(
+      algoAvgFillPrice([
+        { price: "100", qty: "1" },
+        { price: "110", qty: "3" },
+      ]),
+    ).toBe(107.5);
+  });
+});
 
 describe("algoCanResume", () => {
   it("is true for paused and error so vanished clips can retry", () => {

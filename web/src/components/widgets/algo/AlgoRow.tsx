@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  algoAvgFillPrice,
   algoCanResume,
   algoFillProgress,
   algoIsWorking,
@@ -78,6 +79,7 @@ export function AlgoRow({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const buy = algo.side === "buy";
   const { filled, remaining, total, pct } = algoFillProgress(algo);
+  const avgFill = algoAvgFillPrice(algo.fills);
   const working = algoIsWorking(algo.status);
   const canResume = algoCanResume(algo.status);
   const phase = algoPhase(algo);
@@ -148,6 +150,11 @@ export function AlgoRow({
           <span>{formatSize(remaining)}</span>
           <span className="text-muted"> / {master}</span>
           <span className="ml-2 text-[10px] text-muted">filled {formatSize(filled)}</span>
+          {avgFill != null && (
+            <span className="ml-2 text-[10px] text-muted" title="Volume-weighted average fill">
+              avg <span className="text-text">{formatPrice(avgFill)}</span>
+            </span>
+          )}
         </div>
         {tradingEnabled && working && (
           <div className="flex shrink-0 items-center gap-0.5">

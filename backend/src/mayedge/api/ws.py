@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,6 +13,13 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 logger = logging.getLogger(__name__)
 
 BroadcastFn = Callable[[dict[str, Any]], Awaitable[None]]
+
+# Unbounded Queue + a slow browser tab was filling RAM (multi-GB compressed).
+_FANOUT_MAX = 512
+_REPLACE_TYPES = frozenset({"account", "feed_health", "book_sync", "algo"})
+_FLUSH_STATS = "_flush_stats"
+_FLUSH_REPLACE = "_flush_replace"
+_INTERNAL = frozenset({_FLUSH_STATS, _FLUSH_REPLACE})
 
 
 def ws_connected(ws: WebSocket) -> bool:
@@ -63,12 +71,22 @@ class ConnectionManager:
 
 
 class BroadcastFanout:
-    """Queue hub messages; one task drains to the WS broadcaster."""
+    """Queue hub messages; one task drains to the WS broadcaster.
+
+    High-churn types are coalesced (latest quote / account wins). The queue is
+    bounded so a slow tab cannot retain the whole tape in RAM.
+    """
 
     def __init__(self, broadcast: BroadcastFn) -> None:
         self._broadcast = broadcast
         self._queue: asyncio.Queue[dict[str, Any]] | None = None
         self._task: asyncio.Task[None] | None = None
+        self._pending_replace: dict[str, dict[str, Any]] = {}
+        self._replace_queued: set[str] = set()
+        self._pending_stats: dict[int, dict[str, Any]] = {}
+        self._stats_queued = False
+        self._overflow_log_at = 0.0
+        self.dropped = 0
 
     def start(self) -> None:
         if self._task is not None:
@@ -80,6 +98,10 @@ class BroadcastFanout:
         task = self._task
         self._task = None
         self._queue = None
+        self._pending_replace.clear()
+        self._replace_queued.clear()
+        self._pending_stats.clear()
+        self._stats_queued = False
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -89,6 +111,54 @@ class BroadcastFanout:
         q = self._queue
         if q is None:
             return
+        kind = str(message.get("type") or "")
+        if kind == "market_stats":
+            for row in message.get("markets") or []:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    idx = int(row.get("market_index"))
+                except (TypeError, ValueError):
+                    continue
+                self._pending_stats[idx] = row
+            if not self._stats_queued:
+                self._stats_queued = True
+                self._put(q, {"type": _FLUSH_STATS})
+            return
+        if kind in _REPLACE_TYPES:
+            self._pending_replace[kind] = message
+            if kind not in self._replace_queued:
+                self._replace_queued.add(kind)
+                self._put(q, {"type": _FLUSH_REPLACE, "slot": kind})
+            return
+        self._put(q, message)
+
+    def _put(self, q: asyncio.Queue[dict[str, Any]], message: dict[str, Any]) -> None:
+        parked: list[dict[str, Any]] = []
+        while q.qsize() >= _FANOUT_MAX:
+            try:
+                item = q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item.get("type") in _INTERNAL:
+                parked.append(item)
+                continue
+            self.dropped += 1
+            now = time.monotonic()
+            if now - self._overflow_log_at >= 10:
+                self._overflow_log_at = now
+                logger.warning(
+                    "fanout overflow — dropped %s (total dropped=%s q=%s)",
+                    item.get("type"),
+                    self.dropped,
+                    q.qsize(),
+                )
+            break
+        for item in parked:
+            try:
+                q.put_nowait(item)
+            except Exception:
+                logger.exception("fanout requeue internal failed")
         try:
             q.put_nowait(message)
         except Exception:
@@ -101,7 +171,22 @@ class BroadcastFanout:
         try:
             while True:
                 msg = await q.get()
+                kind = msg.get("type")
                 try:
+                    if kind == _FLUSH_STATS:
+                        self._stats_queued = False
+                        rows = list(self._pending_stats.values())
+                        self._pending_stats.clear()
+                        if rows:
+                            await self._broadcast({"type": "market_stats", "markets": rows})
+                        continue
+                    if kind == _FLUSH_REPLACE:
+                        slot = str(msg.get("slot") or "")
+                        self._replace_queued.discard(slot)
+                        payload = self._pending_replace.pop(slot, None)
+                        if payload:
+                            await self._broadcast(payload)
+                        continue
                     await self._broadcast(msg)
                 except Exception:
                     logger.exception("fanout broadcast failed")

@@ -254,6 +254,8 @@ export function useMarketWs(symbol: string) {
               available: String(msg.available ?? "0"),
               trade_available:
                 msg.trade_available != null ? String(msg.trade_available) : undefined,
+              portfolio_margin:
+                msg.portfolio_margin != null ? String(msg.portfolio_margin) : undefined,
               unrealized_pnl: String(msg.unrealized_pnl ?? "0"),
               positions: (msg.positions as import("@/lib/api").Position[]) ?? [],
               open_orders: (msg.open_orders as import("@/lib/api").OpenOrder[]) ?? [],

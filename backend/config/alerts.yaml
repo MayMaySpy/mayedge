@@ -26,6 +26,7 @@ spread:
 premium:
   pct: [0.5, 1.2]
 dislocation:
+  # Mark vs mid (not last). Quiet books skip this — last goes stale while mid walks.
   bps: [50, 120]
 funding:
   # Percent per hour (0.20 = 0.20%/hr), same units as Lighter's 1h print.

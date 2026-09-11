@@ -213,8 +213,10 @@ class AccountSummary:
     collateral: str
     available: str
     unrealized_pnl: str
-    # USDC free + haircut multi-asset margin (unified). Use for max order size.
     trade_available: str = "0"
+    portfolio_value: str = "0"
+    cross_portfolio_value: str = "0"
+    portfolio_margin: str = "0"
     positions: list[Position] = field(default_factory=list)
     open_orders: list[OpenOrder] = field(default_factory=list)
 
@@ -223,6 +225,7 @@ class AccountSummary:
             "collateral": self.collateral,
             "available": self.available,
             "trade_available": self.trade_available,
+            "portfolio_margin": self.portfolio_margin,
             "unrealized_pnl": self.unrealized_pnl,
             "positions": [
                 {
@@ -268,49 +271,6 @@ def to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-@dataclass
-class MarginAssetMeta:
-    """Haircut params for unified multi-asset margin (from assetDetails)."""
-
-    symbol: str
-    loan_to_value: float
-    index_price: float
-    margin_mode: str
-
-
-def multi_asset_haircut_usd(assets: Any, details: dict[str, MarginAssetMeta]) -> float:
-    """LTV-discounted USD value of non-stable margin balances (e.g. 1 ETH × index × 0.7)."""
-    if not assets or not details:
-        return 0.0
-    if isinstance(assets, dict):
-        rows: list[Any] = list(assets.values())
-    elif isinstance(assets, list):
-        rows = assets
-    else:
-        return 0.0
-    total = 0.0
-    for item in rows:
-        if isinstance(item, dict):
-            sym = str(item.get("symbol") or "").upper()
-            mode = str(item.get("margin_mode") or "").lower()
-            bal = to_float(item.get("margin_balance"))
-        else:
-            sym = str(getattr(item, "symbol", "") or "").upper()
-            mode = str(getattr(item, "margin_mode", "") or "").lower()
-            bal = to_float(getattr(item, "margin_balance", 0))
-        if not sym or sym in {"USDC", "USDG"}:
-            continue
-        if mode not in {"enabled", "1", "true"}:
-            continue
-        if bal <= 0:
-            continue
-        meta = details.get(sym)
-        if not meta or meta.loan_to_value <= 0 or meta.index_price <= 0:
-            continue
-        total += bal * meta.index_price * meta.loan_to_value
-    return total
 
 
 def margin_fraction_to_leverage(imf: int, default: int = 10) -> int:

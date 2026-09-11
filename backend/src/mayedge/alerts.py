@@ -17,7 +17,8 @@ from mayedge.lighter.models import MarketMeta, to_float
 logger = logging.getLogger(__name__)
 
 _RING = 500
-_SNAPSHOT_MAX = 1200  # ~20 min at 1 sample/s
+# 1 Hz samples; 5m baseline needs ~300s. Keep a little headroom, not 20 min × every perp.
+_SNAPSHOT_MAX = 400
 
 
 @dataclass(frozen=True)
@@ -221,7 +222,7 @@ class ExploitDetector:
         self._snapshots: dict[int, deque[MarketSnapshot]] = {}
         self._seen_since: dict[int, float] = {}
         self._cooldown: dict[tuple[int, str], float] = {}
-        self._liq_window: dict[int, deque[tuple[float, float, str]]] = {}
+        self._liq_window: dict[int, deque[tuple[float, float, str, str]]] = {}
         self._pending: list[ExploitEvent] = []
 
     def recent(self) -> list[dict[str, Any]]:
@@ -336,8 +337,8 @@ class ExploitDetector:
         if not items:
             return
         now = time.time()
-        by_market: dict[int, list[tuple[float, float, str]]] = {}
-        for row in items:
+        by_market: dict[int, list[tuple[float, float, str, str]]] = {}
+        for i, row in enumerate(items):
             try:
                 mi = int(row.get("market_index") or 0)
             except (TypeError, ValueError):
@@ -350,17 +351,20 @@ class ExploitDetector:
                 sz = to_float(row.get("size"))
                 usd = px * sz
             side = str(row.get("side") or "")
-            by_market.setdefault(mi, []).append((now, usd, side))
+            key = str(row.get("trade_id") or "") or f"anon:{i}"
+            by_market.setdefault(mi, []).append((now, usd, side, key))
 
         out: list[ExploitEvent] = []
         window_s = self._thr.liq_window_s
         for mi, rows in by_market.items():
             window = self._liq_window.setdefault(mi, deque())
-            for ts, usd, side in rows:
-                window.append((ts, usd, side))
+            for ts, usd, side, key in rows:
+                window = deque(item for item in window if item[3] != key)
+                window.append((ts, usd, side, key))
             cutoff = now - window_s
             while window and window[0][0] < cutoff:
                 window.popleft()
+            self._liq_window[mi] = window
             if not window:
                 continue
             count = len(window)
@@ -379,7 +383,7 @@ class ExploitDetector:
                 if int(row.get("market_index") or 0) == mi:
                     symbol = str(row.get("symbol") or symbol)
                     break
-            sells = sum(1 for _, _, s in window if s == "sell")
+            sells = sum(1 for _, _, s, _ in window if s == "sell")
             direction = "down" if sells >= count / 2 else "up"
             out.append(
                 ExploitEvent(
@@ -535,32 +539,38 @@ class ExploitDetector:
                 )
                 self._mark_cooldown(mi, "premium")
 
-        ref = snap.mid or snap.last or snap.mark
-        disloc = 0.0
-        parts: list[str] = []
-        for label, px in (("mark", snap.mark), ("last", snap.last)):
-            bps = _bps_diff(px, ref, ref) if px > 0 else None
-            if bps is not None and bps >= self._thr.disloc_bps.sev2:
-                disloc = max(disloc, bps)
-                parts.append(label)
-        if disloc >= self._thr.disloc_bps.sev2 and self._cooldown_ok(mi, "dislocation"):
-            sev = _severity_from_thresholds(disloc, self._thr.disloc_bps)
-            out.append(
-                ExploitEvent(
-                    id=str(uuid.uuid4()),
-                    ts=int(snap.ts * 1000),
-                    symbol=sym,
-                    market_index=mi,
-                    kind="dislocation",
-                    severity=sev,
-                    direction="skew",
-                    value=disloc,
-                    baseline=ref,
-                    unit="bps",
-                    note=f"{'/'.join(parts)} vs mid {disloc:.0f} bps",
+        # Mark vs live mid only. Last is stale on quiet books — mid walks, last
+        # does not, and that used to look like a dislocation.
+        # Skip when the spread is already as wide as the disloc bar: mid is junk.
+        if (
+            snap.mark > 0
+            and snap.mid > 0
+            and spread is not None
+            and spread < self._thr.disloc_bps.sev2
+        ):
+            disloc = _bps_diff(snap.mark, snap.mid, snap.mid)
+            if (
+                disloc is not None
+                and disloc >= self._thr.disloc_bps.sev2
+                and self._cooldown_ok(mi, "dislocation")
+            ):
+                sev = _severity_from_thresholds(disloc, self._thr.disloc_bps)
+                out.append(
+                    ExploitEvent(
+                        id=str(uuid.uuid4()),
+                        ts=int(snap.ts * 1000),
+                        symbol=sym,
+                        market_index=mi,
+                        kind="dislocation",
+                        severity=sev,
+                        direction=_direction_from_delta(snap.mark - snap.mid),
+                        value=disloc,
+                        baseline=snap.mid,
+                        unit="bps",
+                        note=f"Mark vs mid {disloc:.0f} bps",
+                    )
                 )
-            )
-            self._mark_cooldown(mi, "dislocation")
+                self._mark_cooldown(mi, "dislocation")
 
         funding_pct_hr = abs(snap.funding)
         if funding_pct_hr >= self._thr.funding_hourly_pct.sev2 and self._cooldown_ok(mi, "funding"):

@@ -592,33 +592,6 @@ function preferBalance(prev: string | undefined, next: string | undefined): stri
   return prev ?? "0";
 }
 
-/** Keep multi-asset trade capacity; don't fall back to plain available. */
-function preferTradeAvailable(
-  prev: string | undefined,
-  next: string | undefined,
-  available: string | undefined
-): string {
-  const n = parseFloat(next ?? "");
-  const p = parseFloat(prev ?? "");
-  const a = parseFloat(available ?? "");
-  if (Number.isFinite(n) && n > 0) {
-    // Ignore USDC-only collapses while we still have multi-asset headroom.
-    if (
-      Number.isFinite(p) &&
-      Number.isFinite(a) &&
-      a > 0 &&
-      p > a * 1.05 &&
-      Math.abs(n - a) <= Math.max(1, a * 0.02)
-    ) {
-      return prev!;
-    }
-    return String(next);
-  }
-  if (Number.isFinite(p) && p > 0) return prev!;
-  if (Number.isFinite(a) && a > 0) return String(available);
-  return prev ?? next ?? "0";
-}
-
 export function subscribeAccount(onChange: () => void) {
   return accountNotify.subscribe(onChange);
 }
@@ -639,11 +612,8 @@ export function setAccount(next: Account | null) {
   account = {
     collateral: preferBalance(prev?.collateral, next.collateral),
     available: preferBalance(prev?.available, next.available),
-    trade_available: preferTradeAvailable(
-      prev?.trade_available,
-      next.trade_available,
-      next.available ?? prev?.available
-    ),
+    trade_available: preferBalance(prev?.trade_available, next.trade_available),
+    portfolio_margin: preferBalance(prev?.portfolio_margin, next.portfolio_margin),
     unrealized_pnl: next.unrealized_pnl ?? prev?.unrealized_pnl ?? "0",
     positions: hasPositions ? (next.positions ?? []) : (prev?.positions ?? []),
     open_orders: hasOrders ? (next.open_orders ?? []) : (prev?.open_orders ?? []),
@@ -743,6 +713,7 @@ export interface LiquidationEvent {
   price: string;
   size: string;
   usd_amount: string | null;
+  fill_count?: number;
   timestamp: number;
 }
 
@@ -765,6 +736,10 @@ function liqTsMs(ts: number): number {
   return ts > 1e12 ? ts : ts * 1000;
 }
 
+function liqSig(row: LiquidationEvent): string {
+  return `${liqIdentity(row.trade_id)}:${row.size}:${row.usd_amount ?? ""}:${row.fill_count ?? 0}:${row.timestamp}`;
+}
+
 /** Union by trade_id, always newest-first. */
 function mergeLiquidations(
   existing: LiquidationEvent[],
@@ -779,7 +754,17 @@ function mergeLiquidations(
     if (!row.trade_id) continue;
     const key = liqIdentity(row.trade_id);
     const prev = byId.get(key);
-    if (!prev || liqTsMs(row.timestamp) >= liqTsMs(prev.timestamp)) {
+    if (!prev) {
+      byId.set(key, row);
+      continue;
+    }
+    const prevCount = prev.fill_count ?? 1;
+    const nextCount = row.fill_count ?? 1;
+    if (nextCount !== prevCount) {
+      if (nextCount > prevCount) byId.set(key, row);
+      continue;
+    }
+    if (liqTsMs(row.timestamp) >= liqTsMs(prev.timestamp)) {
       byId.set(key, row);
     }
   }
@@ -817,7 +802,7 @@ export function seedLiquidations(next: LiquidationEvent[]) {
   const merged = mergeLiquidations(liquidations, next);
   const same =
     merged.length === liquidations.length &&
-    merged.every((row, i) => liqIdentity(row.trade_id) === liqIdentity(liquidations[i]?.trade_id));
+    merged.every((row, i) => liqSig(row) === liqSig(liquidations[i]!));
   if (same) return;
   liquidations = merged;
   liqNotify.notifyNow();
@@ -829,7 +814,7 @@ export function prependLiquidations(incoming: LiquidationEvent[]) {
   const merged = mergeLiquidations(before, incoming);
   const same =
     merged.length === before.length &&
-    merged.every((row, i) => liqIdentity(row.trade_id) === liqIdentity(before[i]?.trade_id));
+    merged.every((row, i) => liqSig(row) === liqSig(before[i]!));
   if (same) return;
   liquidations = merged;
   liqNotify.notify();

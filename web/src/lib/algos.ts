@@ -208,6 +208,23 @@ export function algoFillProgress(algo: {
   return { filled, remaining, total, pct };
 }
 
+/** Volume-weighted average of blotter fills. Null until there is a priced fill. */
+export function algoAvgFillPrice(
+  fills?: { price?: string | null; qty?: string | null }[] | null,
+): number | null {
+  let notional = 0;
+  let qty = 0;
+  for (const f of fills ?? []) {
+    const price = parseFloat(f.price ?? "");
+    const size = parseFloat(f.qty ?? "");
+    if (!(price > 0) || !(size > 0)) continue;
+    notional += price * size;
+    qty += size;
+  }
+  if (!(qty > 0)) return null;
+  return notional / qty;
+}
+
 export function algoIsLive(status: string | null | undefined): boolean {
   return algoIsWorking(status);
 }

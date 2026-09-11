@@ -34,11 +34,6 @@ interface HeaderProps {
   onEditToggle: () => void;
 }
 
-function num(value: string | undefined) {
-  const x = parseFloat(value ?? "");
-  return Number.isFinite(x) ? x : 0;
-}
-
 function formatOi(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value) || value < 0) return "—";
   return formatUsdCompact(value) || "$0";
@@ -188,7 +183,6 @@ export function Header({
   const oi = current?.open_interest ?? null;
 
   const openPositions = (account?.positions ?? []).filter((p) => parseFloat(p.size) !== 0);
-  const usedMargin = openPositions.reduce((sum, p) => sum + num(p.allocated_margin), 0);
 
   const markTitle =
     mark != null && spot != null
@@ -304,26 +298,11 @@ export function Header({
 
         <div className="flex min-w-0 items-center justify-end gap-3 justify-self-end">
           {account ? (
-            <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
-              <HeaderStat
-                label="Collateral"
-                value={formatPrice(account.collateral, 2)}
-                title="Account collateral"
-              />
-              <HeaderStat
-                label="Available"
-                value={formatPrice(account.available, 2)}
-                title="Free collateral"
-              />
-              {usedMargin > 0 && (
-                <HeaderStat
-                  label="In use"
-                  value={formatPrice(usedMargin, 2)}
-                  valueClass="text-muted"
-                  title="Margin allocated to open positions"
-                />
-              )}
-            </div>
+            <HeaderStat
+              label="Margin"
+              value={formatPrice(account.portfolio_margin ?? "0", 2)}
+              title="Portfolio Margin"
+            />
           ) : null}
 
           <div className="flex shrink-0 items-center gap-2 font-mono text-[10px]">

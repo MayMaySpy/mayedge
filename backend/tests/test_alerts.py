@@ -257,6 +257,72 @@ class ExploitDetectorTest(unittest.TestCase):
         ]
         self.assertEqual(len(spread_events), 1)
 
+    def test_dislocation_is_mark_vs_mid(self) -> None:
+        now = time.time()
+        self._seed_series(
+            1,
+            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.95, 100.05, 1000, 1e6, 0, 0)],
+        )
+        meta = _meta(
+            mark_price=101.0,
+            last_trade_price=100.0,
+            best_bid_price=99.95,
+            best_ask_price=100.05,
+            mid_price=100.0,
+            open_interest=1000.0,
+            volume_24h=1e6,
+        )
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_market_stats(meta)
+            self.det.flush()
+        events = [e for batch in self.events for e in batch.get("events", [])]
+        disloc = next(e for e in events if e.get("kind") == "dislocation")
+        self.assertEqual(disloc["note"], "Mark vs mid 100 bps")
+        self.assertEqual(disloc["direction"], "up")
+        self.assertAlmostEqual(disloc["value"], 100.0)
+
+    def test_dislocation_ignores_stale_last(self) -> None:
+        now = time.time()
+        self._seed_series(
+            1,
+            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.95, 100.05, 1000, 1e6, 0, 0)],
+        )
+        meta = _meta(
+            mark_price=100.0,
+            last_trade_price=90.0,
+            best_bid_price=99.95,
+            best_ask_price=100.05,
+            mid_price=100.0,
+            open_interest=1000.0,
+            volume_24h=1e6,
+        )
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_market_stats(meta)
+            self.det.flush()
+        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
+        self.assertNotIn("dislocation", kinds)
+
+    def test_dislocation_skips_wide_book(self) -> None:
+        now = time.time()
+        self._seed_series(
+            1,
+            [MarketSnapshot(now - 5, 100, 100, 100, 100, 90, 110, 1000, 1e6, 0, 0)],
+        )
+        meta = _meta(
+            mark_price=101.0,
+            last_trade_price=100.0,
+            best_bid_price=90.0,
+            best_ask_price=110.0,
+            mid_price=100.0,
+            open_interest=1000.0,
+            volume_24h=1e6,
+        )
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_market_stats(meta)
+            self.det.flush()
+        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
+        self.assertNotIn("dislocation", kinds)
+
     def test_liq_cluster_fires(self) -> None:
         now = time.time()
         items = [
@@ -275,6 +341,53 @@ class ExploitDetectorTest(unittest.TestCase):
 
         kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
         self.assertIn("liq_cluster", kinds)
+
+    def test_liq_cluster_does_not_count_fills_of_one_order(self) -> None:
+        now = time.time()
+        items = [
+            {
+                "market_index": 1,
+                "symbol": "ETH",
+                "trade_id": "1:liquidation:555",
+                "usd_amount": "300",
+                "side": "sell",
+            }
+            for _ in range(14)
+        ]
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_liquidations(items)
+        self.assertEqual(self.events, [])
+
+    def test_liq_cluster_upserts_usd_for_same_group(self) -> None:
+        now = time.time()
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_liquidations(
+                [
+                    {
+                        "market_index": 1,
+                        "symbol": "ETH",
+                        "trade_id": "1:liquidation:555",
+                        "usd_amount": "1000",
+                        "side": "sell",
+                    }
+                ]
+            )
+            self.det.on_liquidations(
+                [
+                    {
+                        "market_index": 1,
+                        "symbol": "ETH",
+                        "trade_id": "1:liquidation:555",
+                        "usd_amount": "150000",
+                        "side": "sell",
+                    }
+                ]
+            )
+        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
+        self.assertIn("liq_cluster", kinds)
+        ev = next(e for batch in self.events for e in batch.get("events", []))
+        self.assertEqual(ev["baseline"], 1)
+        self.assertEqual(ev["value"], 150000.0)
 
     def test_flush_caps_events(self) -> None:
         thr = ExploitThresholds(

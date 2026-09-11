@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS liquidations (
     price TEXT NOT NULL,
     size TEXT NOT NULL,
     usd_amount TEXT,
-    ts INTEGER NOT NULL
+    ts INTEGER NOT NULL,
+    group_id TEXT
 );
 """
 
@@ -110,14 +111,15 @@ CREATE TABLE liquidations (
     price TEXT NOT NULL,
     size TEXT NOT NULL,
     usd_amount TEXT,
-    ts INTEGER NOT NULL
+    ts INTEGER NOT NULL,
+    group_id TEXT
 )
 """
 
 _LIQ_MAX_ROWS = 50_000
 _LIQ_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _last_liq_prune_at = 0.0
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _meta_int(
@@ -154,6 +156,7 @@ def _ensure_liquidations(conn: sqlite3.Connection) -> None:
     required: dict[str, str] = {
         "side": "side TEXT",
         "usd_amount": "usd_amount TEXT",
+        "group_id": "group_id TEXT",
     }
     for name, ddl in required.items():
         if name not in cols:
@@ -190,6 +193,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _ensure_algo_venue(conn)
     if version < 2:
         _ensure_algo_mm_columns(conn)
+    if version < 3:
+        _ensure_liquidations(conn)
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 

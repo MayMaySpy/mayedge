@@ -23,8 +23,8 @@ def insert_liquidations(rows: list[dict[str, Any]]) -> int:
             cur = conn.execute(
                 """
                 INSERT OR IGNORE INTO liquidations(
-                    trade_id, market_index, symbol, kind, side, price, size, usd_amount, ts
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    trade_id, market_index, symbol, kind, side, price, size, usd_amount, ts, group_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tid,
@@ -36,6 +36,7 @@ def insert_liquidations(rows: list[dict[str, Any]]) -> int:
                     str(r.get("size") or "0"),
                     r.get("usd_amount"),
                     int(r.get("ts") or 0),
+                    str(r.get("group_id") or "") or None,
                 ),
             )
             inserted += cur.rowcount
@@ -65,7 +66,7 @@ def list_liquidations(
         conn = _connect()
         rows = conn.execute(
             f"""
-            SELECT trade_id, market_index, symbol, kind, side, price, size, usd_amount, ts
+            SELECT trade_id, market_index, symbol, kind, side, price, size, usd_amount, ts, group_id
             FROM liquidations
             {where}
             ORDER BY ts DESC
@@ -84,6 +85,7 @@ def list_liquidations(
             "size": r["size"],
             "usd_amount": r["usd_amount"],
             "timestamp": r["ts"],
+            "group_id": r["group_id"] or "",
         }
         for r in rows
     ]
