@@ -116,8 +116,11 @@ class BroadcastFanout:
             for row in message.get("markets") or []:
                 if not isinstance(row, dict):
                     continue
+                raw_idx = row.get("market_index")
+                if raw_idx is None:
+                    continue
                 try:
-                    idx = int(row.get("market_index"))
+                    idx = int(raw_idx)
                 except (TypeError, ValueError):
                     continue
                 self._pending_stats[idx] = row

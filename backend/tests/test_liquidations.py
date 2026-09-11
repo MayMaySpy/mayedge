@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from unittest.mock import patch
 
 from mayedge import db as store
@@ -84,12 +85,12 @@ class LiquidationHydrateTests(unittest.TestCase):
 
 class LiquidationGroupTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.out: list[dict[str, object]] = []
+        self.out: list[dict[str, Any]] = []
         self.feed = LiquidationFeed(self.out.append, persist=False)
         self.eth = MarketMeta(1, "ETH", 2, 4, 0.001, 10.0, market_type="perp")
 
-    def _fill(self, trade_id: int, *, ask_id: int, size: str = "0.1", **extra: object) -> dict[str, object]:
-        row: dict[str, object] = {
+    def _fill(self, trade_id: int, *, ask_id: int, size: str = "0.1", **extra: object) -> dict[str, Any]:
+        row: dict[str, Any] = {
             "trade_id": trade_id,
             "price": "100",
             "size": size,
