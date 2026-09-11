@@ -3,7 +3,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
-import { parseDecimal } from "@/lib/numbers";
+import { parseDecimal, decimalInput } from "@/lib/numbers";
 import { buildLadderPlan } from "@/lib/ladderPlan";
 import { makerMinSize } from "../math";
 import { TicketChips, TicketField } from "../ui";
@@ -140,6 +140,7 @@ export function LadderParamsSheet({
           value={state.priceFrom}
           inputMode="decimal"
           placeholder="0.00"
+          sanitize={decimalInput}
           onChange={(v) => set({ priceFrom: v })}
         />
         <TicketField
@@ -148,6 +149,7 @@ export function LadderParamsSheet({
           value={state.priceTo}
           inputMode="decimal"
           placeholder="0.00"
+          sanitize={decimalInput}
           onChange={(v) => set({ priceTo: v })}
         />
       </FieldGroup>

@@ -523,7 +523,9 @@ export function PositionsPanel({
                 </TableHeader>
                 <TableBody>
                   {visibleOrders.map((o) => {
-                    const algoKind = algoOrderKind(o.client_order_index);
+                    const algoKind = algoOrderKind(o.client_order_index, {
+                      reduceOnly: o.reduce_only,
+                    });
                     return (
                     <TableRow key={o.order_index}>
                       <TableCell>

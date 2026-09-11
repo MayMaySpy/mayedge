@@ -196,7 +196,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
           <TabsContent value="working" className="mt-0">
             <AlgoList
               rows={workingRows}
-              empty="No working algos. Place one from the ticket."
+              empty="No working algos. Start one from the ticket."
               symbol={symbol}
               tradingEnabled={tradingEnabled}
               busyId={busyId}

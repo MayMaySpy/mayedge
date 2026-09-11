@@ -10,6 +10,7 @@ import lighter
 from mayedge.config import settings
 from mayedge.lighter.account import account_service
 from mayedge.lighter.coi import init_manual_coi_seq, next_manual_client_order_index
+from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import (
     from_scaled,
@@ -112,7 +113,27 @@ class OrderService:
             raise ValueError(
                 f"Min {meta.min_base_amount} {meta.symbol} or ${meta.min_quote_amount}"
             )
+        mapped = venue_client_error(err)
+        if mapped:
+            raise VenueBlocked(*mapped)
         raise ValueError(err)
+
+    def _market_worst_price(self, meta, *, is_ask: bool, slippage: float) -> int:
+        """IOC cap from the local book — do not REST-fetch Lighter's order book (WAF)."""
+        bid_s, ask_s = gateway.best_bid_ask(meta.market_index)
+        touch = 0.0
+        if is_ask and bid_s:
+            touch = float(bid_s)
+        elif not is_ask and ask_s:
+            touch = float(ask_s)
+        spot = touch or float(meta.last_trade_price or meta.mark_price or 0)
+        if spot <= 0:
+            raise ValueError("No book — cannot price market order")
+        slip = max(0.0, min(float(slippage), 0.05))
+        worst = spot * (1 - slip) if is_ask else spot * (1 + slip)
+        if worst <= 0:
+            raise ValueError("Invalid market price")
+        return self._scale_price(str(worst), meta.price_decimals)
 
     @staticmethod
     def _is_invalid_nonce(err: Any) -> bool:
@@ -203,14 +224,17 @@ class OrderService:
         self._check_notional(meta, base_amount)
         is_ask = self._is_ask(side)
         coi = client_order_index or self._next_client_order_index()
+        price_int = self._market_worst_price(meta, is_ask=is_ask, slippage=slippage)
 
-        _tx, tx_hash, err = await self.signer.create_market_order_if_slippage(
-            market_index=market_index,
-            client_order_index=coi,
-            base_amount=base_amount,
-            max_slippage=slippage,
-            is_ask=is_ask,
-            reduce_only=reduce_only,
+        _tx, tx_hash, err = await self._retry_nonce(
+            lambda: self.signer.create_market_order(
+                market_index=market_index,
+                client_order_index=coi,
+                base_amount=base_amount,
+                avg_execution_price=price_int,
+                is_ask=is_ask,
+                reduce_only=reduce_only,
+            )
         )
         if err:
             self._raise_order_err(err, meta)

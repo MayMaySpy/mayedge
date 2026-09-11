@@ -22,6 +22,8 @@ UNPROVEN_RETRY_MS = 2_000
 AUTO_RESUME_ERRORS = frozenset({"unproven_missing_clip", "trades_reconcile_failed"})
 # Restore: wait for book + account before requoting after process start.
 RESTORE_FEED_TIMEOUT_S = 30.0
-# Rearm trade credit: paginate REST trades (fail closed if cap hit).
+# Rearm trade credit: one recent page. Live fills come from account_all_trades WS.
 REST_TRADES_PAGE_LIMIT = 100
-REST_TRADES_MAX_PAGES = 20
+REST_TRADES_MAX_PAGES = 1
+# Vanished-clip REST (summary + trades) — never denser than this, even if unacked.
+REST_FALLBACK_COOLDOWN_MS = 15_000

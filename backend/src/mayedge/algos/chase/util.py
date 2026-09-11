@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END
+from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.numbers import fmt_decimal
 
 
@@ -48,13 +49,7 @@ def _chase_order_keys(orders: Any, cois: set[int] | None = None) -> list[tuple[i
 
 
 def _is_rate_limit(err: BaseException) -> bool:
-    text = str(err)
-    return (
-        "429" in text
-        or "23000" in text
-        or "too many requests" in text.lower()
-        or "ratelimit" in text.lower()
-    )
+    return isinstance(err, VenueBlocked) or venue_client_error(err) is not None
 
 
 def _is_order_not_found(err: BaseException) -> bool:

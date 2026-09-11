@@ -47,6 +47,8 @@ export interface AlgoPlugin<TState = unknown> {
   resetState: (prev: unknown) => TState;
   blockReason: (state: unknown, ctx: AlgoBlockContext) => string | null;
   cta: (side: "buy" | "sell") => string;
+  /** Two-sided algos: one CTA instead of buy/sell. */
+  singleAction?: boolean;
   submit: (
     state: unknown,
     ctx: AlgoSubmitContext

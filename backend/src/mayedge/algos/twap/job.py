@@ -10,7 +10,7 @@ from typing import Any
 
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import _dec, _fmt, _is_order_not_found
+from mayedge.algos.chase.util import _dec, _fmt, _is_order_not_found, _is_rate_limit
 from mayedge.algos.ledger import Ledger
 from mayedge.algos.twap.plan import (
     ALGO_ID,
@@ -219,7 +219,10 @@ class AdvancedTwapRunner:
             if trades:
                 self._pending_trades.extend(trades)
                 self._drain_trades()
-        except Exception:
+        except Exception as e:
+            if _is_rate_limit(e):
+                logger.warning("twap REST trades blocked by venue for %s", self.algo_id)
+                return
             logger.exception("twap REST trades failed for %s", self.algo_id)
 
     async def _cancel_live(self, *, assume_fill: bool = False) -> None:

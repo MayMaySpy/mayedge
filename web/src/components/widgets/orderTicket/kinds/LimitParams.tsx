@@ -2,6 +2,7 @@ import { FieldGroup } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatPrice } from "@/lib/utils";
+import { decimalInput } from "@/lib/numbers";
 import { TIF_CHIPS } from "../math";
 import { TicketField } from "../ui";
 
@@ -40,6 +41,7 @@ export function LimitParams({
         value={price}
         inputMode="decimal"
         placeholder="0.00"
+        sanitize={decimalInput}
         onChange={onPriceChange}
         chips={{
           sticky: false,

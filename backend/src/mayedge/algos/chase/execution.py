@@ -27,3 +27,7 @@ class ChaseExecution:
     release_book: Callable[[int], None] | None = None
     account_ws_live: Callable[[], bool] | None = None
     get_account_trades: Callable[..., Any] | None = None
+    order_book_payload: Callable[..., Any] | None = None
+    trades_payload: Callable[..., Any] | None = None
+    recent_liquidations: Callable[[], list] | None = None
+    feed_health: Callable[[], dict[str, Any]] | None = None

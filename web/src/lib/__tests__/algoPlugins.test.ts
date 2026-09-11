@@ -3,7 +3,9 @@ import {
   algoOrderKind,
   algoPluginByDeskType,
   CHASE_COI_BASE,
+  chaseGridPlugin,
   chaseIcebergPlugin,
+  GRID_COI_BASE,
   isAlgoClientOrder,
   LADDER_COI_BASE,
   ladderPlugin,
@@ -16,18 +18,70 @@ describe("algo plugin COI bands", () => {
     expect(isAlgoClientOrder(CHASE_COI_BASE)).toBe(true);
     expect(isAlgoClientOrder(TWAP_COI_BASE)).toBe(true);
     expect(isAlgoClientOrder(LADDER_COI_BASE)).toBe(true);
+    expect(isAlgoClientOrder(GRID_COI_BASE)).toBe(true);
     expect(isAlgoClientOrder(1_000_000_000)).toBe(false);
   });
 
   it("maps COI to plugin labels", () => {
     expect(algoOrderKind(CHASE_COI_BASE + 1)).toBe("Chase");
     expect(algoOrderKind(TWAP_COI_BASE + 1)).toBe("TWAP");
+    expect(algoOrderKind(LADDER_COI_BASE + 1)).toBe("Ladder");
+    expect(algoOrderKind(GRID_COI_BASE + 1)).toBe("Grid");
+    expect(algoOrderKind(GRID_COI_BASE + 1, { reduceOnly: true })).toBe("Grid TP");
   });
 
   it("resolves desk types to plugins", () => {
     expect(algoPluginByDeskType("advanced-twap")?.id).toBe("twap");
     expect(algoPluginByDeskType("chase-iceberg")?.id).toBe("chase-iceberg");
     expect(algoPluginByDeskType("ladder")?.id).toBe("ladder");
+    expect(algoPluginByDeskType("chase-grid")?.id).toBe("chase-grid");
+  });
+});
+
+describe("grid plugin blockReason", () => {
+  const ctx = { sizeNum: 10, decimals: 2, minSz: 1, symbol: "ETH" };
+
+  it("blocks without profit", () => {
+    expect(
+      chaseGridPlugin.blockReason(
+        {
+          ...chaseGridPlugin.defaultState,
+          chaseFloor: "90",
+          chaseCeiling: "110",
+          displayQty: "2",
+          profitBps: "",
+        },
+        ctx
+      )
+    ).toBe("Enter profit (bp)");
+  });
+
+  it("allows a small clip vs cap", () => {
+    expect(
+      chaseGridPlugin.blockReason(
+        {
+          ...chaseGridPlugin.defaultState,
+          chaseFloor: "90",
+          chaseCeiling: "110",
+          displayQty: "1",
+        },
+        ctx
+      )
+    ).toBeNull();
+  });
+
+  it("allows valid grid params", () => {
+    expect(
+      chaseGridPlugin.blockReason(
+        {
+          ...chaseGridPlugin.defaultState,
+          chaseFloor: "90",
+          chaseCeiling: "110",
+          displayQty: "2",
+        },
+        ctx
+      )
+    ).toBeNull();
   });
 });
 

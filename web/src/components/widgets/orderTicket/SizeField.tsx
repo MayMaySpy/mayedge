@@ -1,5 +1,6 @@
 import { SIZE_PCTS, trimQty } from "./math";
 import { TicketField } from "./ui";
+import { decimalInput } from "@/lib/numbers";
 
 interface SizeFieldProps {
   symbol: string;
@@ -8,6 +9,7 @@ interface SizeFieldProps {
   maxSize: number;
   maxTitle: string;
   decimals: number;
+  label?: string;
   onSizeChange: (raw: string) => void;
   onSizePct: (pct: number) => void;
   minHint?: string | null;
@@ -25,6 +27,7 @@ export function SizeField({
   onSizePct,
   minHint,
   minHintWarn,
+  label = "Size",
 }: SizeFieldProps) {
   const activePct =
     SIZE_PCTS.find(
@@ -34,13 +37,14 @@ export function SizeField({
   return (
     <TicketField
       id="ticket-size"
-      label="Size"
+      label={label}
       value={size}
       inputMode="decimal"
       placeholder="0.00"
       addon={symbol}
       hint={minHint}
       hintWarn={minHintWarn}
+      sanitize={decimalInput}
       onChange={onSizeChange}
       chips={{
         value: activePct != null ? String(activePct) : "",

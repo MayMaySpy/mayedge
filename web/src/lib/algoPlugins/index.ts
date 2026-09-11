@@ -1,9 +1,12 @@
+import { chaseGridPlugin } from "./chaseGridPlugin";
 import { chaseIcebergPlugin } from "./chaseIcebergPlugin";
 import { ladderPlugin } from "./ladderPlugin";
 import { twapPlugin } from "./twapPlugin";
 import { coiInBand, type AlgoCoiBand, type AlgoPlugin } from "./types";
 
-export const ALGO_PLUGINS = [twapPlugin, chaseIcebergPlugin, ladderPlugin] as const;
+export const ALGO_PLUGINS = [twapPlugin, chaseIcebergPlugin, chaseGridPlugin, ladderPlugin] as const;
+
+const COI_PLUGINS = [...ALGO_PLUGINS];
 
 export type AlgoId = (typeof ALGO_PLUGINS)[number]["id"];
 
@@ -14,6 +17,7 @@ export {
   CHASE_COI_END,
   chaseIcebergPlugin,
 } from "./chaseIcebergPlugin";
+export { GRID_COI_BASE, GRID_COI_END, chaseGridPlugin } from "./chaseGridPlugin";
 export { LADDER_COI_BASE, LADDER_COI_END, ladderPlugin } from "./ladderPlugin";
 export { TWAP_COI_BASE, TWAP_COI_END, twapPlugin } from "./twapPlugin";
 
@@ -22,28 +26,34 @@ export function algoPluginById(id: string): AlgoPlugin | undefined {
 }
 
 export function algoPluginByDeskType(deskType: string): AlgoPlugin | undefined {
-  return ALGO_PLUGINS.find((p) => p.deskType === deskType || p.id === deskType) as
+  return COI_PLUGINS.find((p) => p.deskType === deskType || p.id === deskType) as
     | AlgoPlugin
     | undefined;
 }
 
 export function algoPluginByCoi(coi: string | number | null | undefined) {
-  for (const plugin of ALGO_PLUGINS) {
+  for (const plugin of COI_PLUGINS) {
     if (plugin.coi && coiInBand(coi, plugin.coi)) return plugin;
   }
   return undefined;
 }
 
 export function algoCoiBands(): AlgoCoiBand[] {
-  return ALGO_PLUGINS.flatMap((p) => (p.coi ? [p.coi] : []));
+  return COI_PLUGINS.flatMap((p) => (p.coi ? [p.coi] : []));
 }
 
 export function isAlgoClientOrder(coi: string | number | null | undefined): boolean {
   return algoPluginByCoi(coi) != null;
 }
 
-export function algoOrderKind(coi: string | number | null | undefined): string | null {
-  return algoPluginByCoi(coi)?.label ?? null;
+export function algoOrderKind(
+  coi: string | number | null | undefined,
+  opts?: { reduceOnly?: boolean }
+): string | null {
+  const plugin = algoPluginByCoi(coi);
+  if (!plugin) return null;
+  if (plugin.id === "chase-grid" && opts?.reduceOnly) return "Grid TP";
+  return plugin.label;
 }
 
 /** Catalog row for pickers — derived from plugins. */

@@ -112,6 +112,9 @@ export interface Account {
   trade_available?: string;
   portfolio_margin?: string;
   unrealized_pnl: string;
+  user_tier?: string | null;
+  maker_fee_bps?: string;
+  taker_fee_bps?: string;
   positions: Position[];
   open_orders: OpenOrder[];
 }
@@ -163,6 +166,7 @@ export interface AlgoClip {
   filled: string;
   remaining: string;
   status: "live" | "filled" | "cancelled";
+  kind?: string | null;
   placed_at: number;
   closed_at: number | null;
 }
@@ -207,6 +211,23 @@ export interface AlgoState {
   clips?: AlgoClip[];
   fills?: AlgoFill[];
   working?: AlgoClip | null;
+  working_bid?: AlgoClip | null;
+  working_ask?: AlgoClip | null;
+  inventory?: string | null;
+  inventory_vwap?: string | null;
+  profit_bps?: string | null;
+  grid_bps?: string | null;
+  be_delay_ms?: number | null;
+  merged_active?: boolean;
+  lots?: {
+    lot_id: string;
+    cell_price: string;
+    qty: string;
+    vwap: string;
+    side: string;
+    tp_price: string;
+    merged?: boolean;
+  }[];
 }
 
 export interface AlgoBook {

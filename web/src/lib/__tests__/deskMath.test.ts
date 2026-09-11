@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
+import { canonicalDecimal, decimalInput, parseDecimal } from "@/lib/numbers";
 import { chaseQuote, clipQty, roundPassive } from "@/lib/chaseIceberg";
 import { maxOrderSize, minSizeHint, ticketBlockReason } from "@/components/widgets/orderTicket/math";
 
@@ -20,6 +20,17 @@ describe("parseDecimal", () => {
 describe("canonicalDecimal", () => {
   it("normalizes trailing comma", () => {
     expect(canonicalDecimal("12,5")).toBe("12.5");
+  });
+});
+
+describe("decimalInput", () => {
+  it("keeps comma and dot", () => {
+    expect(decimalInput("1.234,56")).toBe("1.234,56");
+    expect(decimalInput("12,5")).toBe("12,5");
+  });
+
+  it("strips letters", () => {
+    expect(decimalInput("12,5abc")).toBe("12,5");
   });
 });
 

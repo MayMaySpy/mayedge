@@ -20,6 +20,7 @@ import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
 import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
+import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
 import { setAlgo as setLiveAlgo, useLiveAccount, useLiveBbo } from "@/lib/liveData";
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
@@ -102,6 +103,7 @@ export function OrderTicket({
 
   const loading = busy != null;
   const plugin = algoPluginById(algo);
+  const singleAction = kind === "algo" && !!plugin?.singleAction;
   const pluginState = pluginStates[algo];
 
   if (market && market.symbol !== syncedSymbol) {
@@ -189,10 +191,10 @@ export function OrderTicket({
   const slipFrac = Math.max(0, (parseFloat(slippagePct) || 0) / 100);
   const worstBuy = spot != null ? spot * (1 + slipFrac) : null;
   const worstSell = spot != null ? spot * (1 - slipFrac) : null;
-  const sizeNum = parseFloat(size) || 0;
+  const sizeNum = parseDecimal(size) ?? 0;
   const decimals = market.size_decimals ?? 4;
   const priceDecimals = market.price_decimals ?? 4;
-  const priceNum = parseFloat(price) || 0;
+  const priceNum = parseDecimal(price) ?? 0;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
   const pxForSide = (s: "buy" | "sell") => {
     if (kind === "limit" && priceNum > 0) return priceNum;
@@ -262,6 +264,9 @@ export function OrderTicket({
   const sharedBlocked = ticketBlockReason(blockOpts);
   const buyBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxBuy });
   const sellBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxSell });
+  const actionBlocked = singleAction
+    ? ticketBlockReason({ ...blockOpts, maxSize })
+    : null;
 
   const orderCtaLabel = (side: "buy" | "sell") => {
     if (kind === "algo" && plugin) return plugin.cta(side);
@@ -269,10 +274,15 @@ export function OrderTicket({
   };
 
   const send = async (orderSide: "buy" | "sell") => {
-    const blocked = orderSide === "buy" ? buyBlocked : sellBlocked;
+    const blocked = singleAction
+      ? actionBlocked
+      : orderSide === "buy"
+        ? buyBlocked
+        : sellBlocked;
     if (blocked || loading) return;
-    const qSize = trimQty(sizeNum, decimals) || size;
-    const qPrice = priceNum > 0 ? trimQty(priceNum, priceDecimals) || price : price;
+    const qSize = trimQty(sizeNum, decimals) || (canonicalDecimal(size) ?? size);
+    const qPrice =
+      priceNum > 0 ? trimQty(priceNum, priceDecimals) || canonicalDecimal(price) || price : price;
     if (kind === "market") {
       await submit(
         () =>
@@ -395,11 +405,14 @@ export function OrderTicket({
                 sizeNum={sizeNum}
                 maxSize={maxSize}
                 maxTitle={
-                  reduceOnly
+                  singleAction
+                    ? "Max inventory cap at this leverage"
+                    : reduceOnly
                     ? "Position size"
                     : "Available at this leverage. Opposite side includes close + flip."
                 }
                 decimals={decimals}
+                label={singleAction ? "Cap" : "Size"}
                 minHint={sizeMin?.text}
                 minHintWarn={sizeMin?.warn}
                 onSizeChange={setSize}
@@ -439,6 +452,7 @@ export function OrderTicket({
           </ScrollArea>
 
           <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2">
+              {!singleAction ? (
               <Field orientation="horizontal" className="w-auto items-center gap-1.5">
                 <Switch
                   id="close-only"
@@ -458,6 +472,9 @@ export function OrderTicket({
                   <TooltipContent>Reduces position only — will not open or flip</TooltipContent>
                 </Tooltip>
               </Field>
+              ) : (
+                <span className="text-[10px] text-muted">Inventory cap per side</span>
+              )}
 
               <Button
                 type="button"
@@ -480,6 +497,18 @@ export function OrderTicket({
           {sharedBlocked ? (
             <p className="mb-1 text-center text-xs text-muted">{sharedBlocked}</p>
           ) : null}
+          {singleAction ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 w-full truncate px-1.5 text-sm font-semibold text-text"
+              disabled={loading || !!sharedBlocked || !!actionBlocked}
+              title={sharedBlocked ?? actionBlocked ?? undefined}
+              onClick={() => void send("buy")}
+            >
+              {busy ? "Sending…" : sharedBlocked || actionBlocked || orderCtaLabel("buy")}
+            </Button>
+          ) : (
           <div className="grid grid-cols-2 gap-1">
             <Button
               type="button"
@@ -510,6 +539,7 @@ export function OrderTicket({
                   : orderCtaLabel("sell")}
             </Button>
           </div>
+          )}
         </div>
       </form>
 

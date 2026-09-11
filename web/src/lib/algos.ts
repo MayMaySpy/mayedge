@@ -78,6 +78,11 @@ const PAUSE_COPY: Record<string, string> = {
   past_index: "Past index",
   no_mark: "Waiting for mark",
   deadline: "Duration ended",
+  inside_profit_margin: "Inside profit margin",
+  reentry_cooldown: "Reentry cooldown",
+  inventory_cap: "At inventory cap",
+  tp_covers: "Profit orders covering",
+  waiting: "Waiting",
 };
 
 export function algoReasonLabel(reason: string | null | undefined): string {
@@ -139,8 +144,9 @@ export function algoFillProgress(algo: {
   qty?: string | null;
   filled?: string | null;
   remaining?: string | null;
+  algo_type?: string | null;
   fills?: { qty: string }[] | null;
-  clips?: { filled?: string | null; qty?: string | null }[] | null;
+  clips?: { filled?: string | null; qty?: string | null; kind?: string | null }[] | null;
 }): { filled: number; remaining: number; total: number; pct: number } {
   const qty = parseFloat(algo.qty ?? "");
   const filledField = parseFloat(algo.filled ?? "");
@@ -148,8 +154,10 @@ export function algoFillProgress(algo: {
   const total = Number.isFinite(qty) && qty > 0 ? qty : 0;
   const hasFilled = Number.isFinite(filledField) && filledField >= 0;
   const hasRemaining = Number.isFinite(remainingField) && remainingField >= 0;
+  const inventoryCapped = algo.algo_type === "chase-grid";
 
   const fromClips = (algo.clips ?? []).reduce((s, c) => {
+    if (c.kind === "tp") return s;
     const f = parseFloat(c.filled ?? "");
     const q = parseFloat(c.qty ?? "");
     if (!Number.isFinite(f) || f <= 0) return s;
@@ -174,7 +182,7 @@ export function algoFillProgress(algo: {
   }
 
   const proven = fromClips;
-  if (total > 0 && proven > filled) {
+  if (!inventoryCapped && total > 0 && proven > filled) {
     filled = Math.min(total, proven);
     remaining = Math.max(0, total - filled);
   }

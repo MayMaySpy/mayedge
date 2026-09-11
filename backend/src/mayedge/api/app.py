@@ -26,6 +26,7 @@ from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.config import settings
 from mayedge.kill import KillResult, kill
 from mayedge.lighter.account import account_service
+from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
 
@@ -89,8 +90,16 @@ def create_app() -> FastAPI:
         _require_trading()
         try:
             result = await fn()
+        except VenueBlocked as e:
+            raise HTTPException(e.status, str(e)) from e
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            mapped = venue_client_error(e)
+            if mapped:
+                raise HTTPException(mapped[0], mapped[1]) from e
+            logger.exception("trade failed")
+            raise HTTPException(502, "Venue error — try again") from e
         order_service.kick_refresh()
         return result
 

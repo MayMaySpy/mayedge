@@ -1,5 +1,9 @@
 /** Trader-typed decimal. Last `,` or `.` is the decimal; the other is grouping. */
 
+export function decimalInput(raw: string): string {
+  return raw.replace(/[^\d.,]/g, "");
+}
+
 export function canonicalDecimal(raw: string): string | null {
   let s = raw.trim().replace(/[\s\u00a0\u202f]/g, "");
   if (!s) return null;

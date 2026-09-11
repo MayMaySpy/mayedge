@@ -8,6 +8,7 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import (
+    REST_FALLBACK_COOLDOWN_MS,
     REST_TRADES_MAX_PAGES,
     REST_TRADES_PAGE_LIMIT,
     STALE_ACK_MS,
@@ -16,7 +17,7 @@ from mayedge.algos.chase.config import (
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import Action, leftover_is_dust
 from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.chase.util import _dec
+from mayedge.algos.chase.util import _dec, _is_rate_limit
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.lighter.models import maker_min_base
 
@@ -107,6 +108,23 @@ class ChaseFillMixin(Generic[BookT, StateT]):
 
     def _clip_is_dust(self, clip: Clip) -> bool:
         return leftover_is_dust(clip.remaining, self._clip_min_qty())
+
+    def _ws_orders_ok(self) -> bool:
+        if not self._exec().orders_hydrated():
+            return False
+        fn = self._exec().account_ws_live
+        if fn is None:
+            return False
+        return bool(fn())
+
+    def _cached_open_rows(self) -> list[dict[str, Any]]:
+        payload = self._exec().cached_account_payload() or {}
+        out: list[dict[str, Any]] = []
+        for raw in payload.get("open_orders") or []:
+            row = self._order_row(raw)
+            if row is not None:
+                out.append(row)
+        return out
 
     def _reconcile_master(self) -> None:
         """Master filled/remaining follow per-clip filled (capped).
@@ -209,17 +227,29 @@ class ChaseFillMixin(Generic[BookT, StateT]):
                 return row
         return None
 
-    async def _refresh_open_orders(self) -> list[dict[str, Any]]:
-        """One REST pull when WS cache may lag a vanish. Returns normalized rows."""
+    async def _refresh_open_orders(self, *, rest: bool | None = None) -> list[dict[str, Any]] | None:
+        """Open orders. WS cache when the account feed is live; REST only as fallback."""
         ex = self._exec()
         if not ex.enabled:
             return []
-        ex.kick_refresh()
+        now = util.now_ms()
+        if getattr(self, "_backoff_until", 0) > now:
+            return None
+        use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
+        if not use_rest:
+            return self._cached_open_rows()
         try:
             summary = await ex.get_account_summary()
-        except Exception:
+        except Exception as e:
+            if _is_rate_limit(e):
+                on_limit = getattr(self, "_on_rate_limit", None)
+                if callable(on_limit):
+                    on_limit(e)
+                else:
+                    logger.warning("chase REST open-order refresh blocked by venue")
+                return None
             logger.exception("chase REST open-order refresh failed")
-            return []
+            return None
         out: list[dict[str, Any]] = []
         for raw in getattr(summary, "open_orders", None) or []:
             row = self._order_row(raw)
@@ -240,8 +270,18 @@ class ChaseFillMixin(Generic[BookT, StateT]):
         self._state.rest_qty = None
         self._publish()
 
-    async def _credit_rest_trades(self) -> bool:
-        """Credit REST trades for this market before re-arming venue children."""
+    async def _credit_rest_trades(self, *, rest: bool | None = None) -> bool:
+        """Credit REST trades for this market before re-arming venue children.
+
+        Live fills arrive on ``account_all_trades``. REST is for rearm / WS-down
+        backup — one recent page, not a history crawl.
+        """
+        now = util.now_ms()
+        if getattr(self, "_backoff_until", 0) > now:
+            return False
+        use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
+        if not use_rest:
+            return True
         ex = self._exec()
         get_trades = ex.get_account_trades
         if get_trades is None:
@@ -270,19 +310,55 @@ class ChaseFillMixin(Generic[BookT, StateT]):
                 if not next_cursor:
                     return True
                 cursor = str(next_cursor)
-            logger.warning(
-                "chase REST trades reconcile hit page cap %s for market=%s",
+            # One recent page is enough to credit a just-vanished clip. Treating
+            # a leftover cursor as failure re-polls REST every tick on busy markets.
+            logger.info(
+                "chase REST trades stopped at page cap %s for market=%s",
                 REST_TRADES_MAX_PAGES,
                 self._state.market_index,
             )
-            return False
-        except Exception:
+            return True
+        except Exception as e:
+            if _is_rate_limit(e):
+                on_limit = getattr(self, "_on_rate_limit", None)
+                if callable(on_limit):
+                    on_limit(e)
+                else:
+                    logger.warning("chase REST trades blocked by venue")
+                return False
             logger.exception("chase REST trades reconcile failed")
             return False
 
     async def _resolve_vanished_clip(self, clip: Clip, *, now: int) -> None:
         """Clip absent from WS cache — REST truth, then credit or auto-rest."""
-        rest_rows = await self._refresh_open_orders()
+        if getattr(self, "_backoff_until", 0) > now:
+            self._state.quote_action = Action.PAUSE.value
+            self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
+            self._reconcile_master()
+            self._publish()
+            return
+        rest_needed = (not clip.seen_on_book) or (not self._ws_orders_ok())
+        if rest_needed:
+            last = int(getattr(self, "_last_vanish_rest_ms", 0) or 0)
+            if last and now - last < REST_FALLBACK_COOLDOWN_MS:
+                rest_needed = False
+            else:
+                self._last_vanish_rest_ms = now
+        rest_rows = await self._refresh_open_orders(rest=rest_needed)
+        if rest_rows is None:
+            if getattr(self, "_backoff_until", 0) > now:
+                self._state.quote_action = Action.PAUSE.value
+                self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
+                self._reconcile_master()
+                self._publish()
+                return
+            self._state.quote_action = Action.PAUSE.value
+            self._state.reason = "trades_reconcile_failed"
+            self._state.rest_price = None
+            self._state.rest_qty = None
+            self._reconcile_master()
+            self._publish()
+            return
         found = self._find_in_rows(rest_rows, clip.client_order_index)
         if found is not None:
             rem = _dec(found.get("remaining") or "0")
@@ -301,7 +377,7 @@ class ChaseFillMixin(Generic[BookT, StateT]):
             self._close_missing_clip(clip, now=now, assume_fill=True)
             self._reconcile_master()
             return
-        credited = await self._credit_rest_trades()
+        credited = await self._credit_rest_trades(rest=rest_needed)
         if self._may_invent_fill(clip, now):
             self._close_missing_clip(clip, now=now, assume_fill=True)
             self._reconcile_master()
@@ -314,6 +390,12 @@ class ChaseFillMixin(Generic[BookT, StateT]):
             self._unproven_retry_at = 0
             return
         if not credited:
+            if getattr(self, "_backoff_until", 0) > now:
+                self._state.quote_action = Action.PAUSE.value
+                self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
+                self._reconcile_master()
+                self._publish()
+                return
             self._state.quote_action = Action.PAUSE.value
             self._state.reason = "trades_reconcile_failed"
             self._state.rest_price = None
@@ -343,6 +425,9 @@ class ChaseFillMixin(Generic[BookT, StateT]):
                 if now - clip.placed_at < STALE_ACK_MS:
                     self._reconcile_master()
                     return
+                if getattr(self, "_backoff_until", 0) > now:
+                    self._reconcile_master()
+                    return
                 await self._resolve_vanished_clip(clip, now=now)
                 return
             if self._may_invent_fill(clip, now):
@@ -354,6 +439,9 @@ class ChaseFillMixin(Generic[BookT, StateT]):
                 self._reconcile_master()
                 return
             if now - clip.missing_since < self._book.missing_fill_grace_ms:
+                self._reconcile_master()
+                return
+            if getattr(self, "_backoff_until", 0) > now:
                 self._reconcile_master()
                 return
             if clip.seq not in self._missing_refreshed:

@@ -219,6 +219,9 @@ class AccountSummary:
     portfolio_margin: str = "0"
     positions: list[Position] = field(default_factory=list)
     open_orders: list[OpenOrder] = field(default_factory=list)
+    user_tier: str = ""
+    maker_fee_bps: str = "0"
+    taker_fee_bps: str = "0"
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +230,9 @@ class AccountSummary:
             "trade_available": self.trade_available,
             "portfolio_margin": self.portfolio_margin,
             "unrealized_pnl": self.unrealized_pnl,
+            "user_tier": self.user_tier or None,
+            "maker_fee_bps": self.maker_fee_bps,
+            "taker_fee_bps": self.taker_fee_bps,
             "positions": [
                 {
                     "market_index": p.market_index,

@@ -92,8 +92,9 @@ We do **not** use `sendTxBatch` today — each child is one transaction.
 | Advanced TWAP | `[7e9, 8e9)` |
 | Chase | `[8e9, 9e9)` |
 | Ladder | `[9e9, 10e9)` |
+| Chase-grid | `[10e9, 11e9)` |
 
-Manual and TWAP ranges overlap — known debt; ladder/chase do not overlap each other.
+Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap each other.
 
 ## Implications for ladder (keep-N)
 

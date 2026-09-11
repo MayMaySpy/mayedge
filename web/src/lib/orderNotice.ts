@@ -1,7 +1,7 @@
 export type NoticeTone = "bid" | "ask" | "ok" | "warn" | "err";
 
 export type OrderNoticeInput = {
-  kind: "market" | "limit" | "twap" | "chase" | "ladder" | "leverage" | "fill" | "desk";
+  kind: "market" | "limit" | "twap" | "chase" | "grid" | "ladder" | "leverage" | "fill" | "desk";
   side?: "buy" | "sell";
   size?: string;
   symbol?: string;
@@ -34,7 +34,9 @@ export function orderNotice(input: OrderNoticeInput): {
         ? "Chase failed"
         : input.kind === "ladder"
           ? "Ladder failed"
-          : input.title || "Order failed";
+          : input.kind === "grid"
+            ? "Grid failed"
+            : input.title || "Order failed";
     return { title, description: input.note ?? "", tone: "err" };
   }
   const tone: NoticeTone = input.side === "sell" ? "ask" : input.side === "buy" ? "bid" : "ok";
@@ -66,6 +68,20 @@ export function orderNotice(input: OrderNoticeInput): {
       };
     }
     return { title: "Ladder started", description: leg(input), tone };
+  }
+  if (input.kind === "grid") {
+    if (input.status === "paused") {
+      return {
+        title: "Grid waiting",
+        description: [leg(input), input.note].filter(Boolean).join(" · "),
+        tone: "warn",
+      };
+    }
+    return {
+      title: "Grid started",
+      description: [input.size, input.symbol, input.price].filter(Boolean).join(" "),
+      tone: "ok",
+    };
   }
   if (input.kind === "twap") {
     if (input.status === "active") {

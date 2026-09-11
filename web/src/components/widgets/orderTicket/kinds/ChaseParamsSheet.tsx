@@ -1,5 +1,5 @@
 import { FieldGroup } from "@/components/ui/field";
-import { parseDecimal } from "@/lib/numbers";
+import { parseDecimal, decimalInput } from "@/lib/numbers";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import { CHASE_BAND_PCTS, chaseBandFromPct } from "../math";
 import { TicketChips, TicketField } from "../ui";
@@ -32,6 +32,7 @@ export function ChaseParamsSheet({
           value={state.displayQty}
           inputMode="decimal"
           placeholder="0.00"
+          sanitize={decimalInput}
           onChange={(v) => set({ displayQty: v })}
         />
         <TicketField
@@ -58,6 +59,7 @@ export function ChaseParamsSheet({
           value={state.chaseFloor}
           inputMode="decimal"
           placeholder="0.00"
+          sanitize={decimalInput}
           onChange={(v) => set({ chaseFloor: v })}
         />
         <TicketField
@@ -66,6 +68,7 @@ export function ChaseParamsSheet({
           value={state.chaseCeiling}
           inputMode="decimal"
           placeholder="0.00"
+          sanitize={decimalInput}
           onChange={(v) => set({ chaseCeiling: v })}
         />
       </FieldGroup>

@@ -99,6 +99,14 @@ class LadderBook:
     def has(self, algo_id: str) -> bool:
         return algo_id in self._jobs
 
+    def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool:
+        for job in self._jobs.values():
+            if exclude and job.state.algo_id == exclude:
+                continue
+            if job.state.market_index == market_index and job.state.status in ACTIVE_STATUSES:
+                return True
+        return False
+
     def live_on_market_side(
         self, market_index: int, side: str, *, exclude: str | None = None
     ) -> bool:

@@ -79,8 +79,13 @@ export function AlgoRow({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const buy = algo.side === "buy";
+  const isGrid = algo.algo_type === "chase-grid";
+  const twoSided = isGrid;
   const { filled, remaining, total, pct } = algoFillProgress(algo);
-  const avgFill = algoAvgFillPrice(algo.fills);
+  const vwap = parseFloat(algo.inventory_vwap ?? "");
+  const avgFill = twoSided
+    ? (Number.isFinite(vwap) && vwap > 0 ? vwap : null)
+    : algoAvgFillPrice(algo.fills);
   const working = algoIsWorking(algo.status);
   const canResume = algoCanResume(algo.status);
   const phase = algoPhase(algo);
@@ -91,6 +96,15 @@ export function AlgoRow({
     (algo.working as AlgoClip | null | undefined) ??
     algo.clips?.find((c) => c.status === "live") ??
     null;
+  const liveBid = twoSided
+    ? (algo.working_bid ?? null)
+    : (algo.working_bid ?? algo.clips?.find((c) => c.side === "buy" && c.status === "live"));
+  const liveAsk = twoSided
+    ? (algo.working_ask ?? null)
+    : (algo.working_ask ?? algo.clips?.find((c) => c.side === "sell" && c.status === "live"));
+  const liveTps = isGrid
+    ? (algo.clips ?? []).filter((c) => c.status === "live" && c.kind === "tp")
+    : [];
   const kind = algoLabelForType(algo.algo_type ?? algo.id);
 
   const badgeVariant =
@@ -201,12 +215,28 @@ export function AlgoRow({
         <span>
           Clip <span className="text-text">{formatSize(algo.display_qty)}</span>
         </span>
+        {twoSided && (
+          <span>
+            Inv{" "}
+            <span className="text-text">
+              {algo.inventory != null && algo.inventory !== "" ? formatSize(algo.inventory) : "0"}
+            </span>
+          </span>
+        )}
         <span>
           Off{" "}
           <span className="text-text">
             {algo.offset_bps != null && algo.offset_bps !== "" ? `${algo.offset_bps} bps` : "—"}
           </span>
         </span>
+        {isGrid && (
+          <span>
+            Profit{" "}
+            <span className="text-text">
+              {algo.profit_bps != null && algo.profit_bps !== "" ? `${algo.profit_bps} bps` : "—"}
+            </span>
+          </span>
+        )}
         <span>
           Floor <span className="text-text">{formatPrice(algo.price_floor)}</span>
         </span>
@@ -238,7 +268,44 @@ export function AlgoRow({
       {expanded && (
         <div className="mt-2 flex flex-col gap-1 pt-1">
           <Separator />
-          {live && (
+          {isGrid && (algo.lots?.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-0.5 font-mono text-[10px] text-muted">
+              {(algo.lots ?? []).map((lot) => (
+                <div key={lot.lot_id} className="flex gap-2">
+                  <span className="text-text">tp</span>
+                  <span>
+                    {formatSize(lot.qty)} @ {formatPrice(lot.tp_price)}
+                    {lot.merged ? " · merged" : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {twoSided && liveBid && (
+            <div className="flex items-baseline gap-2 font-mono text-[10px]">
+              <span className="text-bid">bid</span>
+              <span className="text-muted">
+                {formatSize(liveBid.remaining)} @ {formatPrice(liveBid.price)}
+              </span>
+            </div>
+          )}
+          {twoSided && liveAsk && (
+            <div className="flex items-baseline gap-2 font-mono text-[10px]">
+              <span className="text-ask">ask</span>
+              <span className="text-muted">
+                {formatSize(liveAsk.remaining)} @ {formatPrice(liveAsk.price)}
+              </span>
+            </div>
+          )}
+          {liveTps.map((clip) => (
+            <div key={clip.seq} className="flex items-baseline gap-2 font-mono text-[10px]">
+              <span className={clip.side === "buy" ? "text-bid" : "text-ask"}>profit</span>
+              <span className="text-muted">
+                {formatSize(clip.remaining)} @ {formatPrice(clip.price)}
+              </span>
+            </div>
+          ))}
+          {!twoSided && live && (
             <div className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className={buy ? "text-bid" : "text-ask"}>live</span>
               <span className="text-text">{venueRef(live)}</span>
@@ -248,7 +315,7 @@ export function AlgoRow({
               <span className="ml-auto text-muted">{clock(live.placed_at)}</span>
             </div>
           )}
-          {fills.length === 0 && !live && (
+          {fills.length === 0 && !live && !liveBid && !liveAsk && liveTps.length === 0 && (
             <div className="font-mono text-[10px] text-muted">No clips yet</div>
           )}
           {fills.map((f) => (

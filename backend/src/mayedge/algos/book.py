@@ -32,6 +32,8 @@ class AlgoBook(Protocol):
 
     async def flush(self) -> None: ...
 
+    def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool: ...
+
 
 def find_book(books: tuple[AlgoBook, ...], algo_type: str) -> AlgoBook | None:
     for book in books:

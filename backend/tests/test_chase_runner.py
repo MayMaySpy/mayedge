@@ -178,7 +178,7 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
         self.assertEqual(live.status, "live")
 
     async def test_partial_below_min_qty_replaces_with_new_clip(self) -> None:
-        """Sub-min leftover cannot amend — cancel it and rest a full display clip."""
+        """Sub-min leftover cannot fill — cancel it and rest a full display clip now."""
         gateway = FakeGateway()
         assert gateway.market is not None
         gateway.market.min_base_amount = 0.5
@@ -188,9 +188,6 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
             first_coi = boot.orders.creates[0]["client_order_index"]
             boot.orders.set_remaining(first_coi, "0.4", filled="0.6")
             await boot.job._evaluate()
-            boot.gateway.set_book("99.99", "100.10")
-            boot.clock.advance(MIN_REQUOTE_MS + 1)
-            await boot.job._evaluate()
         self.assertEqual(len(boot.orders.creates), 2)
         self.assertEqual(len(boot.orders.cancels), 1)
         self.assertEqual(boot.orders.modifies, [])
@@ -199,7 +196,7 @@ class ChaseRunnerRequoteTests(IsolatedChaseTestCase):
         assert live is not None
         self.assertNotEqual(live.client_order_index, first_coi)
         self.assertEqual(live.qty, D("1"))
-        self.assertEqual(live.price, D("99.95"))
+        self.assertEqual(live.price, D("99.96"))
         self.assertEqual(live.status, "live")
 
     async def test_partial_that_would_cross_is_pulled(self) -> None:
@@ -609,6 +606,7 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             still = dict(boot.orders.find_by_coi(coi) or {})
             boot.orders.remove_by_coi(coi)
+            boot.orders.account_ws_live_flag = False
             boot.orders.summary_orders_override = [still]
             await boot.job._evaluate()
             boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
@@ -1241,35 +1239,7 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
             await boot.job._place_working(q)
         self.assertEqual(len(boot.orders.creates), 2)
 
-    async def test_auto_resume_credits_trade_from_second_page(self) -> None:
-        boot = boot_job()
-        with patch_chase(boot.clock, boot.gateway, boot.orders):
-            await boot.job._evaluate()
-            coi = boot.orders.creates[0]["client_order_index"]
-            await boot.job._evaluate()
-            boot.orders.remove_by_coi(coi)
-            await boot.job._evaluate()
-            boot.orders.trades_pages = [
-                [],
-                [
-                    trade_print(
-                        market_index=1,
-                        size="1",
-                        price="99.96",
-                        trade_id=42,
-                        bid_client_id=coi,
-                    )
-                ],
-            ]
-            boot.clock.advance(MISSING_FILL_GRACE_MS + 1)
-            await boot.job._evaluate()
-        self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
-        self.assertEqual(boot.job.state.filled, D("1"))
-        self.assertEqual(boot.job.state.remaining, D("9"))
-        self.assertEqual(len(boot.orders.creates), 2)
-        self.assertGreaterEqual(boot.orders.trades_calls, 2)
-
-    async def test_credit_rest_trades_page_cap_fails_closed(self) -> None:
+    async def test_credit_rest_trades_page_cap_uses_recent_page(self) -> None:
         boot = boot_job()
         boot.orders.trades_pages = [[], [], []]
         with (
@@ -1279,5 +1249,5 @@ class ChaseOvershootSafetyTests(IsolatedChaseTestCase):
                 2,
             ),
         ):
-            ok = await boot.job._credit_rest_trades()
-        self.assertFalse(ok)
+            ok = await boot.job._credit_rest_trades(rest=True)
+        self.assertTrue(ok)

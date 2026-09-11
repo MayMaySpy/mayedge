@@ -39,8 +39,8 @@ import {
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { formatSize } from "@/lib/utils";
 
-const LAYOUT_KEY = "mayedge-layout-v12";
-const VISIBILITY_KEY = "mayedge-visibility-v8";
+const LAYOUT_KEY = "mayedge-layout-v14";
+const VISIBILITY_KEY = "mayedge-visibility-v10";
 
 const GRID_COLS = 12;
 const GRID_ROWS = 24;
@@ -174,7 +174,7 @@ function ChartPanel({
       const px = parseFloat(o.price);
       if (!(px > 0)) continue;
       const buy = o.side === "buy";
-      const kind = algoOrderKind(o.client_order_index);
+      const kind = algoOrderKind(o.client_order_index, { reduceOnly: o.reduce_only });
       const tag = kind ? `${kind} ` : "";
       lines.push({
         id: `ord-${o.order_index}`,

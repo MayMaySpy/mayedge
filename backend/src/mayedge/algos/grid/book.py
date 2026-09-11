@@ -1,28 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-import re
+import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, cast
 
 from mayedge import db as store
-from mayedge.algos.chase.config import HISTORY_CAP
+from mayedge import feed_health
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.twap.job import AdvancedTwapRunner
-from mayedge.algos.twap.plan import (
-    ALGO_ID,
-    TWAP_COI_BASE,
-    TWAP_COI_END,
-    AdvancedTwapParams,
-    validate_params,
-)
+from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END, HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
+from mayedge.algos.grid.decide import ALGO_ID, GridParams
+from mayedge.algos.grid.job import GridRunner
 from mayedge.numbers import fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
 AlgoPayload = dict[str, object]
-_TW_ID = re.compile(r"^TW-(\d+)$")
+MarketConflictFn = Callable[[int], bool]
 
 
 def _as_int(raw: object, default: int = 0) -> int:
@@ -65,8 +61,8 @@ def _created_at(snap: Mapping[str, object]) -> int:
     return _as_int(snap.get("created_at"))
 
 
-class AdvancedTwapBook:
-    """Many advanced-TWAP jobs. Native exchange TWAP does not live here."""
+class ChaseGridBook:
+    """One chase-grid job per market."""
 
     def __init__(
         self,
@@ -75,19 +71,30 @@ class AdvancedTwapBook:
         broadcast: Callable[[AlgoPayload], None],
         coi_base: int | None = None,
         coi_end: int | None = None,
+        missing_fill_grace_ms: int = 800,
+        market_conflict: MarketConflictFn | None = None,
     ) -> None:
         self._execution_fn = execution
         self._broadcast_fn = broadcast
-        self._coi_base = coi_base if coi_base is not None else TWAP_COI_BASE
-        self._coi_end = coi_end if coi_end is not None else TWAP_COI_END
-        self._jobs: dict[str, AdvancedTwapRunner] = {}
+        self._coi_base = coi_base if coi_base is not None else GRID_COI_BASE
+        self._coi_end = coi_end if coi_end is not None else GRID_COI_END
+        self._missing_fill_grace_ms = missing_fill_grace_ms
+        self._market_conflict = market_conflict
+        self._jobs: dict[str, GridRunner] = {}
         self._archive: list[AlgoPayload] = []
         self._id_seq = 0
         self._coi_seq = 0
 
+    def set_market_conflict(self, fn: MarketConflictFn) -> None:
+        self._market_conflict = fn
+
     @property
     def algo_type(self) -> str:
         return ALGO_ID
+
+    @property
+    def missing_fill_grace_ms(self) -> int:
+        return self._missing_fill_grace_ms
 
     def execution(self) -> ChaseExecution:
         return self._execution_fn()
@@ -97,25 +104,29 @@ class AdvancedTwapBook:
 
     def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool:
         for job in self._jobs.values():
-            if exclude and job.algo_id == exclude:
+            if exclude and job.state.algo_id == exclude:
                 continue
-            if job.market_index == market_index and job.status in ACTIVE_STATUSES:
+            if job.state.market_index == market_index and job.state.status in ACTIVE_STATUSES:
                 return True
         return False
 
     def alloc_id(self) -> str:
         self._id_seq += 1
-        return f"TW-{self._id_seq:04d}"
+        store.save_counters(self._id_seq, self._coi_seq)
+        return f"CG-{self._id_seq:04d}"
 
     def alloc_coi(self) -> int:
         self._coi_seq += 1
         coi = self._coi_base + self._coi_seq
         if coi >= self._coi_end:
-            raise RuntimeError("TWAP client_order_index range exhausted")
+            raise RuntimeError("Chase-grid client_order_index range exhausted")
+        store.save_counters(self._id_seq, self._coi_seq)
         return coi
 
     def to_dict(self) -> AlgoPayload:
-        working = [job.snapshot() for job in self._jobs.values() if job.status in ACTIVE_STATUSES]
+        working = [
+            job.snapshot() for job in self._jobs.values() if job.state.status in ACTIVE_STATUSES
+        ]
         working.sort(key=_created_at, reverse=True)
         return {
             "type": "algo",
@@ -124,9 +135,9 @@ class AdvancedTwapBook:
             "history": list(self._archive),
         }
 
-    def _persist_job(self, job: AdvancedTwapRunner, *, archived: bool) -> None:
+    def _persist_job(self, job: GridRunner, *, archived: bool) -> None:
         snap = job.snapshot()
-        ledger = job.ledger
+        ledger = job.state.ledger
         store.upsert_run(
             snap,
             next_clip=ledger.next_clip,
@@ -142,22 +153,22 @@ class AdvancedTwapBook:
 
     def publish(self) -> None:
         for job in self._jobs.values():
-            if job.algo_id and job.status in ACTIVE_STATUSES:
+            if job.state.algo_id and job.state.status in ACTIVE_STATUSES:
                 try:
                     self._persist_job(job, archived=False)
                 except Exception:
-                    logger.exception("failed to persist twap job %s", job.algo_id)
+                    logger.exception("failed to persist chase-grid job %s", job.state.algo_id)
         self._broadcast_fn(self.to_dict())
 
-    def finish(self, job: AdvancedTwapRunner) -> None:
+    def finish(self, job: GridRunner) -> None:
         snap = job.snapshot()
-        algo_id = job.algo_id
+        algo_id = job.state.algo_id
         _ = self._jobs.pop(algo_id, None)
         if algo_id:
             try:
                 self._persist_job(job, archived=True)
             except Exception:
-                logger.exception("failed to archive twap job %s", algo_id)
+                logger.exception("failed to archive chase-grid job %s", algo_id)
             self._archive = [a for a in self._archive if a.get("algo_id") != algo_id]
             self._archive.insert(0, snap)
             self._archive = self._archive[:HISTORY_CAP]
@@ -167,54 +178,65 @@ class AdvancedTwapBook:
         for job in list(self._jobs.values()):
             job.on_gateway(msg)
 
+    async def _wait_feeds_ready(self, market_indices: set[int]) -> None:
+        if not market_indices:
+            return
+        deadline = time.monotonic() + RESTORE_FEED_TIMEOUT_S
+        while time.monotonic() < deadline:
+            ex = self.execution()
+            snap = feed_health.snapshot()
+            if snap.get("account_ws") != "live":
+                await asyncio.sleep(0.1)
+                continue
+            if not ex.orders_hydrated():
+                await asyncio.sleep(0.1)
+                continue
+            if all(ex.is_book_synced(mi) for mi in market_indices):
+                return
+            await asyncio.sleep(0.1)
+
     async def restore(self) -> None:
         store.init_db()
+        counters = store.load_counters()
+        self._id_seq = counters["id_seq"]
+        self._coi_seq = counters["coi_seq"]
         self._archive = store.load_history(HISTORY_CAP, algo_type=ALGO_ID)
-        self._id_seq = 0
-        self._coi_seq = 0
-        for snap in self._archive:
-            self._note_seqs(snap)
+
         rows = store.load_active_runs(algo_type=ALGO_ID)
         if not rows:
-            logger.info("no active advanced-twap jobs to restore")
             self.publish()
             return
-        restored: list[tuple[str, AdvancedTwapRunner]] = []
+
+        market_indices: set[int] = set()
+        restored: list[tuple[str, GridRunner]] = []
         for row in rows:
             algo_id = str(row.get("algo_id") or "")
             try:
-                job = AdvancedTwapRunner(self)
+                job = GridRunner(self)
                 job.hydrate_from_row(row)
                 self._jobs[algo_id] = job
-                self._note_seqs(job.snapshot())
-                for c in job.ledger.clips:
-                    seq = c.client_order_index - self._coi_base
-                    if seq > self._coi_seq:
-                        self._coi_seq = seq
+                mi = int(row.get("market_index") or 0)
+                if mi:
+                    market_indices.add(mi)
+                    ex = self.execution()
+                    if ex.ensure_book:
+                        await ex.ensure_book(mi)
                 restored.append((algo_id, job))
             except Exception:
-                logger.exception("failed to restore twap job %s — archiving as stopped", algo_id)
+                logger.exception("failed to restore chase-grid job %s", algo_id)
                 _ = self._jobs.pop(algo_id, None)
                 self._archive_broken_row(row)
+
+        await self._wait_feeds_ready(market_indices)
         for algo_id, job in restored:
             if algo_id not in self._jobs:
                 continue
             try:
                 await job.resume()
             except Exception:
-                logger.exception("failed to resume twap job %s — archiving as stopped", algo_id)
+                logger.exception("failed to resume chase-grid job %s", algo_id)
                 _ = self._jobs.pop(algo_id, None)
-                row = next((r for r in rows if str(r.get("algo_id")) == algo_id), {})
-                self._archive_broken_row(row)
         self.publish()
-
-    def _note_seqs(self, snap: Mapping[str, object]) -> None:
-        algo_id = str(snap.get("algo_id") or "")
-        m = _TW_ID.match(algo_id)
-        if m:
-            n = int(m.group(1))
-            if n > self._id_seq:
-                self._id_seq = n
 
     def _archive_broken_row(self, row: Mapping[str, object]) -> None:
         algo_id = str(row.get("algo_id") or "")
@@ -222,18 +244,18 @@ class AdvancedTwapBook:
             store.upsert_run(
                 {
                     "algo_id": algo_id,
-                    "algo_type": ALGO_ID,
                     "status": ChaseStatus.STOPPED.value,
                     "market_index": row.get("market_index") or 0,
                     "symbol": row.get("symbol") or "",
-                    "reduce_only": row.get("reduce_only"),
-                    "side": row.get("side"),
                     "qty": row.get("qty"),
                     "remaining": row.get("remaining"),
                     "filled": row.get("filled"),
+                    "quote_action": row.get("quote_action"),
+                    "reason": row.get("reason"),
                     "created_at": row.get("created_at") or 0,
                     "error": "restore failed",
                     "params_json": row.get("params_json") or {},
+                    "algo_type": ALGO_ID,
                 },
                 next_clip=_as_int(row.get("next_clip"), 1),
                 next_fill=_as_int(row.get("next_fill"), 1),
@@ -244,79 +266,67 @@ class AdvancedTwapBook:
                 archived=True,
             )
         except Exception:
-            logger.exception("failed to archive broken twap job %s", algo_id)
+            logger.exception("failed to archive broken chase-grid job %s", algo_id)
 
     async def drain_for_shutdown(self) -> None:
         for job in list(self._jobs.values()):
             try:
                 await job.drain_for_shutdown()
             except Exception:
-                logger.exception("twap drain failed for %s", job.algo_id)
+                logger.exception("drain failed for %s", job.state.algo_id)
 
     async def pause_for_market(self, market_index: int | None) -> None:
         for job in list(self._jobs.values()):
-            if job.status != ChaseStatus.RUNNING:
+            if job.state.status != ChaseStatus.RUNNING:
                 continue
-            if market_index is not None and job.market_index != market_index:
+            if market_index is not None and job.state.market_index != market_index:
                 continue
             try:
                 await job.pause()
             except Exception:
-                logger.exception("twap pause_for_market failed for %s", job.algo_id)
+                logger.exception("pause_for_market failed for %s", job.state.algo_id)
 
     async def flush(self) -> None:
         for job in list(self._jobs.values()):
-            if job.algo_id:
+            if job.state.algo_id:
                 try:
                     self._persist_job(job, archived=False)
                 except Exception:
-                    logger.exception("twap flush persist failed for %s", job.algo_id)
+                    logger.exception("flush persist failed for %s", job.state.algo_id)
+        store.save_counters(self._id_seq, self._coi_seq)
 
     async def start_from_body(self, body: dict[str, Any]) -> None:
-        side = body.get("side")
-        if side not in ("buy", "sell"):
-            raise ValueError("side must be buy or sell")
-        max_price = parse_decimal(str(body["max_price"])) if body.get("max_price") else None
-        max_index = parse_decimal(str(body["max_index_pct"])) if body.get("max_index_pct") else None
-        params = AdvancedTwapParams(
-            side=side,
-            qty=parse_decimal(str(body["qty"])),
-            duration_seconds=int(body["duration_seconds"]),
-            frequency_seconds=int(body.get("frequency_seconds", 5)),
-            style=body.get("style") or "neutral",
-            randomize=bool(body.get("randomize", True)),
-            max_price=max_price,
-            max_index_pct=max_index,
+        profit = body.get("profit_bps")
+        if profit is None:
+            raise ValueError("profit_bps is required")
+        grid_bps = body.get("grid_bps", profit)
+        params = GridParams(
+            max_inventory=parse_decimal(str(body["qty"])),
+            display_qty=parse_decimal(str(body["display_qty"])),
+            offset_bps=parse_decimal(str(body.get("offset_bps", "4"))),
+            profit_bps=parse_decimal(str(profit)),
+            grid_bps=parse_decimal(str(grid_bps)),
+            price_floor=parse_decimal(str(body["price_floor"])),
+            price_ceiling=parse_decimal(str(body["price_ceiling"])),
+            be_delay_ms=int(body.get("be_delay_ms") or 0),
         )
-        validate_params(params)
-        await self.start(
-            market_index=int(body["market_index"]),
-            params=params,
-            reduce_only=bool(body.get("reduce_only", False)),
-        )
+        await self.start(market_index=int(body["market_index"]), params=params)
 
-    async def start(
-        self,
-        *,
-        market_index: int,
-        params: AdvancedTwapParams,
-        reduce_only: bool = False,
-    ) -> None:
+    async def start(self, *, market_index: int, params: GridParams) -> None:
         ex = self.execution()
         if ex.ensure_book:
             ok = await ex.ensure_book(market_index)
             if ok is False:
                 raise ValueError("Order book not synced")
+        if self.live_on_market(market_index):
+            raise ValueError(f"Chase-grid already running on market {market_index}")
+        if self._market_conflict and self._market_conflict(market_index):
+            raise ValueError(f"Another desk algo is already running on market {market_index}")
         algo_id = self.alloc_id()
-        job = AdvancedTwapRunner(self)
+        job = GridRunner(self)
         self._jobs[algo_id] = job
         try:
-            await job.start(
-                algo_id=algo_id,
-                market_index=market_index,
-                params=params,
-                reduce_only=reduce_only,
-            )
+            await job.start(algo_id=algo_id, market_index=market_index, params=params)
         except Exception:
             _ = self._jobs.pop(algo_id, None)
             raise
@@ -327,6 +337,8 @@ class AdvancedTwapBook:
             job = self._jobs.get(algo_id)
             if job:
                 await job.stop()
+            else:
+                self.publish()
             return
         for job in list(self._jobs.values()):
             await job.stop()

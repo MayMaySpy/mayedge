@@ -11,6 +11,8 @@ from mayedge.algos.book import AlgoBook, find_book, find_book_by_algo_id
 from mayedge.algos.chase import HISTORY_CAP
 from mayedge.algos.chase.book import ChaseBook
 from mayedge.algos.chase.execution import ChaseExecution
+from mayedge.algos.grid.book import ChaseGridBook
+from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
 from mayedge.algos.twap.book import AdvancedTwapBook
@@ -65,6 +67,10 @@ def execution() -> ChaseExecution:
         ensure_book=gateway.ensure_order_book,
         release_book=gateway.release_order_book,
         account_ws_live=_account_ws_live,
+        order_book_payload=gateway.order_book_payload,
+        trades_payload=gateway.trades_payload,
+        recent_liquidations=gateway.recent_liquidations,
+        feed_health=feed_health.snapshot,
     )
 
 
@@ -91,7 +97,28 @@ ladder_book = LadderBook(
     coi_base=LADDER_COI_BASE,
     coi_end=LADDER_COI_END,
 )
-books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book)
+grid_book = ChaseGridBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=GRID_COI_BASE,
+    coi_end=GRID_COI_END,
+)
+books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book, grid_book)
+
+
+def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
+    def _fn(market_index: int) -> bool:
+        for book in books:
+            if book is exclude:
+                continue
+            if book.live_on_market(market_index):
+                return True
+        return False
+
+    return _fn
+
+
+grid_book.set_market_conflict(_market_has_other_desk_algo(grid_book))
 
 
 def get_book(algo_type: str) -> AlgoBook | None:

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   algoAvgFillPrice,
   algoCanResume,
+  algoFillProgress,
   algoIsPaused,
   algoReasonLabel,
   algoResumeNotice,
@@ -24,6 +25,23 @@ describe("algoAvgFillPrice", () => {
   });
 });
 
+describe("algoFillProgress", () => {
+  it("lets grid remaining rise after a TP without clip volume pushing filled back up", () => {
+    const { filled, remaining } = algoFillProgress({
+      algo_type: "chase-grid",
+      qty: "400",
+      remaining: "390",
+      filled: "10",
+      clips: [
+        { filled: "25.35", qty: "25.35" },
+        { filled: "15.35", qty: "15.35", kind: "tp" },
+      ],
+    });
+    expect(filled).toBe(10);
+    expect(remaining).toBe(390);
+  });
+});
+
 describe("algoCanResume", () => {
   it("is true for paused and error so vanished clips can retry", () => {
     expect(algoCanResume("paused")).toBe(true);
@@ -40,6 +58,10 @@ describe("algoReasonLabel", () => {
 
   it("labels a trade sync stall as retrying", () => {
     expect(algoReasonLabel("trades_reconcile_failed")).toBe("Trade sync failed — retrying");
+  });
+
+  it("labels inventory cap", () => {
+    expect(algoReasonLabel("inventory_cap")).toBe("At inventory cap");
   });
 });
 

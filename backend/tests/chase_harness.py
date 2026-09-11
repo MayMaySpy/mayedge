@@ -116,6 +116,24 @@ class FakeGateway:
         """Lookups miss while the book still reports synced (same as market=None)."""
         self.market_missing = True
 
+    def order_book_payload(self, market_index: int, *, bump_seq: bool = False) -> dict[str, Any] | None:
+        if self.bid is None or self.ask is None:
+            return None
+        if self.market is not None and self.market.market_index != market_index:
+            return None
+        return {
+            "type": "order_book_snapshot",
+            "market_index": market_index,
+            "bids": [{"price": self.bid, "size": "10"}],
+            "asks": [{"price": self.ask, "size": "10"}],
+        }
+
+    def trades_payload(self, market_index: int) -> dict[str, Any] | None:
+        return None
+
+    def recent_liquidations(self) -> list[dict[str, Any]]:
+        return []
+
 
 class FakeOrderService:
     """In-memory venue children for chase runner tests."""
@@ -133,6 +151,7 @@ class FakeOrderService:
         self.cancel_error: BaseException | None = None
         self.cancel_error_once: BaseException | None = None
         self.summary_orders_override: list[dict[str, Any]] | None = None
+        self.summary_error: BaseException | None = None
         self.summary_calls = 0
         self._summary_sequence: list[list[dict[str, Any]] | None] = []
         self.orders_hydrated = True
@@ -170,6 +189,8 @@ class FakeOrderService:
 
     async def get_account_summary(self) -> Any:
         self.summary_calls += 1
+        if self.summary_error is not None:
+            raise self.summary_error
         if self._summary_sequence:
             orders = self._summary_sequence.pop(0)
         elif self.summary_orders_override is not None:
@@ -356,6 +377,10 @@ def make_execution(gateway: FakeGateway, orders: FakeOrderService) -> ChaseExecu
         list_markets=gateway.list_markets,
         ensure_book=_ensure_book,
         release_book=lambda _mi: None,
+        order_book_payload=gateway.order_book_payload,
+        trades_payload=gateway.trades_payload,
+        recent_liquidations=gateway.recent_liquidations,
+        feed_health=lambda: {"account_ws": "live", "market_ws": "live"},
     )
 
 
@@ -397,8 +422,8 @@ def sell_params(**kw: object) -> ChaseIcebergParams:
 
 @dataclass
 class BootedJob:
-    book: ChaseBook
-    job: ChaseIcebergRunner
+    book: Any
+    job: Any
     clock: FakeClock
     gateway: FakeGateway
     orders: FakeOrderService
@@ -441,6 +466,20 @@ def patch_chase(
         yield
 
 
+@contextmanager
+def patch_grid(
+    clock: FakeClock,
+    gateway: FakeGateway,
+    orders: FakeOrderService,
+) -> Iterator[None]:
+    with (
+        isolated_db(),
+        patch("mayedge.algos.chase.util.now_ms", clock),
+        patch("mayedge.algos.grid.util.now_ms", clock),
+    ):
+        yield
+
+
 def boot_job(
     *,
     params: ChaseIcebergParams | None = None,
@@ -477,6 +516,76 @@ def boot_job(
     return BootedJob(
         book=book,
         job=job,
+        clock=clock,
+        gateway=gateway,
+        orders=orders,
+        algo_id=algo_id,
+    )
+
+
+def grid_params(**kw: object) -> Any:
+    from mayedge.algos.grid.decide import GridParams
+
+    base: dict[str, object] = dict(
+        max_inventory=Decimal("10"),
+        display_qty=Decimal("1"),
+        offset_bps=Decimal("4"),
+        profit_bps=Decimal("40"),
+        grid_bps=Decimal("40"),
+        price_floor=Decimal("90"),
+        price_ceiling=Decimal("110"),
+        be_delay_ms=0,
+    )
+    base.update(kw)
+    return GridParams(**base)  # type: ignore[arg-type]
+
+
+def boot_grid_job(
+    *,
+    params: Any | None = None,
+    market_index: int = 1,
+    algo_id: str = "CG-0001",
+    bid: str | None = "100",
+    ask: str | None = "100.10",
+    clock: FakeClock | None = None,
+    gateway: FakeGateway | None = None,
+    orders: FakeOrderService | None = None,
+) -> BootedJob:
+    """Fresh chase-grid job in RUNNING state without starting the loop."""
+    from mayedge.algos.grid.book import ChaseGridBook
+    from mayedge.algos.grid.job import GridRunner
+    from mayedge.algos.grid.state import GridState
+
+    clock = clock or FakeClock()
+    gateway = gateway or FakeGateway()
+    gateway.set_book(bid, ask)
+    if gateway.market is not None:
+        gateway.market.market_index = market_index
+    orders = orders or FakeOrderService()
+    exec_holder = {"gateway": gateway, "orders": orders}
+
+    def _broadcast(payload: dict[str, Any]) -> None:
+        gateway.broadcasts.append(payload)
+
+    book = ChaseGridBook(
+        execution=lambda: make_execution(exec_holder["gateway"], exec_holder["orders"]),
+        broadcast=_broadcast,
+    )
+    job = GridRunner(book)
+    p = params or grid_params()
+    job._state = GridState(
+        status=ChaseStatus.RUNNING,
+        params=p,
+        market_index=market_index,
+        symbol=gateway.market.symbol if gateway.market else "ETH",
+        remaining=p.max_inventory,
+        algo_id=algo_id,
+        created_at=clock.now_ms,
+    )
+    book._jobs[algo_id] = job
+    return BootedJob(
+        book=book,  # type: ignore[arg-type]
+        job=job,  # type: ignore[arg-type]
         clock=clock,
         gateway=gateway,
         orders=orders,

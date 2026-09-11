@@ -369,28 +369,46 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
         keys = self._ledger_cancel_keys()
         payload = self._exec().cached_account_payload() or {}
         keys.update(self._orders_cancel_keys(payload.get("open_orders")))
-        if refresh and self._exec().enabled:
+        now = util.now_ms()
+        if refresh and self._exec().enabled and getattr(self, "_backoff_until", 0) <= now:
             try:
                 summary = await self._exec().get_account_summary()
                 keys.update(self._orders_cancel_keys(summary.open_orders))
-            except Exception:
-                logger.exception("chase stop: failed to refresh open orders")
+            except Exception as e:
+                if _is_rate_limit(e):
+                    self._on_rate_limit(e)
+                else:
+                    logger.exception("chase stop: failed to refresh open orders")
         return keys
 
-    async def _remaining_child_keys(self) -> set[tuple[int, int]]:
+    async def _remaining_child_keys(self, *, rest: bool | None = None) -> set[tuple[int, int]]:
         if not self._exec().enabled:
             return set()
+        now = util.now_ms()
+        use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
+        if not use_rest or getattr(self, "_backoff_until", 0) > now:
+            payload = self._exec().cached_account_payload() or {}
+            return self._orders_cancel_keys(payload.get("open_orders"))
         try:
             summary = await self._exec().get_account_summary()
             return self._orders_cancel_keys(summary.open_orders)
-        except Exception:
-            logger.exception("chase stop: remaining-orders refresh failed")
+        except Exception as e:
+            if _is_rate_limit(e):
+                self._on_rate_limit(e)
+            else:
+                logger.exception("chase stop: remaining-orders refresh failed")
             payload = self._exec().cached_account_payload() or {}
             return self._orders_cancel_keys(payload.get("open_orders"))
 
     async def _coi_open_on_venue(self, coi: int) -> bool:
-        """True when REST still lists this job COI as an open child."""
+        """True when the open-order cache (or REST fallback) still lists this COI.
+
+        Unknown (REST blocked / backoff) is treated as still open so we do not
+        close a live child as cancelled.
+        """
         rows = await self._refresh_open_orders()
+        if rows is None:
+            return True
         return self._find_in_rows(rows, coi) is not None
 
     async def _venue_children_blocking_place(self) -> bool:
@@ -428,7 +446,7 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
                 for mi, idx in pending:
                     if await self._cancel_one(mi, idx) == "transient":
                         transient = True
-                pending = await self._remaining_child_keys()
+                pending = await self._remaining_child_keys(rest=True)
                 if not pending:
                     self._abandon_live_clips()
                     return True
@@ -440,12 +458,16 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
 
     async def _rearm_from_venue(self) -> bool:
         """Credit REST trades, pull venue children, close live ledger clips."""
-        if not await self._credit_rest_trades():
+        if not await self._credit_rest_trades(rest=True):
+            now = util.now_ms()
             self._state.status = ChaseStatus.RUNNING
             self._state.error = None
             self._state.quote_action = Action.PAUSE.value
-            self._state.reason = "trades_reconcile_failed"
-            self._unproven_retry_at = util.now_ms() + UNPROVEN_RETRY_MS
+            if getattr(self, "_backoff_until", 0) > now:
+                self._state.reason = self._backoff_reason or "rate_limited"
+            else:
+                self._state.reason = "trades_reconcile_failed"
+            self._unproven_retry_at = now + UNPROVEN_RETRY_MS
             self._state.rest_price = None
             self._state.rest_qty = None
             self._publish()
@@ -495,10 +517,13 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
                     self._publish()
                     return
                 else:
-                    if not await self._credit_rest_trades():
+                    if not await self._credit_rest_trades(rest=True):
                         self._unproven_retry_at = now + UNPROVEN_RETRY_MS
                         self._state.quote_action = Action.PAUSE.value
-                        self._state.reason = "trades_reconcile_failed"
+                        if getattr(self, "_backoff_until", 0) > now:
+                            self._state.reason = self._backoff_reason or "rate_limited"
+                        else:
+                            self._state.reason = "trades_reconcile_failed"
                         self._state.rest_price = None
                         self._state.rest_qty = None
                         self._publish()
@@ -562,6 +587,18 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
                     self._publish()
                     return
                 await self._place_working(quote)
+                self._sync_rest_from_live()
+                self._publish()
+                return
+
+            # Sub-min leftover cannot fill or amend — drop it and rest a full clip
+            # even if the touch has not moved (do not wait on dust).
+            if self._clip_is_dust(live):
+                if rate_limited:
+                    self._state.reason = self._backoff_reason or "rate_limited"
+                    self._publish()
+                    return
+                await self._abandon_and_replace_working(quote)
                 self._sync_rest_from_live()
                 self._publish()
                 return
