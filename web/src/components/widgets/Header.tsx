@@ -116,7 +116,7 @@ export function Header({
   const health = useFeedHealth();
   const algoBook = useLiveAlgos();
   const { working: workingAlgos } = algoBlotter(algoBook);
-  const chaseRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
+  const algosRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
   const bid = parseFloat(bbo.bid ?? "");
   const ask = parseFloat(bbo.ask ?? "");
   const spot = bid > 0 && ask > 0 ? (bid + ask) / 2 : bid > 0 ? bid : ask > 0 ? ask : null;
@@ -308,9 +308,9 @@ export function Header({
           <div className="flex shrink-0 items-center gap-2 font-mono text-[10px]">
             {statusBadge}
             {accountBadge}
-            {chaseRunning > 0 && (
-              <Badge variant="warn" title="Working chase algos">
-                {chaseRunning} chase
+            {algosRunning > 0 && (
+              <Badge variant="warn" title="Working algos">
+                {algosRunning} algo{algosRunning === 1 ? "" : "s"}
               </Badge>
             )}
             <Badge variant="muted">{network}</Badge>

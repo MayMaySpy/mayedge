@@ -1,4 +1,4 @@
-"""Lighter desk: gateway, orders, chase book, and WS broadcast wiring."""
+"""Lighter desk: gateway, orders, algo books, and WS broadcast wiring."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ from collections.abc import Callable
 from typing import Any
 
 from mayedge import feed_health
+from mayedge.algos.book import AlgoBook, find_book, find_book_by_algo_id
 from mayedge.algos.chase import HISTORY_CAP
 from mayedge.algos.chase.book import ChaseBook
 from mayedge.algos.chase.execution import ChaseExecution
+from mayedge.algos.ladder.book import LadderBook
+from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
 from mayedge.algos.twap.book import AdvancedTwapBook
 from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 from mayedge.lighter.account import account_service
@@ -82,14 +85,27 @@ twap_book = AdvancedTwapBook(
     coi_base=TWAP_COI_BASE,
     coi_end=TWAP_COI_END,
 )
+ladder_book = LadderBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=LADDER_COI_BASE,
+    coi_end=LADDER_COI_END,
+)
+books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book)
+
+
+def get_book(algo_type: str) -> AlgoBook | None:
+    return find_book(books, algo_type)
 
 
 def algo_book() -> dict[str, Any]:
-    chase = chase_book.to_dict()
-    twap = twap_book.to_dict()
-    working = _book_rows(chase, "working") + _book_rows(twap, "working")
+    working: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
+    for book in books:
+        payload = book.to_dict()
+        working.extend(_book_rows(payload, "working"))
+        history.extend(_book_rows(payload, "history"))
     working.sort(key=_created_at, reverse=True)
-    history = _book_rows(chase, "history") + _book_rows(twap, "history")
     history.sort(key=_created_at, reverse=True)
     history = history[:HISTORY_CAP]
     return {
@@ -101,29 +117,30 @@ def algo_book() -> dict[str, Any]:
 
 
 async def stop_algo(algo_id: str | None = None) -> dict[str, Any]:
-    await chase_book.stop(algo_id)
-    await twap_book.stop(algo_id)
+    for book in books:
+        await book.stop(algo_id)
     return algo_book()
 
 
 async def pause_algo(algo_id: str) -> dict[str, Any]:
-    if chase_book.has(algo_id):
-        await chase_book.pause(algo_id)
-    elif twap_book.has(algo_id):
-        await twap_book.pause(algo_id)
-    else:
+    book = find_book_by_algo_id(books, algo_id)
+    if book is None:
         raise ValueError(f"unknown algo_id {algo_id}")
+    await book.pause(algo_id)
     return algo_book()
 
 
 async def unpause_algo(algo_id: str) -> dict[str, Any]:
-    if chase_book.has(algo_id):
-        await chase_book.unpause(algo_id)
-    elif twap_book.has(algo_id):
-        await twap_book.unpause(algo_id)
-    else:
+    book = find_book_by_algo_id(books, algo_id)
+    if book is None:
         raise ValueError(f"unknown algo_id {algo_id}")
+    await book.unpause(algo_id)
     return algo_book()
+
+
+async def pause_for_market(market_index: int | None) -> None:
+    for book in books:
+        await book.pause_for_market(market_index)
 
 
 def set_broadcast(fn: Callable[[dict[str, Any]], None] | None) -> None:
@@ -138,8 +155,8 @@ def set_broadcast(fn: Callable[[dict[str, Any]], None] | None) -> None:
 def _on_gateway(msg: dict[str, Any]) -> None:
     if _broadcast:
         _broadcast(msg)
-    chase_book.on_gateway(msg)
-    twap_book.on_gateway(msg)
+    for book in books:
+        book.on_gateway(msg)
 
 
 async def start() -> None:
@@ -148,15 +165,15 @@ async def start() -> None:
 
 
 async def stop() -> None:
-    await chase_book.drain_for_shutdown()
-    await twap_book.drain_for_shutdown()
-    await chase_book.flush()
-    await twap_book.flush()
+    for book in books:
+        await book.drain_for_shutdown()
+    for book in books:
+        await book.flush()
     await order_service.stop()
     await gateway.stop()
 
 
 async def restore() -> None:
-    await chase_book.restore()
-    await twap_book.restore()
+    for book in books:
+        await book.restore()
     _publish_algo_book({})

@@ -4,20 +4,18 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
+from decimal import Decimal
 from typing import Any, cast
 
 from mayedge import db as store
 from mayedge import feed_health
-from mayedge.algos.chase.config import (
-    CHASE_COI_BASE,
-    CHASE_COI_END,
-    HISTORY_CAP,
-    RESTORE_FEED_TIMEOUT_S,
-)
+from mayedge.algos.chase.config import HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
 from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.iceberg import ALGO_ID, ChaseIcebergParams
-from mayedge.algos.chase.job import ChaseIcebergRunner
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
+from mayedge.algos.ladder.config import DEFAULT_WINDOW, LADDER_COI_BASE, LADDER_COI_END
+from mayedge.algos.ladder.job import LadderRunner
+from mayedge.algos.ladder.plan import ALGO_ID, LadderParams, NumericLcg, validate_params
+from mayedge.lighter.models import maker_min_base
 from mayedge.numbers import fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
@@ -65,8 +63,8 @@ def _created_at(snap: Mapping[str, object]) -> int:
     return _as_int(snap.get("created_at"))
 
 
-class ChaseBook:
-    """Many chase jobs. Start does not replace a live one."""
+class LadderBook:
+    """Many ladder jobs. Start does not replace a live one."""
 
     def __init__(
         self,
@@ -77,15 +75,15 @@ class ChaseBook:
         coi_end: int | None = None,
         missing_fill_grace_ms: int = 800,
     ) -> None:
-        self._execution_fn: Callable[[], ChaseExecution] = execution
-        self._broadcast_fn: Callable[[AlgoPayload], None] = broadcast
-        self._coi_base: int = coi_base if coi_base is not None else CHASE_COI_BASE
-        self._coi_end: int = coi_end if coi_end is not None else CHASE_COI_END
-        self._missing_fill_grace_ms: int = missing_fill_grace_ms
-        self._jobs: dict[str, ChaseIcebergRunner] = {}
+        self._execution_fn = execution
+        self._broadcast_fn = broadcast
+        self._coi_base = coi_base if coi_base is not None else LADDER_COI_BASE
+        self._coi_end = coi_end if coi_end is not None else LADDER_COI_END
+        self._missing_fill_grace_ms = missing_fill_grace_ms
+        self._jobs: dict[str, LadderRunner] = {}
         self._archive: list[AlgoPayload] = []
-        self._id_seq: int = 0
-        self._coi_seq: int = 0
+        self._id_seq = 0
+        self._coi_seq = 0
 
     @property
     def algo_type(self) -> str:
@@ -100,14 +98,6 @@ class ChaseBook:
 
     def has(self, algo_id: str) -> bool:
         return algo_id in self._jobs
-
-    def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool:
-        for job in self._jobs.values():
-            if exclude and job.state.algo_id == exclude:
-                continue
-            if job.state.market_index == market_index and job.state.status in ACTIVE_STATUSES:
-                return True
-        return False
 
     def live_on_market_side(
         self, market_index: int, side: str, *, exclude: str | None = None
@@ -127,13 +117,13 @@ class ChaseBook:
     def alloc_id(self) -> str:
         self._id_seq += 1
         store.save_counters(self._id_seq, self._coi_seq)
-        return f"CH-{self._id_seq:04d}"
+        return f"LD-{self._id_seq:04d}"
 
     def alloc_coi(self) -> int:
         self._coi_seq += 1
         coi = self._coi_base + self._coi_seq
         if coi >= self._coi_end:
-            raise RuntimeError("Chase client_order_index range exhausted")
+            raise RuntimeError("Ladder client_order_index range exhausted")
         store.save_counters(self._id_seq, self._coi_seq)
         return coi
 
@@ -149,7 +139,7 @@ class ChaseBook:
             "history": list(self._archive),
         }
 
-    def _persist_job(self, job: ChaseIcebergRunner, *, archived: bool) -> None:
+    def _persist_job(self, job: LadderRunner, *, archived: bool) -> None:
         snap = job.snapshot()
         ledger = job.state.ledger
         store.upsert_run(
@@ -171,11 +161,10 @@ class ChaseBook:
                 try:
                     self._persist_job(job, archived=False)
                 except Exception:
-                    logger.exception("failed to persist chase job %s", job.state.algo_id)
-        payload = self.to_dict()
-        self._broadcast_fn(payload)
+                    logger.exception("failed to persist ladder job %s", job.state.algo_id)
+        self._broadcast_fn(self.to_dict())
 
-    def finish(self, job: ChaseIcebergRunner) -> None:
+    def finish(self, job: LadderRunner) -> None:
         snap = job.snapshot()
         algo_id = job.state.algo_id
         _ = self._jobs.pop(algo_id, None)
@@ -183,7 +172,7 @@ class ChaseBook:
             try:
                 self._persist_job(job, archived=True)
             except Exception:
-                logger.exception("failed to archive chase job %s", algo_id)
+                logger.exception("failed to archive ladder job %s", algo_id)
             self._archive = [a for a in self._archive if a.get("algo_id") != algo_id]
             self._archive.insert(0, snap)
             self._archive = self._archive[:HISTORY_CAP]
@@ -216,25 +205,24 @@ class ChaseBook:
         )
 
     async def restore(self) -> None:
-        """Load counters, history, and auto-resume active jobs from SQLite."""
         store.init_db()
         counters = store.load_counters()
         self._id_seq = counters["id_seq"]
         self._coi_seq = counters["coi_seq"]
-        self._archive = store.load_history(HISTORY_CAP, algo_type="chase-iceberg")
+        self._archive = store.load_history(HISTORY_CAP, algo_type=ALGO_ID)
 
-        rows = store.load_active_runs(algo_type="chase-iceberg")
+        rows = store.load_active_runs(algo_type=ALGO_ID)
         if not rows:
-            logger.info("no active chase jobs to restore")
+            logger.info("no active ladder jobs to restore")
             self.publish()
             return
 
         market_indices: set[int] = set()
-        restored: list[tuple[str, ChaseIcebergRunner]] = []
+        restored: list[tuple[str, LadderRunner]] = []
         for row in rows:
             algo_id = str(row.get("algo_id") or "")
             try:
-                job = ChaseIcebergRunner(self)
+                job = LadderRunner(self)
                 job.hydrate_from_row(row)
                 self._jobs[algo_id] = job
                 mi = int(row.get("market_index") or 0)
@@ -245,7 +233,7 @@ class ChaseBook:
                         await ex.ensure_book(mi)
                 restored.append((algo_id, job))
             except Exception:
-                logger.exception("failed to restore chase job %s — archiving as stopped", algo_id)
+                logger.exception("failed to restore ladder job %s — archiving as stopped", algo_id)
                 _ = self._jobs.pop(algo_id, None)
                 self._archive_broken_row(row)
 
@@ -257,7 +245,7 @@ class ChaseBook:
             try:
                 await job.resume()
             except Exception:
-                logger.exception("failed to resume chase job %s — archiving as stopped", algo_id)
+                logger.exception("failed to resume ladder job %s — archiving as stopped", algo_id)
                 _ = self._jobs.pop(algo_id, None)
                 row = next((r for r in rows if str(r.get("algo_id")) == algo_id), {})
                 self._archive_broken_row(row)
@@ -275,10 +263,6 @@ class ChaseBook:
                     "reduce_only": row.get("reduce_only"),
                     "side": row.get("side"),
                     "qty": row.get("qty"),
-                    "display_qty": row.get("display_qty"),
-                    "offset_bps": row.get("offset_bps"),
-                    "price_floor": row.get("price_floor"),
-                    "price_ceiling": row.get("price_ceiling"),
                     "remaining": row.get("remaining"),
                     "filled": row.get("filled"),
                     "quote_action": row.get("quote_action"),
@@ -287,6 +271,8 @@ class ChaseBook:
                     "rest_qty": row.get("rest_qty"),
                     "created_at": row.get("created_at") or 0,
                     "error": "restore failed",
+                    "params_json": row.get("params_json") or {},
+                    "algo_type": ALGO_ID,
                 },
                 next_clip=_as_int(row.get("next_clip"), 1),
                 next_fill=_as_int(row.get("next_fill"), 1),
@@ -302,10 +288,9 @@ class ChaseBook:
                 self._archive.insert(0, snap[0])
                 self._archive = self._archive[:HISTORY_CAP]
         except Exception:
-            logger.exception("failed to archive broken chase job %s", algo_id)
+            logger.exception("failed to archive broken ladder job %s", algo_id)
 
     async def drain_for_shutdown(self) -> None:
-        """Pull all venue children before process exit."""
         for job in list(self._jobs.values()):
             try:
                 await job.drain_for_shutdown()
@@ -313,7 +298,6 @@ class ChaseBook:
                 logger.exception("drain failed for %s", job.state.algo_id)
 
     async def pause_for_market(self, market_index: int | None) -> None:
-        """Pause RUNNING chase jobs on a market (or all) before venue cancel-all."""
         for job in list(self._jobs.values()):
             if job.state.status != ChaseStatus.RUNNING:
                 continue
@@ -325,7 +309,6 @@ class ChaseBook:
                 logger.exception("pause_for_market failed for %s", job.state.algo_id)
 
     async def flush(self) -> None:
-        """Final write of all live jobs (e.g. before shutdown cancel)."""
         for job in list(self._jobs.values()):
             if job.state.algo_id:
                 try:
@@ -334,20 +317,49 @@ class ChaseBook:
                     logger.exception("flush persist failed for %s", job.state.algo_id)
         store.save_counters(self._id_seq, self._coi_seq)
 
+    def _market_limits(self, market_index: int) -> tuple[Decimal, Decimal, Decimal]:
+        ex = self.execution()
+        meta = ex.get_market_by_index(market_index)
+        if not meta:
+            raise ValueError("Unknown market")
+        tick = Decimal(10) ** -meta.price_decimals
+        qty_step = Decimal(10) ** -meta.size_decimals
+        bid_s, ask_s = ex.best_bid_ask(market_index)
+        px = Decimal(str(bid_s or ask_s or "0"))
+        min_qty = maker_min_base(
+            meta.min_base_amount, meta.min_quote_amount, px if px > 0 else None
+        )
+        if min_qty <= 0:
+            min_qty = qty_step
+        return tick, qty_step, min_qty
+
     async def start_from_body(self, body: dict[str, Any]) -> None:
         side = body.get("side")
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
-        params = ChaseIcebergParams(
+        market_index = int(body["market_index"])
+        rungs = int(body.get("rungs") or body.get("orders") or 20)
+        params = LadderParams(
             side=side,
             qty=parse_decimal(str(body["qty"])),
-            display_qty=parse_decimal(str(body["display_qty"])),
-            offset_bps=parse_decimal(str(body.get("offset_bps", "4"))),
-            price_floor=parse_decimal(str(body["price_floor"])),
-            price_ceiling=parse_decimal(str(body["price_ceiling"])),
+            price_from=parse_decimal(str(body["price_from"])),
+            price_to=parse_decimal(str(body["price_to"])),
+            rungs=rungs,
+            window=int(body.get("window", DEFAULT_WINDOW)),
+            size_var_pct=parse_decimal(str(body.get("size_var_pct") or "0")),
+            price_var_pct=parse_decimal(str(body.get("price_var_pct") or "0")),
+            size_skew=parse_decimal(str(body.get("size_skew") or "0")),
         )
+        tick, qty_step, min_qty = self._market_limits(market_index)
+        seed_raw = body.get("seed")
+        rng = None
+        if (params.size_var_pct > 0 or params.price_var_pct > 0) and seed_raw is not None and str(
+            seed_raw
+        ) != "":
+            rng = NumericLcg(int(seed_raw))
+        validate_params(params, tick=tick, qty_step=qty_step, min_qty=min_qty, rng=rng)
         await self.start(
-            market_index=int(body["market_index"]),
+            market_index=market_index,
             params=params,
             reduce_only=bool(body.get("reduce_only", False)),
         )
@@ -356,7 +368,7 @@ class ChaseBook:
         self,
         *,
         market_index: int,
-        params: ChaseIcebergParams,
+        params: LadderParams,
         reduce_only: bool = False,
     ) -> None:
         ex = self.execution()
@@ -366,10 +378,10 @@ class ChaseBook:
                 raise ValueError("Order book not synced")
         if self.live_on_market_side(market_index, params.side):
             raise ValueError(
-                f"Chase already running on market {market_index} side {params.side}"
+                f"Ladder already running on market {market_index} side {params.side}"
             )
         algo_id = self.alloc_id()
-        job = ChaseIcebergRunner(self)
+        job = LadderRunner(self)
         self._jobs[algo_id] = job
         try:
             await job.start(

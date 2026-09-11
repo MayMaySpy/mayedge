@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, Generic
 
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import (
@@ -17,7 +17,7 @@ from mayedge.algos.chase.config import (
     STOP_CANCEL_TRIES,
     UNPROVEN_RETRY_MS,
 )
-from mayedge.algos.chase.fills import ChaseFillMixin
+from mayedge.algos.chase.fills import BookT, ChaseFillMixin, StateT
 from mayedge.algos.chase.iceberg import (
     Action,
     ChaseIcebergParams,
@@ -39,7 +39,7 @@ from mayedge.algos.chase.util import (
 logger = logging.getLogger(__name__)
 
 
-class ChasePlaceMixin(ChaseFillMixin):
+class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
     """Requote loop: decide, amend live clip, or place post-only child."""
 
     _lock: asyncio.Lock
@@ -524,7 +524,10 @@ class ChasePlaceMixin(ChaseFillMixin):
 
             live = self._state.ledger.working()
 
-            quote = decide(self._state.params, view, self._state.remaining)
+            params = self._state.params
+            if not isinstance(params, ChaseIcebergParams):
+                return
+            quote = decide(params, view, self._state.remaining)
             self._state.quote_action = quote.action.value
             self._state.reason = quote.reason
             self._sync_rest_from_live()
@@ -534,7 +537,7 @@ class ChasePlaceMixin(ChaseFillMixin):
                 return
 
             must_pull = live is not None and self._working_crosses(
-                live.price, view, self._state.params.side
+                live.price, view, params.side
             )
             rate_limited = now < self._backoff_until
             cooling = (

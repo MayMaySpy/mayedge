@@ -8,7 +8,6 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { notifyErr, notifyOk } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
-import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { ChartWidget, type ChartOverlay, type OverlayAction } from "@/components/widgets/ChartWidget";
 import { Header } from "@/components/widgets/Header";
 import { LiqsPanel } from "@/components/widgets/LiqsPanel";
@@ -40,21 +39,20 @@ import {
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { formatSize } from "@/lib/utils";
 
-const LAYOUT_KEY = "mayedge-layout-v11";
-const VISIBILITY_KEY = "mayedge-visibility-v7";
+const LAYOUT_KEY = "mayedge-layout-v12";
+const VISIBILITY_KEY = "mayedge-visibility-v8";
 
 const GRID_COLS = 12;
 const GRID_ROWS = 24;
 const MARGIN = 4;
 const PAD = 4;
 
-/** Matches docs/ui.png: chart + book/tape + ticket/algos on top, blotter row below. */
+/** Chart + book/tape + ticket on top, blotter row below. */
 const DEFAULT_LAYOUT: LayoutItem[] = [
   { i: "chart", x: 0, y: 0, w: 7, h: 16, minW: 4, minH: 6 },
   { i: "book", x: 7, y: 0, w: 2, h: 10, minW: 2, minH: 4 },
   { i: "tape", x: 7, y: 10, w: 2, h: 6, minW: 2, minH: 3 },
-  { i: "ticket", x: 9, y: 0, w: 3, h: 10, minW: 2, minH: 6 },
-  { i: "algos", x: 9, y: 10, w: 3, h: 6, minW: 2, minH: 3 },
+  { i: "ticket", x: 9, y: 0, w: 3, h: 16, minW: 2, minH: 6 },
   { i: "positions", x: 0, y: 16, w: 7, h: 8, minW: 6, minH: 4 },
   { i: "alerts", x: 7, y: 16, w: 2, h: 8, minW: 2, minH: 3 },
   { i: "liqs", x: 9, y: 16, w: 3, h: 8, minW: 2, minH: 3 },
@@ -231,9 +229,12 @@ function ChartPanel({
 
 export function Dashboard() {
   const { symbol, setSymbol, setPair } = useDeskRoute();
-  const [layout, setLayout] = useState<LayoutItem[]>(() =>
-    loadJson(LAYOUT_KEY, DEFAULT_LAYOUT)
-  );
+  const [layout, setLayout] = useState<LayoutItem[]>(() => {
+    const known = new Set<string>(PANEL_IDS);
+    const raw = loadJson(LAYOUT_KEY, DEFAULT_LAYOUT);
+    const next = raw.filter((item) => known.has(item.i));
+    return next.length ? next : DEFAULT_LAYOUT;
+  });
   const [visible, setVisible] = useState<Record<string, boolean>>(() =>
     loadJson(VISIBILITY_KEY, defaultPanelVisibility())
   );
@@ -321,9 +322,15 @@ export function Dashboard() {
     (next: readonly LayoutItem[]) => {
       if (!editing) return;
       setLayout((prev) => {
-        const byId = new Map(next.map((item) => [item.i, geometryOf(item)]));
-        const merged = prev.map((item) => byId.get(item.i) ?? item);
+        const known = new Set<string>(PANEL_IDS);
+        const byId = new Map(
+          next.filter((item) => known.has(item.i)).map((item) => [item.i, geometryOf(item)])
+        );
+        const merged = prev
+          .filter((item) => known.has(item.i))
+          .map((item) => byId.get(item.i) ?? item);
         for (const item of next) {
+          if (!known.has(item.i)) continue;
           if (!merged.some((m) => m.i === item.i)) merged.push(geometryOf(item));
         }
         if (layoutsEqual(prev, merged)) return prev;
@@ -362,7 +369,7 @@ export function Dashboard() {
       if (action.action === "cancel") {
         if (overlay.kind === "algo") {
           try {
-            const book = await api.chaseStop(overlay.algoId);
+            const book = await api.algoStop(overlay.algoId);
             setAlgo(book);
             notifyOk(overlay.algoId ? `${overlay.algoId} stopped` : "Algo stopped");
           } catch (e) {
@@ -564,17 +571,6 @@ export function Dashboard() {
                     tradingEnabled={deskTradingEnabled}
                     connected={ws.connected}
                     onClose={panelClose("ticket")}
-                  />
-                </WidgetShell>
-              </div>
-            )}
-            {visible.algos !== false && (
-              <div key="algos" className="h-full">
-                <WidgetShell>
-                  <AlgoOrdersPanel
-                    symbol={symbol}
-                    tradingEnabled={deskTradingEnabled}
-                    onClose={panelClose("algos")}
                   />
                 </WidgetShell>
               </div>

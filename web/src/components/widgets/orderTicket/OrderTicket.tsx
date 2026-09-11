@@ -17,11 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
-import { algoById, algoReasonLabel, ALGOS, twapDurationSeconds, twapFreqSeconds, twapSlipFromMaxPrice, type AlgoId, type TwapStyle } from "@/lib/algos";
+import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
 import { setAlgo as setLiveAlgo, useLiveAccount, useLiveBbo } from "@/lib/liveData";
-import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
@@ -35,7 +34,6 @@ import {
   maxOrderSize,
   minSizeHint,
   ORDER_KINDS,
-  orderCta,
   persistSlipPct,
   snapLeverage,
   suggestedLeverage,
@@ -54,6 +52,15 @@ interface OrderTicketProps {
   onClose?: () => void;
 }
 
+function initialPluginStates(): Record<AlgoId, unknown> {
+  const out = {} as Record<AlgoId, unknown>;
+  for (const row of ALGOS) {
+    const plugin = algoPluginById(row.id);
+    if (plugin) out[row.id] = plugin.defaultState;
+  }
+  return out;
+}
+
 export function OrderTicket({
   market,
   onOrderPlaced,
@@ -69,18 +76,7 @@ export function OrderTicket({
   const [reduceOnly, setReduceOnly] = useState(false);
   const [tif, setTif] = useState("gtt");
   const [algo, setAlgo] = useState<AlgoId>("chase-iceberg");
-  const [twapHours, setTwapHours] = useState("");
-  const [twapMinutes, setTwapMinutes] = useState("30");
-  const [twapMaxPrice, setTwapMaxPrice] = useState("");
-  const [twapAdvanced, setTwapAdvanced] = useState(false);
-  const [twapRandomize, setTwapRandomize] = useState(true);
-  const [twapStyle, setTwapStyle] = useState<TwapStyle>("neutral");
-  const [twapFreq, setTwapFreq] = useState("5");
-  const [twapIndexPct, setTwapIndexPct] = useState("");
-  const [displayQty, setDisplayQty] = useState("");
-  const [offsetBps, setOffsetBps] = useState("4");
-  const [chaseFloor, setChaseFloor] = useState("");
-  const [chaseCeiling, setChaseCeiling] = useState("");
+  const [pluginStates, setPluginStates] = useState(initialPluginStates);
   const [leverage, setLeverage] = useState("5");
   const [levOpen, setLevOpen] = useState(false);
   const [levDraft, setLevDraft] = useState("");
@@ -105,14 +101,21 @@ export function OrderTicket({
   }, [bookPick]);
 
   const loading = busy != null;
+  const plugin = algoPluginById(algo);
+  const pluginState = pluginStates[algo];
 
   if (market && market.symbol !== syncedSymbol) {
     setSyncedSymbol(market.symbol);
     setSize("");
     setPrice("");
-    setChaseFloor("");
-    setChaseCeiling("");
-    setDisplayQty("");
+    setPluginStates((prev) => {
+      const next = { ...prev };
+      for (const row of ALGOS) {
+        const p = algoPluginById(row.id);
+        if (p) next[row.id] = p.resetState(prev[row.id]);
+      }
+      return next;
+    });
     setLeverage(suggestedLeverage(market, account?.positions));
   }
 
@@ -186,11 +189,10 @@ export function OrderTicket({
   const slipFrac = Math.max(0, (parseFloat(slippagePct) || 0) / 100);
   const worstBuy = spot != null ? spot * (1 + slipFrac) : null;
   const worstSell = spot != null ? spot * (1 - slipFrac) : null;
-  const sizeNum = parseDecimal(size) ?? 0;
+  const sizeNum = parseFloat(size) || 0;
   const decimals = market.size_decimals ?? 4;
   const priceDecimals = market.price_decimals ?? 4;
-  const twapSec = twapDurationSeconds(twapHours, twapMinutes);
-  const priceNum = parseDecimal(price) ?? 0;
+  const priceNum = parseFloat(price) || 0;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
   const pxForSide = (s: "buy" | "sell") => {
     if (kind === "limit" && priceNum > 0) return priceNum;
@@ -219,12 +221,7 @@ export function OrderTicket({
   const worst = spot;
   const isMaker = kind === "limit" && tif !== "ioc";
   const minSz = makerMinSize(market.min_base_amount ?? 0, market.min_quote_amount ?? 0, limitPx);
-  const parsedClip = parseDecimal(displayQty);
-  const clipNum = parsedClip != null && parsedClip > 0 ? parsedClip : 0;
   const sizeMin = minSizeHint(minSz, decimals, sizeNum);
-  const offsetNum = parseDecimal(offsetBps) ?? 0;
-  const floorNum = parseDecimal(chaseFloor) ?? NaN;
-  const ceilNum = parseDecimal(chaseCeiling) ?? NaN;
 
   const setSizePct = (pct: number) => {
     if (maxSize <= 0) return;
@@ -236,9 +233,19 @@ export function OrderTicket({
     persistSlipPct(raw);
   };
 
-  const twapSlip =
-    twapSlipFromMaxPrice(parseDecimal(twapMaxPrice) ?? 0, spot ?? 0) ??
-    (parseFloat(slippagePct) || 0) / 100;
+  const algoBlockCtx = {
+    sizeNum,
+    decimals,
+    minSz,
+    symbol: market.symbol,
+    spot,
+    slipFrac,
+  };
+  const algoBlocked =
+    kind === "algo" && plugin
+      ? plugin.blockReason(pluginState, algoBlockCtx)
+      : null;
+
   const blockOpts = {
     tradingEnabled,
     feedReady: feed.ready,
@@ -250,18 +257,16 @@ export function OrderTicket({
     price,
     isMaker,
     minSz,
-    algo,
-    twapSec,
-    twapSlip: parseDecimal(twapMaxPrice) != null ? twapSlip : null,
-    twapAdvanced,
-    twapFreqSec: twapAdvanced ? twapFreqSeconds(twapFreq) : null,
-    floorNum,
-    ceilNum,
-    clipNum,
+    algoBlocked,
   };
   const sharedBlocked = ticketBlockReason(blockOpts);
   const buyBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxBuy });
   const sellBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxSell });
+
+  const orderCtaLabel = (side: "buy" | "sell") => {
+    if (kind === "algo" && plugin) return plugin.cta(side);
+    return side === "buy" ? "Buy" : "Sell";
+  };
 
   const send = async (orderSide: "buy" | "sell") => {
     const blocked = orderSide === "buy" ? buyBlocked : sellBlocked;
@@ -299,109 +304,27 @@ export function OrderTicket({
       );
       return;
     }
-    if (kind === "algo" && algo === "chase-iceberg") {
-      const clip = trimQty(clipNum, decimals);
-      if (!clip) return;
-      const floor = canonicalDecimal(chaseFloor) ?? chaseFloor;
-      const ceiling = canonicalDecimal(chaseCeiling) ?? chaseCeiling;
+    if (kind === "algo" && plugin) {
       setBusy(orderSide);
       try {
-        const s = await api.chaseStart({
-          market_index: market.market_index,
+        const result = await plugin.submit(pluginState, {
+          market,
           side: orderSide,
-          qty: canonicalDecimal(size) ?? qSize,
-          display_qty: canonicalDecimal(displayQty) ?? clip,
-          offset_bps:
-            canonicalDecimal(offsetBps) ?? String(Number.isFinite(offsetNum) ? offsetNum : 4),
-          price_floor: floor,
-          price_ceiling: ceiling,
-          reduce_only: reduceOnly,
+          qSize,
+          sizeNum,
+          decimals,
+          reduceOnly,
+          spot,
+          slipFrac,
         });
-        setLiveAlgo(s);
+        if (result.setLiveBook && result.book) setLiveAlgo(result.book);
+        notifyOrder(result.notice);
         onOrderPlaced?.();
-        const just = s.working?.[0];
-        if (just?.status === "error") {
-          notifyOrder({
-            kind: "chase",
-            status: "error",
-            note: just.error || "Chase error",
-            symbol: market.symbol,
-          });
-        } else if (just?.quote_action === "pause") {
-          notifyOrder({
-            kind: "chase",
-            side: orderSide,
-            size: just.rest_qty ?? clip,
-            symbol: market.symbol,
-            status: "paused",
-            note: algoReasonLabel(just.reason) || "waiting",
-          });
-        } else {
-          notifyOrder({
-            kind: "chase",
-            side: orderSide,
-            size: just?.rest_qty ?? clip,
-            symbol: market.symbol,
-            price: just?.rest_price ?? undefined,
-            status: "active",
-          });
-        }
-      } catch (e) {
-        notifyErr(e instanceof Error ? e.message : "Chase failed");
-      } finally {
-        setBusy(null);
-      }
-      return;
-    }
-    if (algo === "twap" && twapSec != null && twapAdvanced) {
-      const freq = twapFreqSeconds(twapFreq);
-      if (freq == null) return;
-      setBusy(orderSide);
-      try {
-        const s = await api.twapStart({
-          market_index: market.market_index,
-          side: orderSide,
-          qty: canonicalDecimal(size) ?? qSize,
-          duration_seconds: twapSec,
-          frequency_seconds: freq,
-          style: twapStyle,
-          randomize: twapRandomize,
-          max_price: parseDecimal(twapMaxPrice) != null ? canonicalDecimal(twapMaxPrice) : null,
-          max_index_pct: parseDecimal(twapIndexPct) != null ? canonicalDecimal(twapIndexPct) : null,
-          reduce_only: reduceOnly,
-        });
-        setLiveAlgo(s);
-        onOrderPlaced?.();
-        notifyOrder({
-          kind: "twap",
-          status: "active",
-          side: orderSide,
-          size: qSize,
-          symbol: market.symbol,
-        });
       } catch (e) {
         notifyErr(e instanceof Error ? e.message : "Order failed");
       } finally {
         setBusy(null);
       }
-      return;
-    }
-    if (algo === "twap" && twapSec != null) {
-      await submit(
-        () =>
-          api.placeTwapOrder({
-            market_index: market.market_index,
-            side: orderSide,
-            size: qSize,
-            duration_seconds: twapSec,
-            max_slippage:
-              twapSlipFromMaxPrice(parseDecimal(twapMaxPrice) ?? 0, spot ?? 0) ??
-              (slipFrac || 0.01),
-            reduce_only: reduceOnly,
-          }),
-        { kind: "twap", size: qSize, symbol: market.symbol },
-        orderSide
-      );
     }
   };
 
@@ -432,8 +355,8 @@ export function OrderTicket({
                   if (open) setKind("algo");
                 }}
                 onValueChange={(v) => {
-                  if (v === "chase-iceberg" || v === "twap") {
-                    setAlgo(v);
+                  if (ALGOS.some((a) => a.id === v)) {
+                    setAlgo(v as AlgoId);
                     setKind("algo");
                   }
                 }}
@@ -505,31 +428,11 @@ export function OrderTicket({
                   algo={algo}
                   market={market}
                   bookMid={mid}
-                  displayQty={displayQty}
-                  offsetBps={offsetBps}
-                  chaseFloor={chaseFloor}
-                  chaseCeiling={chaseCeiling}
-                  twapHours={twapHours}
-                  twapMinutes={twapMinutes}
-                  twapMaxPrice={twapMaxPrice}
-                  twapAdvanced={twapAdvanced}
-                  twapRandomize={twapRandomize}
-                  twapStyle={twapStyle}
-                  twapFreq={twapFreq}
-                  twapIndexPct={twapIndexPct}
                   sizeNum={sizeNum}
-                  onDisplayQtyChange={setDisplayQty}
-                  onOffsetBpsChange={setOffsetBps}
-                  onChaseFloorChange={setChaseFloor}
-                  onChaseCeilingChange={setChaseCeiling}
-                  onTwapHoursChange={setTwapHours}
-                  onTwapMinutesChange={setTwapMinutes}
-                  onTwapMaxPriceChange={setTwapMaxPrice}
-                  onTwapAdvancedChange={setTwapAdvanced}
-                  onTwapRandomizeChange={setTwapRandomize}
-                  onTwapStyleChange={setTwapStyle}
-                  onTwapFreqChange={setTwapFreq}
-                  onTwapIndexPctChange={setTwapIndexPct}
+                  pluginState={pluginState}
+                  onPluginStateChange={(state) =>
+                    setPluginStates((prev) => ({ ...prev, [algo]: state }))
+                  }
                 />
               </TabsContent>
             </FieldGroup>
@@ -590,7 +493,7 @@ export function OrderTicket({
                 ? "Sending…"
                 : !sharedBlocked && buyBlocked
                   ? buyBlocked
-                  : orderCta({ kind, algo, side: "buy", base: market.symbol })}
+                  : orderCtaLabel("buy")}
             </Button>
             <Button
               type="button"
@@ -604,7 +507,7 @@ export function OrderTicket({
                 ? "Sending…"
                 : !sharedBlocked && sellBlocked
                   ? sellBlocked
-                  : orderCta({ kind, algo, side: "sell", base: market.symbol })}
+                  : orderCtaLabel("sell")}
             </Button>
           </div>
         </div>

@@ -11,7 +11,7 @@ from mayedge.numbers import fmt_decimal, parse_decimal
 logger = logging.getLogger(__name__)
 
 
-class ChaseKill(Protocol):
+class AlgoKill(Protocol):
     async def stop(self) -> None: ...
 
 
@@ -55,11 +55,11 @@ class KillResult:
 async def kill(
     *,
     flatten: bool,
-    chase: ChaseKill,
+    algos: AlgoKill,
     orders: OrdersKill,
     get_account_summary: Any,
 ) -> KillResult:
-    await chase.stop()
+    await algos.stop()
 
     cancel_ok = True
     cancel_error: str | None = None

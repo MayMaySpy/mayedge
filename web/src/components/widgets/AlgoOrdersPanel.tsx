@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
-import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,7 +13,6 @@ import { setAlgo, useLiveAlgos } from "@/lib/liveData";
 interface AlgoOrdersPanelProps {
   symbol?: string | null;
   tradingEnabled: boolean;
-  onClose?: () => void;
 }
 
 function AlgoList({
@@ -70,7 +68,7 @@ function AlgoList({
   );
 }
 
-export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersPanelProps) {
+export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps) {
   const book = useLiveAlgos();
   const { working, history } = algoBlotter(book);
   const [tab, setTab] = useState<"working" | "history">("working");
@@ -85,7 +83,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     if (!tradingEnabled || busyId) return;
     setBusyId(algoId);
     try {
-      const book = await api.chaseStop(algoId);
+      const book = await api.algoStop(algoId);
       setAlgo(book);
       const still = (book.working ?? []).find((a) => a.algo_id === algoId);
       if (still?.status === "error") {
@@ -104,7 +102,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     if (!tradingEnabled || busyId) return;
     setBusyId(algoId);
     try {
-      const book = await api.chasePause(algoId);
+      const book = await api.algoPause(algoId);
       setAlgo(book);
       notifyOk(`${algoId} paused`);
     } catch (err) {
@@ -118,7 +116,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     if (!tradingEnabled || busyId) return;
     setBusyId(algoId);
     try {
-      const book = await api.chaseUnpause(algoId);
+      const book = await api.algoUnpause(algoId);
       setAlgo(book);
       const still = (book.working ?? []).find((a) => a.algo_id === algoId);
       const notice = algoResumeNotice(still ?? { algo_id: algoId, status: "running" });
@@ -136,7 +134,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
     if (!tradingEnabled || busyId || working.length === 0) return;
     setBusyId("*");
     try {
-      await api.chaseStop(undefined);
+      await api.algoStop();
       setAlgo(await api.algoStatus());
       notifyOk("All algos stopped");
     } catch (err) {
@@ -148,26 +146,6 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PanelHeader
-        title="Algos"
-        onClose={onClose}
-        trailing={
-          tradingEnabled && working.length > 0 ? (
-            <Button
-              variant="danger"
-              size="sm"
-              disabled={!!busyId}
-              onClick={() => void stopAll()}
-              className="h-6"
-            >
-              Stop all
-            </Button>
-          ) : null
-        }
-      >
-        <span className="font-mono text-[10px] tabular-nums text-text">{working.length}</span>
-      </PanelHeader>
-
       <Tabs
         value={tab}
         onValueChange={(v) => {
@@ -175,7 +153,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
         }}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="flex h-7 shrink-0 items-center gap-1 border-b border-rule px-1.5">
+        <div className="flex h-7 shrink-0 items-center gap-1 border-b border-rule px-2">
           <TabsList className="h-7 border-0">
             <TabsTrigger value="working" className="h-7">
               Working
@@ -184,22 +162,34 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled, onClose }: AlgoOrdersP
               History
             </TabsTrigger>
           </TabsList>
-          <ToggleGroup
-            type="single"
-            variant="seg"
-            size="sm"
-            spacing={0}
-            value={scope}
-            onValueChange={(v) => {
-              if (v === "all" || v === "pair") setScope(v);
-            }}
-            className="ml-auto"
-          >
-            <ToggleGroupItem value="all">All</ToggleGroupItem>
-            <ToggleGroupItem value="pair" disabled={!symbol}>
-              {symbol ?? "Pair"}
-            </ToggleGroupItem>
-          </ToggleGroup>
+          <div className="ml-auto flex items-center gap-1">
+            <ToggleGroup
+              type="single"
+              variant="seg"
+              size="sm"
+              spacing={0}
+              value={scope}
+              onValueChange={(v) => {
+                if (v === "all" || v === "pair") setScope(v);
+              }}
+            >
+              <ToggleGroupItem value="all">All</ToggleGroupItem>
+              <ToggleGroupItem value="pair" disabled={!symbol}>
+                {symbol ?? "Pair"}
+              </ToggleGroupItem>
+            </ToggleGroup>
+            {tradingEnabled && working.length > 0 ? (
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={!!busyId}
+                onClick={() => void stopAll()}
+                className="h-6"
+              >
+                Stop all
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <ScrollArea className="min-h-0 flex-1">

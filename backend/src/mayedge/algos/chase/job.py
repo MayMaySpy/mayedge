@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 
-class ChaseIcebergRunner(ChasePlaceMixin):
+class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
     """One chase job. ChaseBook owns many of these."""
 
     def __init__(self, book: ChaseBookView) -> None:

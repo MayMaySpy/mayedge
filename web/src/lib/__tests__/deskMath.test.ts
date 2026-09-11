@@ -145,11 +145,7 @@ describe("ticketBlockReason", () => {
     price: "",
     isMaker: false,
     minSz: 0.01,
-    algo: "twap",
-    twapSec: 900,
-    floorNum: 90,
-    ceilNum: 110,
-    clipNum: 1,
+    algoBlocked: null as string | null,
   };
 
   it("blocks when trading off", () => {
@@ -184,111 +180,10 @@ describe("ticketBlockReason", () => {
     );
   });
 
-  it("blocks twap without duration", () => {
-    expect(ticketBlockReason({ ...base, kind: "algo", twapSec: null })).toBe("Running time 1m–30d");
-  });
-
-  it("blocks twap max price beyond 5%", () => {
-    expect(ticketBlockReason({ ...base, kind: "algo", twapSlip: 0.06 })).toBe("Max 5% from mark");
-  });
-
-  it("allows advanced twap max price beyond 5%", () => {
+  it("forwards algo plugin block reason", () => {
     expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        twapAdvanced: true,
-        twapFreqSec: 5,
-        twapSlip: 0.08,
-      })
-    ).toBeNull();
-  });
-
-  it("blocks advanced twap without a valid slice frequency", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        twapAdvanced: true,
-        twapFreqSec: null,
-      })
-    ).toBe("Slice 2s–1h");
-  });
-
-  it("blocks chase without band", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        floorNum: 0,
-        ceilNum: 0,
-      })
+      ticketBlockReason({ ...base, kind: "algo", algoBlocked: "Set floor / ceiling" })
     ).toBe("Set floor / ceiling");
-  });
-
-  it("blocks chase without clip", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        clipNum: 0,
-      })
-    ).toBe("Enter clip size");
-  });
-
-  it("blocks chase clip larger than parent", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        sizeNum: 1,
-        clipNum: 2,
-      })
-    ).toBe("Clip exceeds parent");
-  });
-
-  it("blocks chase when parent is below min size", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        sizeNum: 5,
-        clipNum: 5,
-        minSz: 10,
-      })
-    ).toBe("Min 10 ETH");
-  });
-
-  it("blocks chase when clip is below min size", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        sizeNum: 20,
-        maxSize: 100,
-        clipNum: 5,
-        minSz: 10,
-      })
-    ).toBe("Min 10 ETH");
-  });
-
-  it("allows chase when clip meets min size", () => {
-    expect(
-      ticketBlockReason({
-        ...base,
-        kind: "algo",
-        algo: "chase-iceberg",
-        sizeNum: 20,
-        maxSize: 100,
-        clipNum: 10,
-        minSz: 10,
-      })
-    ).toBeNull();
   });
 
   it("allows valid market order", () => {

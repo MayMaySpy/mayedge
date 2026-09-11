@@ -3,15 +3,21 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Iterable, Mapping
-from typing import cast
+from typing import Any, cast
 
 from mayedge import db as store
 from mayedge.algos.chase.config import HISTORY_CAP
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.twap.job import AdvancedTwapRunner
-from mayedge.algos.twap.plan import ALGO_ID, TWAP_COI_BASE, TWAP_COI_END, AdvancedTwapParams
-from mayedge.numbers import fmt_decimal
+from mayedge.algos.twap.plan import (
+    ALGO_ID,
+    TWAP_COI_BASE,
+    TWAP_COI_END,
+    AdvancedTwapParams,
+    validate_params,
+)
+from mayedge.numbers import fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +84,10 @@ class AdvancedTwapBook:
         self._archive: list[AlgoPayload] = []
         self._id_seq = 0
         self._coi_seq = 0
+
+    @property
+    def algo_type(self) -> str:
+        return ALGO_ID
 
     def execution(self) -> ChaseExecution:
         return self._execution_fn()
@@ -253,6 +263,29 @@ class AdvancedTwapBook:
                     self._persist_job(job, archived=False)
                 except Exception:
                     logger.exception("twap flush persist failed for %s", job.algo_id)
+
+    async def start_from_body(self, body: dict[str, Any]) -> None:
+        side = body.get("side")
+        if side not in ("buy", "sell"):
+            raise ValueError("side must be buy or sell")
+        max_price = parse_decimal(str(body["max_price"])) if body.get("max_price") else None
+        max_index = parse_decimal(str(body["max_index_pct"])) if body.get("max_index_pct") else None
+        params = AdvancedTwapParams(
+            side=side,
+            qty=parse_decimal(str(body["qty"])),
+            duration_seconds=int(body["duration_seconds"]),
+            frequency_seconds=int(body.get("frequency_seconds", 5)),
+            style=body.get("style") or "neutral",
+            randomize=bool(body.get("randomize", True)),
+            max_price=max_price,
+            max_index_pct=max_index,
+        )
+        validate_params(params)
+        await self.start(
+            market_index=int(body["market_index"]),
+            params=params,
+            reduce_only=bool(body.get("reduce_only", False)),
+        )
 
     async def start(
         self,

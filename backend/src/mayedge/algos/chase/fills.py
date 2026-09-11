@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, Generic, Protocol, TypeVar
 
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import (
@@ -15,12 +15,38 @@ from mayedge.algos.chase.config import (
 )
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import Action, leftover_is_dust
-from mayedge.algos.chase.state import ChaseBookView, ChaseState, ChaseStatus
+from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.chase.util import _dec
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.lighter.models import maker_min_base
 
 logger = logging.getLogger(__name__)
+
+
+class FillBook(Protocol):
+    def execution(self) -> ChaseExecution: ...
+
+    @property
+    def missing_fill_grace_ms(self) -> int: ...
+
+
+class FillState(Protocol):
+    ledger: Ledger
+    remaining: Decimal
+    filled: Decimal
+    market_index: int
+    params: Any
+    quote_action: str
+    reason: str | None
+    status: ChaseStatus
+    error: str | None
+    rest_price: Decimal | None
+    rest_qty: Decimal | None
+    reduce_only: bool
+
+
+BookT = TypeVar("BookT", bound=FillBook)
+StateT = TypeVar("StateT", bound=FillState)
 
 
 def may_invent_fill(
@@ -42,11 +68,11 @@ def may_invent_fill(
     return ledger.should_fill_when_missing(clip)
 
 
-class ChaseFillMixin:
+class ChaseFillMixin(Generic[BookT, StateT]):
     """Drain trades, sync open orders, reconcile master qty."""
 
-    _book: ChaseBookView
-    _state: ChaseState
+    _book: BookT
+    _state: StateT
     _cois: set[int]
     _pending_trades: list[dict[str, Any]]
     _canceling: bool

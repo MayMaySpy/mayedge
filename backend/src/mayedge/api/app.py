@@ -11,14 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mayedge import db as store
 from mayedge import desk, feed_health
-from mayedge.algos.chase import ChaseIcebergParams
-from mayedge.algos.twap.plan import AdvancedTwapParams
 from mayedge.api.schemas import (
-    AdvancedTwapStartRequest,
+    AlgoStopRequest,
     CancelAllRequest,
     CancelOrderRequest,
-    ChaseStartRequest,
-    ChaseStopRequest,
     KillRequest,
     LeverageRequest,
     LimitOrderRequest,
@@ -32,21 +28,19 @@ from mayedge.kill import KillResult, kill
 from mayedge.lighter.account import account_service
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
-from mayedge.numbers import parse_decimal
 
 logger = logging.getLogger(__name__)
 
 
 class _AllAlgos:
     async def stop(self) -> None:
-        await desk.chase_book.stop()
-        await desk.twap_book.stop()
+        await desk.stop_algo()
 
 
 async def run_kill(*, flatten: bool) -> KillResult:
     return await kill(
         flatten=flatten,
-        chase=_AllAlgos(),
+        algos=_AllAlgos(),
         orders=order_service,
         get_account_summary=order_service.get_account_summary,
     )
@@ -252,15 +246,13 @@ def create_app() -> FastAPI:
     @app.post("/api/orders/cancel-all")
     async def cancel_all(req: CancelAllRequest) -> dict[str, Any]:
         _require_trading()
-        await desk.chase_book.pause_for_market(req.market_index)
-        await desk.twap_book.pause_for_market(req.market_index)
+        await desk.pause_for_market(req.market_index)
         return await _trade(lambda: order_service.cancel_all_orders(req.market_index))
 
     @app.post("/api/orders/cancel-all/{market_index}")
     async def cancel_all_market(market_index: int) -> dict[str, Any]:
         _require_trading()
-        await desk.chase_book.pause_for_market(market_index)
-        await desk.twap_book.pause_for_market(market_index)
+        await desk.pause_for_market(market_index)
         return await _trade(lambda: order_service.cancel_all_orders(market_index))
 
     @app.post("/api/leverage")
@@ -274,38 +266,12 @@ def create_app() -> FastAPI:
     async def get_algos() -> dict[str, Any]:
         return desk.algo_book()
 
-    @app.get("/api/algos/chase-iceberg")
-    async def get_chase() -> dict[str, Any]:
-        return desk.chase_book.to_dict()
-
-    @app.post("/api/algos/chase-iceberg/start")
-    async def start_chase(req: ChaseStartRequest) -> dict[str, Any]:
-        _require_trading()
-        book = desk.chase_book
-        try:
-            params = ChaseIcebergParams(
-                side=req.side,
-                qty=parse_decimal(req.qty),
-                display_qty=parse_decimal(req.display_qty),
-                offset_bps=parse_decimal(req.offset_bps),
-                price_floor=parse_decimal(req.price_floor),
-                price_ceiling=parse_decimal(req.price_ceiling),
-            )
-            await book.start(
-                market_index=req.market_index,
-                params=params,
-                reduce_only=req.reduce_only,
-            )
-        except (ValueError, ArithmeticError) as e:
-            raise HTTPException(400, str(e)) from e
-        return desk.algo_book()
-
-    @app.post("/api/algos/chase-iceberg/stop")
-    async def stop_chase(req: ChaseStopRequest = ChaseStopRequest()) -> dict[str, Any]:
+    @app.post("/api/algos/stop")
+    async def stop_algos(req: AlgoStopRequest = AlgoStopRequest()) -> dict[str, Any]:
         return await desk.stop_algo(req.algo_id if req else None)
 
-    @app.post("/api/algos/chase-iceberg/pause")
-    async def pause_chase(req: ChaseStopRequest) -> dict[str, Any]:
+    @app.post("/api/algos/pause")
+    async def pause_algos(req: AlgoStopRequest) -> dict[str, Any]:
         _require_trading()
         if not req.algo_id:
             raise HTTPException(400, "algo_id required")
@@ -314,8 +280,8 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
-    @app.post("/api/algos/chase-iceberg/unpause")
-    async def unpause_chase(req: ChaseStopRequest) -> dict[str, Any]:
+    @app.post("/api/algos/unpause")
+    async def unpause_algos(req: AlgoStopRequest) -> dict[str, Any]:
         _require_trading()
         if not req.algo_id:
             raise HTTPException(400, "algo_id required")
@@ -324,28 +290,22 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
-    @app.post("/api/algos/advanced-twap/start")
-    async def start_advanced_twap(req: AdvancedTwapStartRequest) -> dict[str, Any]:
+    @app.get("/api/algos/{algo_type}")
+    async def get_algo_type(algo_type: str) -> dict[str, Any]:
+        book = desk.get_book(algo_type)
+        if book is None:
+            raise HTTPException(404, f"Unknown algo type {algo_type!r}")
+        return book.to_dict()
+
+    @app.post("/api/algos/{algo_type}/start")
+    async def start_algo(algo_type: str, body: dict[str, Any]) -> dict[str, Any]:
+        book = desk.get_book(algo_type)
+        if book is None:
+            raise HTTPException(404, f"Unknown algo type {algo_type!r}")
         _require_trading()
         try:
-            max_price = parse_decimal(req.max_price) if req.max_price else None
-            max_index = parse_decimal(req.max_index_pct) if req.max_index_pct else None
-            params = AdvancedTwapParams(
-                side=req.side,
-                qty=parse_decimal(req.qty),
-                duration_seconds=req.duration_seconds,
-                frequency_seconds=req.frequency_seconds,
-                style=req.style,
-                randomize=req.randomize,
-                max_price=max_price,
-                max_index_pct=max_index,
-            )
-            await desk.twap_book.start(
-                market_index=req.market_index,
-                params=params,
-                reduce_only=req.reduce_only,
-            )
-        except (ValueError, ArithmeticError) as e:
+            await book.start_from_body(body)
+        except (ValueError, ArithmeticError, KeyError) as e:
             raise HTTPException(400, str(e)) from e
         return desk.algo_book()
 

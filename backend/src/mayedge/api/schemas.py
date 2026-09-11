@@ -55,29 +55,5 @@ class KillRequest(BaseModel):
     flatten: bool = False
 
 
-class ChaseStopRequest(BaseModel):
+class AlgoStopRequest(BaseModel):
     algo_id: str | None = None
-
-
-class ChaseStartRequest(BaseModel):
-    market_index: int
-    side: TradeSide
-    qty: str
-    display_qty: str
-    offset_bps: str = "4"
-    price_floor: str
-    price_ceiling: str
-    reduce_only: bool = False
-
-
-class AdvancedTwapStartRequest(BaseModel):
-    market_index: int
-    side: TradeSide
-    qty: str
-    duration_seconds: int = Field(ge=60, le=2_592_000)
-    frequency_seconds: int = Field(default=5, ge=2, le=3_600)
-    style: Literal["passive", "neutral", "aggressive"] = "neutral"
-    randomize: bool = True
-    max_price: str | None = None
-    max_index_pct: str | None = None
-    reduce_only: bool = False

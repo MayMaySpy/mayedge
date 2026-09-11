@@ -50,7 +50,7 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
 
         result = await kill(
             flatten=True,
-            chase=chase,
+            algos=chase,
             orders=orders,
             get_account_summary=get_account_summary,
         )
@@ -72,7 +72,7 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
 
         result = await kill(
             flatten=False,
-            chase=chase,
+            algos=chase,
             orders=orders,
             get_account_summary=AsyncMock(),
         )

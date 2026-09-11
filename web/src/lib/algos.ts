@@ -1,25 +1,6 @@
 import { parseDecimal } from "@/lib/numbers";
 import type { Market } from "@/lib/api";
 
-export type AlgoId = "twap" | "chase-iceberg";
-
-export interface AlgoDef {
-  id: AlgoId;
-  label: string;
-  /** One-line job. Shown under the picker before params. */
-  intent: string;
-}
-
-/** Add a row here, then a sheet under `orderTicket/kinds/AlgoParams`. Shared size/side/RO stay on the ticket. */
-export const ALGOS: readonly AlgoDef[] = [
-  { id: "twap", label: "TWAP", intent: "Time-weighted slices over the running time" },
-  {
-    id: "chase-iceberg",
-    label: "Chase",
-    intent: "Passive clips behind the touch — chase, never cross",
-  },
-];
-
 export const TWAP_SLICE_SECONDS = 30;
 export const TWAP_MIN_SECONDS = 60;
 export const TWAP_MAX_SECONDS = 30 * 24 * 60 * 60;
@@ -71,10 +52,6 @@ export function formatTwapRuntime(sec: number): string {
 export function twapSlipFromMaxPrice(maxPrice: number, spot: number): number | null {
   if (!(spot > 0) || !(maxPrice > 0)) return null;
   return Math.abs(maxPrice - spot) / spot;
-}
-
-export function algoById(id: AlgoId): AlgoDef {
-  return ALGOS.find((a) => a.id === id) ?? ALGOS[0];
 }
 
 const PAUSE_COPY: Record<string, string> = {
@@ -184,8 +161,6 @@ export function algoFillProgress(algo: {
   let filled: number;
   let remaining: number;
 
-  // Prefer backend master fields, but never show less filled than the clips /
-  // fill tape already prove (guards master/tape drift).
   if (total > 0 && hasRemaining) {
     remaining = Math.min(total, Math.max(0, remainingField));
     filled = Math.max(0, total - remaining);
@@ -208,7 +183,6 @@ export function algoFillProgress(algo: {
   return { filled, remaining, total, pct };
 }
 
-/** Volume-weighted average of blotter fills. Null until there is a priced fill. */
 export function algoAvgFillPrice(
   fills?: { price?: string | null; qty?: string | null }[] | null,
 ): number | null {
@@ -227,50 +201,6 @@ export function algoAvgFillPrice(
 
 export function algoIsLive(status: string | null | undefined): boolean {
   return algoIsWorking(status);
-}
-
-/** Chase clips use [8e9, 9e9). Advanced TWAP uses [7e9, 8e9). */
-export const CHASE_COI_BASE = 8_000_000_000;
-export const CHASE_COI_END = 9_000_000_000;
-export const TWAP_COI_BASE = 7_000_000_000;
-export const TWAP_COI_END = 8_000_000_000;
-
-export function isChaseClientOrder(coi: string | number | null | undefined): boolean {
-  if (coi == null || coi === "") return false;
-  const n = typeof coi === "number" ? coi : Number(coi);
-  return Number.isFinite(n) && n >= CHASE_COI_BASE && n < CHASE_COI_END;
-}
-
-export function isTwapClientOrder(coi: string | number | null | undefined): boolean {
-  if (coi == null || coi === "") return false;
-  const n = typeof coi === "number" ? coi : Number(coi);
-  return Number.isFinite(n) && n >= TWAP_COI_BASE && n < TWAP_COI_END;
-}
-
-export function isAlgoClientOrder(coi: string | number | null | undefined): boolean {
-  return isChaseClientOrder(coi) || isTwapClientOrder(coi);
-}
-
-export function algoOrderKind(coi: string | number | null | undefined): "Chase" | "TWAP" | null {
-  if (isChaseClientOrder(coi)) return "Chase";
-  if (isTwapClientOrder(coi)) return "TWAP";
-  return null;
-}
-
-export function isAlgoChildOrder(
-  order: { client_order_index: string | number },
-  algo?: {
-    working_coi?: number | null;
-    clips?: { client_order_index: number; status: string }[] | null;
-  } | null
-): boolean {
-  if (isAlgoClientOrder(order.client_order_index)) return true;
-  if (!algo) return false;
-  const coi = Number(order.client_order_index);
-  if (algo.working_coi != null && coi === algo.working_coi) return true;
-  return (algo.clips ?? []).some(
-    (c) => c.status === "live" && c.client_order_index === coi
-  );
 }
 
 export function algoBlotter(book: import("./api").AlgoBook | import("./api").AlgoState | null): {
@@ -316,7 +246,6 @@ export function preferPerpMarket(markets: Market[], symbol: string): Market | un
   return markets.find((m) => marketSymbol(m) === want);
 }
 
-/** One row per symbol in pickers — perp wins when a spot twin exists. */
 export function uniqueSymbolMarkets(markets: Market[]): Market[] {
   const bySym = new Map<string, Market>();
   for (const m of markets) {
@@ -336,3 +265,20 @@ export function sameMarketIndex(a: unknown, b: unknown): boolean {
   const nb = Number(b);
   return Number.isFinite(na) && Number.isFinite(nb) && na === nb;
 }
+
+export type { AlgoId } from "@/lib/algoPlugins";
+export {
+  ALGOS,
+  algoById,
+  algoLabelForType,
+  algoOrderKind,
+  algoPluginByCoi,
+  algoPluginByDeskType,
+  algoPluginById,
+  isAlgoChildOrder,
+  isAlgoClientOrder,
+  CHASE_COI_BASE,
+  CHASE_COI_END,
+  TWAP_COI_BASE,
+  TWAP_COI_END,
+} from "@/lib/algoPlugins";

@@ -4,6 +4,7 @@ import { notifyOk } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { algoLabelForType } from "@/lib/algoPlugins";
 import {
   algoAvgFillPrice,
   algoCanResume,
@@ -90,12 +91,7 @@ export function AlgoRow({
     (algo.working as AlgoClip | null | undefined) ??
     algo.clips?.find((c) => c.status === "live") ??
     null;
-  const kind =
-    algo.algo_type === "chase-iceberg" || algo.id === "chase-iceberg"
-      ? "Chase"
-      : algo.algo_type === "advanced-twap" || algo.id === "advanced-twap" || algo.id === "twap"
-        ? "TWAP"
-        : (algo.algo_type ?? algo.id ?? "Algo");
+  const kind = algoLabelForType(algo.algo_type ?? algo.id);
 
   const badgeVariant =
     phase.tone === "bid"

@@ -184,14 +184,7 @@ export function ticketBlockReason(opts: {
   price: string;
   isMaker: boolean;
   minSz: number;
-  algo: string;
-  twapSec: number | null;
-  twapSlip?: number | null;
-  floorNum: number;
-  ceilNum: number;
-  clipNum: number;
-  twapAdvanced?: boolean;
-  twapFreqSec?: number | null;
+  algoBlocked?: string | null;
 }): string | null {
   if (!opts.tradingEnabled) return "Trading not configured";
   if (!opts.feedReady) return opts.feedReason ?? "Feed not ready";
@@ -203,58 +196,6 @@ export function ticketBlockReason(opts: {
   if (opts.isMaker && opts.minSz > 0 && opts.sizeNum + 1e-9 < opts.minSz) {
     return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
   }
-  if (opts.kind === "algo" && opts.algo === "twap" && opts.twapSec == null) {
-    return "Running time 1m–30d";
-  }
-  if (
-    opts.kind === "algo" &&
-    opts.algo === "twap" &&
-    opts.twapAdvanced &&
-    (opts.twapFreqSec == null || opts.twapFreqSec < 2 || opts.twapFreqSec > 3600)
-  ) {
-    return "Slice 2s–1h";
-  }
-  if (
-    opts.kind === "algo" &&
-    opts.algo === "twap" &&
-    !opts.twapAdvanced &&
-    opts.twapSlip != null &&
-    opts.twapSlip > 0.05 + 1e-9
-  ) {
-    return "Max 5% from mark";
-  }
-  if (
-    opts.kind === "algo" &&
-    opts.algo === "chase-iceberg" &&
-    (!(opts.floorNum > 0) || !(opts.ceilNum > opts.floorNum))
-  ) {
-    return "Set floor / ceiling";
-  }
-  if (opts.kind === "algo" && opts.algo === "chase-iceberg") {
-    if (opts.minSz > 0 && opts.sizeNum + 1e-9 < opts.minSz) {
-      return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
-    }
-    if (!(opts.clipNum > 0) || opts.clipNum > opts.sizeNum + 1e-9) {
-      return opts.clipNum <= 0 ? "Enter clip size" : "Clip exceeds parent";
-    }
-    if (opts.minSz > 0 && opts.clipNum + 1e-9 < opts.minSz) {
-      return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
-    }
-  }
+  if (opts.kind === "algo" && opts.algoBlocked) return opts.algoBlocked;
   return null;
-}
-
-export function orderCta(opts: {
-  kind: OrderKind;
-  algo: string;
-  side: "buy" | "sell";
-  base: string;
-}): string {
-  if (opts.kind === "algo" && opts.algo === "chase-iceberg") {
-    return opts.side === "buy" ? "Chase buy" : "Chase sell";
-  }
-  if (opts.kind === "algo" && opts.algo === "twap") {
-    return opts.side === "buy" ? "TWAP buy" : "TWAP sell";
-  }
-  return opts.side === "buy" ? "Buy" : "Sell";
 }

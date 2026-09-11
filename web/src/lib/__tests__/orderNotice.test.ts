@@ -45,7 +45,7 @@ describe("orderNotice", () => {
     });
   });
 
-  it("names TWAP and chase distinctly", () => {
+  it("names TWAP, chase, and ladder distinctly", () => {
     expect(orderNotice({ kind: "twap", side: "buy", size: "10", symbol: "SOL" }).title).toBe(
       "TWAP sent"
     );
@@ -60,6 +60,19 @@ describe("orderNotice", () => {
       title: "Chase paused",
       description: "waiting",
       tone: "warn",
+    });
+    expect(
+      orderNotice({ kind: "ladder", side: "buy", size: "2", symbol: "ETH", status: "active" }).title
+    ).toBe("Ladder started");
+    expect(orderNotice({ kind: "ladder", status: "paused", note: "waiting" })).toEqual({
+      title: "Ladder waiting",
+      description: "waiting",
+      tone: "warn",
+    });
+    expect(orderNotice({ kind: "ladder", status: "error", note: "rung too small" })).toEqual({
+      title: "Ladder failed",
+      description: "rung too small",
+      tone: "err",
     });
   });
 

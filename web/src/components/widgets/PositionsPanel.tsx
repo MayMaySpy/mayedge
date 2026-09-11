@@ -4,6 +4,7 @@ import { notifyErr, notifyOk } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
+import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,8 +22,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api, isLongPosition, type Market, type Position } from "@/lib/api";
-import { algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
-import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
+import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
+import { useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   nextPosSort,
   positionNotional,
@@ -136,6 +137,8 @@ export function PositionsPanel({
   onClose,
 }: PositionsPanelProps) {
   const account = useLiveAccount();
+  const algoBook = useLiveAlgos();
+  const { working: workingAlgos } = algoBlotter(algoBook);
   const bbo = useLiveBbo();
   const feed = useTradingReady({ connected });
   const [tab, setTab] = useState("positions");
@@ -288,6 +291,10 @@ export function PositionsPanel({
             <TabsTrigger value="orders">
               Orders
               <span className="ml-1 font-mono text-[10px] text-muted">({openOrderCount})</span>
+            </TabsTrigger>
+            <TabsTrigger value="algos">
+              Algos
+              <span className="ml-1 font-mono text-[10px] text-muted">({workingAlgos.length})</span>
             </TabsTrigger>
             <TabsTrigger value="trades">Trades</TabsTrigger>
             <TabsTrigger value="funding">Funding</TabsTrigger>
@@ -573,6 +580,10 @@ export function PositionsPanel({
               </Table>
             )}
           </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="algos" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <AlgoOrdersPanel symbol={market?.symbol} tradingEnabled={tradingEnabled} />
         </TabsContent>
 
         <TabsContent value="trades" className="min-h-0 flex-1 px-2">

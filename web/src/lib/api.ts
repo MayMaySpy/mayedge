@@ -320,30 +320,24 @@ export const api = {
     const qs = q.toString();
     return request<AccountFundingPage>(`/account/funding${qs ? `?${qs}` : ""}`);
   },
-  chaseStatus: () => request<AlgoBook>("/algos/chase-iceberg"),
   algoStatus: () => request<AlgoBook>("/algos"),
-  chaseStart: (body: Record<string, unknown>) =>
-    request<AlgoBook>("/algos/chase-iceberg/start", {
+  algoStart: (algoType: string, body: Record<string, unknown>) =>
+    request<AlgoBook>(`/algos/${encodeURIComponent(algoType)}/start`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  twapStart: (body: Record<string, unknown>) =>
-    request<AlgoBook>("/algos/advanced-twap/start", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  chaseStop: (algo_id?: string | null) =>
-    request<AlgoBook>("/algos/chase-iceberg/stop", {
+  algoStop: (algo_id?: string | null) =>
+    request<AlgoBook>("/algos/stop", {
       method: "POST",
       body: JSON.stringify({ algo_id: algo_id ?? null }),
     }),
-  chasePause: (algo_id: string) =>
-    request<AlgoBook>("/algos/chase-iceberg/pause", {
+  algoPause: (algo_id: string) =>
+    request<AlgoBook>("/algos/pause", {
       method: "POST",
       body: JSON.stringify({ algo_id }),
     }),
-  chaseUnpause: (algo_id: string) =>
-    request<AlgoBook>("/algos/chase-iceberg/unpause", {
+  algoUnpause: (algo_id: string) =>
+    request<AlgoBook>("/algos/unpause", {
       method: "POST",
       body: JSON.stringify({ algo_id }),
     }),
