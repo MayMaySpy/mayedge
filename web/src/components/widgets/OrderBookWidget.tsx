@@ -66,7 +66,7 @@ const Slot = memo(function Slot({
         style={{ width: `${pct}%`, background: color }}
       />
       <span className={side === "bid" ? "text-bid" : "text-ask"}>{formatPrice(price)}</span>
-      <span className="text-right text-muted">{formatSize(size)}</span>
+      <span className="text-right text-muted-foreground">{formatSize(size)}</span>
     </button>
   );
 });
@@ -81,7 +81,7 @@ export const OrderBookWidget = memo(function OrderBookWidget({ onClose }: { onCl
     if (!el) return;
     const measure = () => {
       const h = el.clientHeight;
-      const usable = Math.max(0, h - 76);
+      const usable = Math.max(0, h - 88);
       setDepth(Math.max(4, Math.floor(usable / 2 / ROW_H)));
     };
     measure();
@@ -108,7 +108,7 @@ export const OrderBookWidget = memo(function OrderBookWidget({ onClose }: { onCl
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       <PanelHeader title="Book" onClose={onClose} />
-      <div className="grid h-5 shrink-0 grid-cols-2 px-2 font-mono text-[11px] leading-5 text-muted">
+      <div className="grid h-6 shrink-0 grid-cols-2 px-2 font-mono text-[11px] leading-6 text-muted-foreground">
         <span>Price</span>
         <span className="text-right">Size</span>
       </div>
@@ -127,24 +127,42 @@ export const OrderBookWidget = memo(function OrderBookWidget({ onClose }: { onCl
           );
         })}
       </div>
-      <div className="flex h-7 shrink-0 items-center justify-center border-y border-rule bg-elevated/30 font-mono text-xs font-medium">
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-y border-border bg-secondary/50 px-2 font-mono">
         {mid > 0 ? (
-          <button
-            type="button"
-            className="flex cursor-pointer items-center appearance-none border-0 bg-transparent p-0 hover:text-text"
-            title="Set limit price to mid"
-            aria-label="Set limit price to mid"
-            onClick={() => pickLimitPrice(String(mid))}
-          >
-            <span className="text-text">{formatPrice(mid, 6)}</span>
-            <span className="ml-2 text-muted">
-              {spreadPct != null
-                ? `${spreadPct.toFixed(spreadPct < 0.01 ? 4 : 3)}%`
-                : ""}
-            </span>
-          </button>
+          <>
+            <button
+              type="button"
+              className="text-[12px] text-bid hover:underline"
+              title="Set limit to bid"
+              disabled={!bidRows[0]}
+              onClick={() => bidRows[0] && pickLimitPrice(bidRows[0].price)}
+            >
+              {bidRows[0] ? formatPrice(bidRows[0].price, 6) : "—"}
+            </button>
+            <button
+              type="button"
+              className="flex cursor-pointer items-center appearance-none border-0 bg-transparent p-0"
+              title="Set limit price to mid"
+              aria-label="Set limit price to mid"
+              onClick={() => pickLimitPrice(String(mid))}
+            >
+              <span className="text-[13px] font-medium text-foreground">{formatPrice(mid, 6)}</span>
+              <span className="ml-1.5 text-[11px] text-muted-foreground">
+                {spreadPct != null ? `${spreadPct.toFixed(spreadPct < 0.01 ? 4 : 3)}%` : ""}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="text-[12px] text-ask hover:underline"
+              title="Set limit to ask"
+              disabled={!askRows[0]}
+              onClick={() => askRows[0] && pickLimitPrice(askRows[0].price)}
+            >
+              {askRows[0] ? formatPrice(askRows[0].price, 6) : "—"}
+            </button>
+          </>
         ) : (
-          <span className="text-text">—</span>
+          <span className="mx-auto text-muted-foreground">No book</span>
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

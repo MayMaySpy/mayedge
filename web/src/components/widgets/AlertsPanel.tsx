@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { notifyDesk } from "@/lib/notify";
+import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { HeaderNumberInput } from "@/components/desk/HeaderNumberInput";
 import { Badge } from "@/components/ui/badge";
-import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -79,9 +80,9 @@ function formatValue(ev: AlertEvent): string {
 }
 
 function severityClass(sev: number): string {
-  if (sev >= 3) return "bg-loss/20 text-loss border-loss/30";
+  if (sev >= 3) return "bg-ask/20 text-ask border-ask/30";
   if (sev >= 2) return "bg-warn/20 text-warn border-warn/30";
-  return "bg-muted/30 text-muted border-rule";
+  return "bg-muted text-muted-foreground border-border";
 }
 
 interface AlertsPanelProps {
@@ -148,26 +149,29 @@ export const AlertsPanel = memo(function AlertsPanel({
         title="Alerts"
         onClose={onClose}
         trailing={
-          <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-            <FieldLabel htmlFor="alerts-min-sev" className="font-mono text-[10px] text-muted">
-              sev≥
-            </FieldLabel>
-            <HeaderNumberInput
-              id="alerts-min-sev"
-              min={1}
-              max={3}
-              step={1}
-              value={minSev}
-              widthClass="w-7 text-center"
-              onChange={(n) => setMin(String(n))}
-            />
-          </Field>
+          <FilterPopover>
+            <Field>
+              <FieldLabel htmlFor="alerts-min-sev">Min severity</FieldLabel>
+              <HeaderNumberInput
+                id="alerts-min-sev"
+                min={1}
+                max={3}
+                step={1}
+                value={minSev}
+                widthClass="w-10 text-center"
+                onChange={(n) => setMin(String(n))}
+              />
+            </Field>
+          </FilterPopover>
         }
       />
       <ScrollArea className="min-h-0 flex-1">
         {rows.length === 0 ? (
           <Empty className="py-8">
-            <EmptyDescription>No alert signals yet</EmptyDescription>
+            <EmptyHeader>
+              <EmptyTitle>No alerts</EmptyTitle>
+              <EmptyDescription>No signals at this severity yet</EmptyDescription>
+            </EmptyHeader>
           </Empty>
         ) : (
           <Table>
@@ -190,7 +194,7 @@ export const AlertsPanel = memo(function AlertsPanel({
                   onClick={() => onOpenPair?.(ev.symbol)}
                   title={ev.note}
                 >
-                  <TableCell className="py-1 font-mono text-[10px] text-muted">
+                  <TableCell className="py-1 font-mono text-[10px] text-muted-foreground">
                     {formatTime(ev.ts)}
                   </TableCell>
                   <TableCell className="py-1 font-semibold">{pairLabel(ev.symbol)}</TableCell>

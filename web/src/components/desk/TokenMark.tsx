@@ -25,7 +25,7 @@ function TokenMarkInner({
     return (
       <span
         className={cn(
-          "inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-elevated font-sans text-[9px] font-medium text-muted",
+          "inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-elevated font-sans text-[9px] font-medium text-muted-foreground",
           className
         )}
         aria-hidden

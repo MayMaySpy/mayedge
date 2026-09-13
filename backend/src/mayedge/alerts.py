@@ -200,6 +200,24 @@ def _severity_from_thresholds(value: float, pair: SevPair) -> int:
     return 1
 
 
+def _liq_event_ts_s(row: dict[str, Any], *, now: float) -> float:
+    """Event time in epoch seconds. Missing/zero falls back to arrival (live ticks)."""
+    raw = row.get("timestamp", row.get("ts"))
+    try:
+        ts = int(raw or 0)
+    except (TypeError, ValueError):
+        ts = 0
+    if ts <= 0:
+        return now
+    if ts > 1e16:
+        ts //= 1_000_000
+    elif ts > 1e14:
+        ts //= 1000
+    if ts < 1e12:
+        return float(ts)
+    return ts / 1000.0
+
+
 def _direction_from_delta(delta: float) -> str:
     if delta > 0:
         return "up"
@@ -352,7 +370,8 @@ class ExploitDetector:
                 usd = px * sz
             side = str(row.get("side") or "")
             key = str(row.get("trade_id") or "") or f"anon:{i}"
-            by_market.setdefault(mi, []).append((now, usd, side, key))
+            ts = _liq_event_ts_s(row, now=now)
+            by_market.setdefault(mi, []).append((ts, usd, side, key))
 
         out: list[ExploitEvent] = []
         window_s = self._thr.liq_window_s
@@ -362,8 +381,7 @@ class ExploitDetector:
                 window = deque(item for item in window if item[3] != key)
                 window.append((ts, usd, side, key))
             cutoff = now - window_s
-            while window and window[0][0] < cutoff:
-                window.popleft()
+            window = deque(sorted((item for item in window if item[0] >= cutoff), key=lambda r: r[0]))
             self._liq_window[mi] = window
             if not window:
                 continue
@@ -385,10 +403,11 @@ class ExploitDetector:
                     break
             sells = sum(1 for _, _, s, _ in window if s == "sell")
             direction = "down" if sells >= count / 2 else "up"
+            newest_ts = window[-1][0]
             out.append(
                 ExploitEvent(
                     id=str(uuid.uuid4()),
-                    ts=int(now * 1000),
+                    ts=int(newest_ts * 1000),
                     symbol=symbol,
                     market_index=mi,
                     kind="liq_cluster",

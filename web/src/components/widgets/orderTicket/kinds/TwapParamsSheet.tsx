@@ -37,8 +37,8 @@ export interface TwapParamsState {
 function TwapRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex w-full justify-between gap-2 text-xs">
-      <span className="whitespace-nowrap text-muted">{label}</span>
-      <span className="font-mono tabular-nums text-text">{value}</span>
+      <span className="whitespace-nowrap text-muted-foreground">{label}</span>
+      <span className="font-mono tabular-nums text-foreground">{value}</span>
     </div>
   );
 }
@@ -56,7 +56,7 @@ function ToggleRow({
 }) {
   return (
     <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
-      <FieldLabel htmlFor={id} className="text-xs font-normal text-muted">
+      <FieldLabel htmlFor={id} className="text-xs font-normal text-muted-foreground">
         {label}
       </FieldLabel>
       <Switch
@@ -105,7 +105,7 @@ export function TwapParamsSheet({
         onCheckedChange={(on) => set({ twapAdvanced: on })}
       />
       <div className="flex flex-col gap-1">
-        <p className="text-xs text-muted">Running Time (1m – 30d)</p>
+        <p className="text-xs text-muted-foreground">Running Time (1m – 30d)</p>
         <FieldGroup className="grid grid-cols-2 gap-1">
           <TicketField
             id="twap-hours"

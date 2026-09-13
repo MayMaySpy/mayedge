@@ -58,7 +58,7 @@ function ToggleRow({
 }) {
   return (
     <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
-      <FieldLabel htmlFor={id} className="text-xs font-normal text-muted">
+      <FieldLabel htmlFor={id} className="text-xs font-normal text-muted-foreground">
         {label}
       </FieldLabel>
       <Switch
@@ -238,14 +238,14 @@ export function LadderParamsSheet({
       ) : null}
       {preview && (
         <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 font-mono text-[10px] text-muted">{preview}</p>
+          <p className="min-w-0 font-mono text-[10px] text-muted-foreground">{preview}</p>
           <Button
             type="button"
             variant="ghost"
             size="sm"
             disabled={!plan}
             onClick={() => setPreviewOpen(true)}
-            className="h-auto shrink-0 px-1 py-0 text-[10px] font-medium text-muted hover:text-text"
+            className="h-auto shrink-0 px-1 py-0 text-[10px] font-medium text-muted-foreground hover:text-text"
           >
             Preview
           </Button>

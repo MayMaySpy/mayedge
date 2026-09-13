@@ -50,6 +50,7 @@ class TestSplitWsType(unittest.TestCase):
 
 class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self.out: list[dict] = []
         gw = LighterGateway.__new__(LighterGateway)
         gw._current_market_index = 120
         gw._recent_trades = {120: [Trade(price="1", size="1", side="buy", timestamp=1)]}
@@ -57,8 +58,7 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
         gw._max_1s = 3600
         gw._subscribers = []
         gw._markets = {}
-        gw._liqs = LiquidationFeed(lambda _msg: None, persist=False)
-        self.out: list[dict] = []
+        gw._liqs = LiquidationFeed(self.out.append, persist=False)
         gw.subscribe(self.out.append)
         self.gw = gw
 
@@ -133,6 +133,7 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
         rows = self.gw._liqs.recent()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["trade_id"], "1:liquidation:t99")
+        self.assertFalse(any(m.get("type") == "liquidations" for m in self.out))
 
     async def test_trade_fe_update_routes_to_tape(self) -> None:
         await handle_ws_message(

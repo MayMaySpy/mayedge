@@ -55,7 +55,7 @@ export function HeaderNumberInput({
           type="button"
           tabIndex={-1}
           aria-label="Increase"
-          className="flex h-1/2 items-center justify-center text-muted hover:bg-elevated hover:text-text"
+          className="flex h-1/2 items-center justify-center text-muted-foreground hover:bg-elevated hover:text-foreground"
           onClick={() => bump(1)}
         >
           <ChevronUp className="size-2.5" />
@@ -64,7 +64,7 @@ export function HeaderNumberInput({
           type="button"
           tabIndex={-1}
           aria-label="Decrease"
-          className="flex h-1/2 items-center justify-center border-t border-rule text-muted hover:bg-elevated hover:text-text"
+          className="flex h-1/2 items-center justify-center border-t border-rule text-muted-foreground hover:bg-elevated hover:text-text"
           onClick={() => bump(-1)}
         >
           <ChevronDown className="size-2.5" />

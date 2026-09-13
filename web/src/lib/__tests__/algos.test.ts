@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   algoAvgFillPrice,
   algoCanResume,
+  algoCapturedPnl,
   algoFillProgress,
   algoIsPaused,
   algoReasonLabel,
@@ -39,6 +40,14 @@ describe("algoFillProgress", () => {
     });
     expect(filled).toBe(10);
     expect(remaining).toBe(390);
+  });
+});
+
+describe("algoCapturedPnl", () => {
+  it("is only for the grid and defaults to 0", () => {
+    expect(algoCapturedPnl({ algo_type: "chase-iceberg", captured_pnl: "12" })).toBeNull();
+    expect(algoCapturedPnl({ algo_type: "chase-grid" })).toBe(0);
+    expect(algoCapturedPnl({ algo_type: "chase-grid", captured_pnl: "12.5" })).toBe(12.5);
   });
 });
 

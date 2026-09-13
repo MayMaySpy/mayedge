@@ -39,7 +39,7 @@ import {
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { formatSize } from "@/lib/utils";
 
-const LAYOUT_KEY = "mayedge-layout-v14";
+const LAYOUT_KEY = "mayedge-layout-v16";
 const VISIBILITY_KEY = "mayedge-visibility-v10";
 
 const GRID_COLS = 12;
@@ -47,7 +47,7 @@ const GRID_ROWS = 24;
 const MARGIN = 4;
 const PAD = 4;
 
-/** Chart + book/tape + ticket on top, blotter row below. */
+/** Chart is the stage; ticket is a tool column; blotter is a ledger. */
 const DEFAULT_LAYOUT: LayoutItem[] = [
   { i: "chart", x: 0, y: 0, w: 7, h: 16, minW: 4, minH: 6 },
   { i: "book", x: 7, y: 0, w: 2, h: 10, minW: 2, minH: 4 },
@@ -469,13 +469,14 @@ export function Dashboard() {
         tradingEnabled={deskTradingEnabled}
         editing={editing}
         onEditToggle={() => setEditing((open) => !open)}
+        onResetLayout={resetLayout}
       />
 
       {editing && (
         <div className="flex shrink-0 items-center gap-2 border-b border-rule bg-panel px-3 py-1">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {hiddenPanels.length === 0 ? (
-              <span className="text-[11px] text-muted">All panels on the desk</span>
+              <span className="text-[11px] text-muted-foreground">All panels on the desk</span>
             ) : (
               hiddenPanels.map((id) => (
                 <Button
@@ -490,20 +491,9 @@ export function Dashboard() {
               ))
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button type="button" variant="ghost" size="sm" onClick={resetLayout}>
-              Reset
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="font-semibold text-text"
-              onClick={() => setEditing(false)}
-            >
-              Done
-            </Button>
-          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditing(false)}>
+            Done
+          </Button>
         </div>
       )}
 

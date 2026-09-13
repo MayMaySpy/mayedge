@@ -108,7 +108,7 @@ export interface OpenOrder {
 export interface Account {
   collateral: string;
   available: string;
-  /** Venue available_balance — use for max order size. */
+  /** Free margin for max order size: USDC available + LTV of non-quote collateral. */
   trade_available?: string;
   portfolio_margin?: string;
   unrealized_pnl: string;
@@ -215,6 +215,7 @@ export interface AlgoState {
   working_ask?: AlgoClip | null;
   inventory?: string | null;
   inventory_vwap?: string | null;
+  captured_pnl?: string | null;
   profit_bps?: string | null;
   grid_bps?: string | null;
   be_delay_ms?: number | null;

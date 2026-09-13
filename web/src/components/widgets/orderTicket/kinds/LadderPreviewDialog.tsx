@@ -38,7 +38,7 @@ export function LadderPreviewDialog({
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted">Average entry</span>
+            <span className="text-xs text-muted-foreground">Average entry</span>
             <span className="font-mono text-xs tabular-nums text-text">
               {formatPrice(plan.avgEntry, priceDecimals)}
             </span>
@@ -46,7 +46,7 @@ export function LadderPreviewDialog({
           <div className="border-t border-dashed border-rule" />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-semibold text-text">Quantity allocation</span>
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
               <span className="w-20">Price</span>
               <span className="flex-1 text-center">Quantity</span>
               <span className="w-16 text-right">Share</span>
@@ -57,7 +57,7 @@ export function LadderPreviewDialog({
                 const live = i < liveN;
                 return (
                   <div key={`${row.price}-${i}`} className="flex items-center justify-between">
-                    <span className="w-20 font-mono text-xs tabular-nums text-muted">
+                    <span className="w-20 font-mono text-xs tabular-nums text-muted-foreground">
                       {formatPrice(row.price, priceDecimals)}
                     </span>
                     <div className="flex flex-1 items-center justify-center gap-1">
@@ -65,17 +65,17 @@ export function LadderPreviewDialog({
                         {formatSize(row.qty)} {symbol}
                       </span>
                       {live ? (
-                        <span className="text-[9px] uppercase tracking-wide text-muted">live</span>
+                        <span className="text-[9px] uppercase tracking-wide text-muted-foreground">live</span>
                       ) : null}
                     </div>
-                    <span className="w-16 text-right font-mono text-xs tabular-nums text-muted">
+                    <span className="w-16 text-right font-mono text-xs tabular-nums text-muted-foreground">
                       {share.toFixed(share >= 10 ? 0 : 1)}%
                     </span>
                   </div>
                 );
               })}
             </div>
-            <p className="text-[10px] text-muted">
+            <p className="text-[10px] text-muted-foreground">
               {liveN} of {plan.orders.length} closest rest live; refill on fill.
             </p>
           </div>

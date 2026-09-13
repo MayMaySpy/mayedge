@@ -149,9 +149,10 @@ export function minSizeHint(
 /**
  * Max base size the ticket can send.
  *
- * Lighter order-margin (cross): same-side needs notional/lev from free balance;
- * opposite-side credits 2×|pos| notional before consuming free margin — so a full
- * close+flip costs ~0 extra margin, and max opposite = 2×|pos| + available×lev/price.
+ * Lighter order-margin (cross): same-side needs notional/lev from free TAV
+ * (USDC available + LTV of non-quote collateral); opposite-side credits 2×|pos|
+ * notional before consuming free margin — so a full close+flip costs ~0 extra
+ * margin, and max opposite = 2×|pos| + available×lev/price.
  */
 export function maxOrderSize(opts: {
   available: number;

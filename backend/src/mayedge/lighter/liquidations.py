@@ -154,6 +154,7 @@ class LiquidationFeed:
         rows: list[Any],
         *,
         get_market: Callable[[int], MarketMeta | None],
+        snapshot: bool = False,
     ) -> None:
         meta = get_market(market_index)
         symbol = meta.symbol if meta else f"M{market_index}"
@@ -233,6 +234,10 @@ class LiquidationFeed:
                 logger.exception("failed to persist liquidations")
 
         self._rebuild_ring()
+        if snapshot:
+            # Venue subscribed/* dumps last-N trades. Ring/DB should absorb
+            # them; broadcasting would look like a live cluster to alerts.
+            return
         public = [g.public() for g in changed.values()]
         public.sort(key=lambda e: int(e.get("timestamp") or 0), reverse=True)
         self._broadcast({"type": "liquidations", "items": public})

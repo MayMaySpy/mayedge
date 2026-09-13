@@ -342,6 +342,44 @@ class ExploitDetectorTest(unittest.TestCase):
         kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
         self.assertIn("liq_cluster", kinds)
 
+    def test_liq_cluster_ignores_stale_backlog(self) -> None:
+        now = time.time()
+        stale_ms = int((now - 3600) * 1000)
+        items = [
+            {
+                "market_index": 1,
+                "symbol": "ETH",
+                "trade_id": f"1:liquidation:{i}",
+                "usd_amount": "60000",
+                "side": "sell",
+                "timestamp": stale_ms,
+            }
+            for i in range(12)
+        ]
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_liquidations(items)
+        self.assertEqual(self.events, [])
+
+    def test_liq_cluster_uses_event_time_not_arrival(self) -> None:
+        now = time.time()
+        recent_ms = int((now - 8) * 1000)
+        items = [
+            {
+                "market_index": 1,
+                "symbol": "ETH",
+                "trade_id": f"1:liquidation:{i}",
+                "usd_amount": "60000",
+                "side": "sell",
+                "timestamp": recent_ms,
+            }
+            for i in range(4)
+        ]
+        with patch("mayedge.alerts.time.time", return_value=now):
+            self.det.on_liquidations(items)
+        ev = next(e for batch in self.events for e in batch.get("events", []))
+        self.assertEqual(ev["kind"], "liq_cluster")
+        self.assertEqual(ev["ts"], recent_ms)
+
     def test_liq_cluster_does_not_count_fills_of_one_order(self) -> None:
         now = time.time()
         items = [

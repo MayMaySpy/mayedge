@@ -49,3 +49,15 @@ def portfolio_margin_usd(
             continue
         total += ltv * qty * index
     return total
+
+
+def trade_available_usd(
+    available: float, portfolio_margin: float, cross_portfolio: float
+) -> float:
+    """Free margin for new orders: USDC available + LTV of non-quote collateral.
+
+    Lighter ``available_balance`` is USDC-only. Order risk checks use TAV, so
+    buying power must include the haircut already in ``portfolio_margin``.
+    """
+    asset_margin = max(0.0, portfolio_margin - max(cross_portfolio, 0.0))
+    return max(0.0, available) + asset_margin

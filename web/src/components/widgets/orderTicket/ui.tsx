@@ -1,7 +1,5 @@
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   InputGroup,
   InputGroupAddon,
@@ -56,58 +54,44 @@ export function TicketField({
   hintWarn?: boolean;
   chips?: TicketChipSet;
 }) {
-  const input = (
-    <InputGroupInput
-      id={id}
-      value={value}
-      inputMode={inputMode}
-      onChange={(e) => onChange(sanitize ? sanitize(e.target.value) : e.target.value)}
-      placeholder={placeholder}
-      aria-label={label}
-      aria-invalid={hintWarn || undefined}
-      aria-describedby={hint ? `${id}-hint` : undefined}
-    />
-  );
-
-  const field = (
-    <Field className={chips ? undefined : className} data-invalid={hintWarn || undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      {addon != null || hint ? (
-        <InputGroup>
-          {input}
-          <InputGroupAddon align="inline-end">
-            {hint ? (
-              <InputGroupText
-                id={`${id}-hint`}
-                title={hint}
-                className={cn("min-w-0 truncate", hintWarn && "text-destructive")}
-              >
-                {hint}
-              </InputGroupText>
-            ) : null}
-            {typeof addon === "string" ? <InputGroupText>{addon}</InputGroupText> : addon}
-          </InputGroupAddon>
-        </InputGroup>
-      ) : (
-        <Input
-          id={id}
-          value={value}
-          inputMode={inputMode}
-          onChange={(e) => onChange(sanitize ? sanitize(e.target.value) : e.target.value)}
-          placeholder={placeholder}
-          aria-label={label}
-          aria-invalid={hintWarn || undefined}
-        />
-      )}
-    </Field>
-  );
-
-  if (!chips) return field;
-
   return (
     <div className={cn("flex flex-col gap-1", className)}>
-      {field}
-      <TicketChips {...chips} />
+      <Field data-invalid={hintWarn || undefined}>
+        <FieldLabel htmlFor={id} className="sr-only">
+          {label}
+        </FieldLabel>
+        <InputGroup>
+          <InputGroupAddon align="inline-start">
+            <InputGroupText className="text-xs font-normal">{label}</InputGroupText>
+          </InputGroupAddon>
+          <InputGroupInput
+            id={id}
+            value={value}
+            inputMode={inputMode}
+            onChange={(e) => onChange(sanitize ? sanitize(e.target.value) : e.target.value)}
+            placeholder={placeholder}
+            aria-label={label}
+            aria-invalid={hintWarn || undefined}
+            aria-describedby={hint ? `${id}-hint` : undefined}
+            className="text-right font-mono tabular-nums"
+          />
+          {addon != null ? (
+            <InputGroupAddon align="inline-end">
+              {typeof addon === "string" ? <InputGroupText>{addon}</InputGroupText> : addon}
+            </InputGroupAddon>
+          ) : null}
+        </InputGroup>
+        {hint ? (
+          <FieldDescription
+            id={`${id}-hint`}
+            title={hint}
+            className={cn("truncate", hintWarn && "text-destructive")}
+          >
+            {hint}
+          </FieldDescription>
+        ) : null}
+      </Field>
+      {chips ? <TicketChips {...chips} /> : null}
     </div>
   );
 }
@@ -133,30 +117,6 @@ export function TicketChips({
 }) {
   const aria = ariaLabel ?? label ?? "Options";
 
-  if (!sticky) {
-    return (
-      <Field className={cn("gap-1", className)}>
-        {label ? <FieldLabel>{label}</FieldLabel> : null}
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label={aria}>
-          {items.map((item) => (
-            <Button
-              key={item.value}
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => onValueChange(item.value)}
-            >
-              {item.label}
-            </Button>
-          ))}
-        </div>
-        {trailing}
-      </Field>
-    );
-  }
-
   return (
     <Field
       orientation={label ? "horizontal" : "vertical"}
@@ -165,14 +125,15 @@ export function TicketChips({
       {label ? <FieldLabel className="flex-none">{label}</FieldLabel> : null}
       <ToggleGroup
         type="single"
-        variant="outline"
+        variant="ghost"
         size="sm"
-        spacing={2}
-        value={value ?? ""}
+        spacing={1}
+        value={sticky ? (value ?? "") : ""}
         onValueChange={(v) => {
           if (v) onValueChange(v);
         }}
         aria-label={aria}
+        className="w-full min-w-0"
       >
         {items.map((item) => (
           <ToggleGroupItem
@@ -180,8 +141,9 @@ export function TicketChips({
             value={item.value}
             title={item.title}
             disabled={item.disabled}
+            className="h-6 min-w-0 flex-1 px-1"
           >
-            {item.label}
+            <span className="truncate">{item.label}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
@@ -210,9 +172,7 @@ export function SlipControl({
       items={SLIP_PRESETS.map((p) => ({ value: String(p), label: `${p}%` }))}
       trailing={
         worst != null ? (
-          <FieldDescription className="font-mono tabular-nums">
-            {formatPrice(worst)}
-          </FieldDescription>
+          <FieldDescription className="font-mono tabular-nums">{formatPrice(worst)}</FieldDescription>
         ) : null
       }
     />

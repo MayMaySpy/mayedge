@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { LayoutGrid } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FavoritesBar } from "@/components/widgets/FavoritesBar";
@@ -32,6 +42,7 @@ interface HeaderProps {
   tradingEnabled: boolean;
   editing: boolean;
   onEditToggle: () => void;
+  onResetLayout: () => void;
 }
 
 function formatOi(value: number | null | undefined): string {
@@ -46,6 +57,7 @@ function HeaderStat({
   hint,
   hintClass,
   title,
+  loud,
 }: {
   label: string;
   value: string;
@@ -53,13 +65,24 @@ function HeaderStat({
   hint?: string;
   hintClass?: string;
   title?: string;
+  loud?: boolean;
 }) {
   const body = (
     <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="font-sans text-[11px] text-muted">{label}</span>
-      <span className={cn("font-mono text-[11px] tabular-nums text-text", valueClass)}>{value}</span>
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          "font-mono tabular-nums text-foreground",
+          loud ? "text-base font-medium leading-none" : "text-[13px]",
+          valueClass
+        )}
+      >
+        {value}
+      </span>
       {hint ? (
-        <span className={cn("font-mono text-[10px] tabular-nums text-muted", hintClass)}>{hint}</span>
+        <span className={cn("font-mono text-[11px] tabular-nums text-muted-foreground", hintClass)}>
+          {hint}
+        </span>
       ) : null}
     </span>
   );
@@ -69,7 +92,7 @@ function HeaderStat({
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="inline-flex cursor-default rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-bid"
+          className="inline-flex cursor-default rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           {body}
         </button>
@@ -80,7 +103,7 @@ function HeaderStat({
 }
 
 function StatRule() {
-  return <Separator orientation="vertical" className="h-3.5 self-center bg-rule" />;
+  return <Separator orientation="vertical" className="h-4 self-center" />;
 }
 
 function fundingTooltip(rate: number | null, apr: number | null): string | undefined {
@@ -101,6 +124,7 @@ export function Header({
   tradingEnabled,
   editing,
   onEditToggle,
+  onResetLayout,
 }: HeaderProps) {
   const [killOpen, setKillOpen] = useState(false);
   const [killBusy, setKillBusy] = useState(false);
@@ -144,39 +168,19 @@ export function Header({
         : health.account_ws === "down"
           ? "down"
           : "reconnecting";
-  const accountLabel =
-    accountStatus === "live"
-      ? "Acct live"
-      : accountStatus === "stale"
-        ? "Acct stale"
-        : accountStatus === "down"
-          ? "Acct down"
-          : "Acct reconnect";
-  const accountVariant =
-    accountStatus === "live" ? "bid" : accountStatus === "down" ? "muted" : "ask";
-  const accountDot =
-    accountStatus === "live"
-      ? "bg-bid"
-      : accountStatus === "down"
-        ? "bg-muted-foreground"
-        : "bg-ask";
+
+  const worst =
+    marketStatus === "live" && accountStatus === "live"
+      ? "live"
+      : marketStatus === "connecting" && accountStatus !== "down"
+        ? "connecting"
+        : marketStatus === "stale" || accountStatus === "stale" || marketStatus === "reconnecting" || accountStatus === "reconnecting"
+          ? "stale"
+          : "down";
 
   const statusLabel =
-    marketStatus === "live"
-      ? "Live"
-      : marketStatus === "stale"
-        ? "Stale"
-        : marketStatus === "connecting"
-          ? "Connecting"
-          : "Reconnecting";
-  const statusVariant =
-    marketStatus === "live" ? "bid" : marketStatus === "connecting" ? "muted" : "ask";
-  const statusDot =
-    marketStatus === "live"
-      ? "bg-bid"
-      : marketStatus === "connecting"
-        ? "bg-muted-foreground"
-        : "bg-ask";
+    worst === "live" ? "Live" : worst === "connecting" ? "Connecting" : worst === "stale" ? "Stale" : "Down";
+  const statusVariant = worst === "live" ? "bid" : worst === "connecting" ? "muted" : "ask";
 
   const fundingApr = current?.funding_apr ?? null;
   const fundingRate = current?.funding_rate ?? null;
@@ -191,13 +195,6 @@ export function Header({
         ? `Mark ${formatPrice(mark)}`
         : undefined;
   const fundingTitle = fundingTooltip(fundingRate, fundingApr);
-  const statusTitle = [
-    health.trade_subs_target ? `trade subs ${health.trade_subs}/${health.trade_subs_target}` : null,
-    `market ${health.market_ws}`,
-    `account ${health.account_ws}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   const distClass =
     distPct == null
@@ -208,7 +205,7 @@ export function Header({
           ? "text-ask"
           : undefined;
   const fundingClass =
-    fundingApr == null ? "text-muted" : fundingApr >= 0 ? "text-ask" : "text-bid";
+    fundingApr == null ? "text-muted-foreground" : fundingApr >= 0 ? "text-ask" : "text-bid";
 
   const runKill = async (flatten: boolean) => {
     setKillBusy(true);
@@ -228,40 +225,6 @@ export function Header({
     }
   };
 
-  let accountBadge: ReactNode = (
-    <Badge variant={accountVariant}>
-      <span className={cn("inline-block size-1.5 rounded-full", accountDot)} />
-      {accountLabel}
-    </Badge>
-  );
-  if (statusTitle) {
-    accountBadge = (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">{accountBadge}</span>
-        </TooltipTrigger>
-        <TooltipContent>{statusTitle}</TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  let statusBadge: ReactNode = (
-    <Badge variant={statusVariant}>
-      <span className={cn("inline-block size-1.5 rounded-full", statusDot)} />
-      {statusLabel}
-    </Badge>
-  );
-  if (statusTitle) {
-    statusBadge = (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">{statusBadge}</span>
-        </TooltipTrigger>
-        <TooltipContent>Market feed: {health.market_ws}</TooltipContent>
-      </Tooltip>
-    );
-  }
-
   const flattenLegs = openPositions.map((p) => {
     const sz = Math.abs(parseFloat(p.size) || 0);
     const px = parseFloat(p.mark_price) || parseFloat(p.entry_price) || 0;
@@ -269,20 +232,33 @@ export function Header({
   });
   const flattenNotional = flattenLegs.reduce((s, l) => s + l.notional, 0);
 
+  let healthBadge: ReactNode = (
+    <Badge variant={statusVariant}>
+      <span
+        className={cn(
+          "inline-block size-1.5 rounded-full",
+          worst === "live" ? "bg-bid" : worst === "connecting" ? "bg-muted-foreground" : "bg-ask"
+        )}
+      />
+      {statusLabel}
+    </Badge>
+  );
+
   return (
     <div className="shrink-0">
-      <header className="grid h-9 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-rule bg-panel px-3">
-        <div className="min-w-0 justify-self-start flex items-center gap-2">
+      <header className="grid h-11 grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-border bg-card px-3">
+        <div className="min-w-0 justify-self-start">
           <MarketPicker markets={markets} symbol={symbol} onSymbolChange={onSymbolChange} />
         </div>
 
-        <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+        <div className="flex min-w-0 items-center justify-center gap-3 overflow-x-auto">
           <HeaderStat
             label="Mark"
             value={mark != null ? formatPrice(mark) : "—"}
             hint={distPct != null ? formatPct(distPct) : undefined}
             hintClass={distClass}
             title={markTitle}
+            loud
           />
           <StatRule />
           <HeaderStat
@@ -296,47 +272,65 @@ export function Header({
           <HeaderStat label="OI" value={formatOi(oi)} />
         </div>
 
-        <div className="flex min-w-0 items-center justify-end gap-3 justify-self-end">
+        <div className="flex min-w-0 items-center justify-end gap-2 justify-self-end">
           {account ? (
             <HeaderStat
               label="Margin"
               value={formatPrice(account.portfolio_margin ?? "0", 2)}
-              title="Portfolio Margin"
+              title="Portfolio margin"
             />
           ) : null}
 
-          <div className="flex shrink-0 items-center gap-2 font-mono text-[10px]">
-            {statusBadge}
-            {accountBadge}
-            {algosRunning > 0 && (
-              <Badge variant="warn" title="Working algos">
-                {algosRunning} algo{algosRunning === 1 ? "" : "s"}
-              </Badge>
-            )}
-            <Badge variant="muted">{network}</Badge>
-            {!tradingEnabled && <Badge variant="muted">Read-only</Badge>}
-            {tradingEnabled && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 border-ask/40 px-2 text-[10px] text-ask hover:bg-ask/10"
-                onClick={() => setKillOpen(true)}
-              >
-                Kill
-              </Button>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                {healthBadge}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Feeds</DropdownMenuLabel>
+                <DropdownMenuItem disabled>
+                  Market {health.market_ws}
+                  {health.trade_subs_target
+                    ? ` · trades ${health.trade_subs}/${health.trade_subs_target}`
+                    : ""}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled>Account {health.account_ws}</DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <Button
-            type="button"
-            variant={editing ? "outline" : "ghost"}
-            size="sm"
-            onClick={onEditToggle}
-            className={editing ? "font-semibold text-text" : undefined}
-          >
-            {editing ? "Done" : "Edit"}
-          </Button>
+          {algosRunning > 0 && (
+            <Badge variant="warn">
+              {algosRunning} algo{algosRunning === 1 ? "" : "s"}
+            </Badge>
+          )}
+          <Badge variant="outline">{network}</Badge>
+          {!tradingEnabled && <Badge variant="muted">Read-only</Badge>}
+          {tradingEnabled && (
+            <Button type="button" variant="danger" size="sm" className="h-7" onClick={() => setKillOpen(true)}>
+              Kill
+            </Button>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant={editing ? "outline" : "ghost"} size="sm" className="h-7">
+                <LayoutGrid data-icon="inline-start" />
+                {editing ? "Done" : "Layout"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={onEditToggle}>
+                  {editing ? "Done editing" : "Edit layout"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onResetLayout}>Reset layout</DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
       <Dialog open={killOpen} onOpenChange={setKillOpen}>
@@ -347,7 +341,7 @@ export function Header({
               Stop all algos and cancel every open order. Optionally flatten every open
               position with market reduce-only orders.
               {openPositions.length > 0 && (
-                <span className="mt-2 block font-mono text-[11px] text-text">
+                <span className="mt-2 block font-mono text-[12px] text-foreground">
                   Flatten: {openPositions.length} position
                   {openPositions.length === 1 ? "" : "s"}
                   {flattenNotional > 0
@@ -364,7 +358,7 @@ export function Header({
             <Button type="button" variant="outline" disabled={killBusy} onClick={() => runKill(false)}>
               Stop + cancel
             </Button>
-            <Button type="button" variant="danger" disabled={killBusy} onClick={() => runKill(true)}>
+            <Button type="button" variant="destructive" disabled={killBusy} onClick={() => runKill(true)}>
               Stop + flatten
             </Button>
           </DialogFooter>

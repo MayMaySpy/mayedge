@@ -5,24 +5,26 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Desk tokens — keep after shadcn so trading colors win over nova defaults. */
-@theme {
-  --color-canvas: #0a0c0f;
-  --color-panel: #0e1116;
-  --color-elevated: #1a1f27;
-  --color-rule: #252b34;
-  --color-bid: #2ecc71;
-  --color-ask: #ff4d5e;
-  --color-warn: #e8b84a;
-  --color-text: #f2f5f8;
-  /* Desk muted text (not shadcn surface — use text-muted / text-muted-foreground). */
-  --color-muted: #b4bcc6;
+/*
+  Desk tokens mapped onto shadcn semantics.
+  --muted is a surface. Muted *text* is --muted-foreground.
+  Bid/ask/warn are extra semantic colors, not primary.
+*/
+@theme inline {
+  --color-canvas: var(--background);
+  --color-panel: var(--card);
+  --color-elevated: var(--secondary);
+  --color-rule: var(--border);
+  --color-text: var(--foreground);
+  --color-bid: var(--bid);
+  --color-ask: var(--ask);
+  --color-warn: var(--warn);
+  --color-loss: var(--ask);
+
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-heading: "IBM Plex Sans", system-ui, sans-serif;
-}
 
-@theme inline {
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -43,6 +45,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -62,41 +65,43 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Always-dark trading desk — map shadcn semantics onto desk palette. */
 :root,
 .dark {
-  --background: #0a0c0f;
-  --foreground: #f2f5f8;
-  --card: #0e1116;
-  --card-foreground: #f2f5f8;
-  --popover: #0e1116;
-  --popover-foreground: #f2f5f8;
-  --primary: #2ecc71;
-  --primary-foreground: #0a0c0f;
-  --secondary: #1a1f27;
-  --secondary-foreground: #f2f5f8;
-  --muted: #1a1f27;
-  --muted-foreground: #b4bcc6;
-  --accent: #1a1f27;
-  --accent-foreground: #f2f5f8;
-  --destructive: #ff4d5e;
-  --border: #252b34;
-  --input: #252b34;
-  --ring: #2ecc71;
-  --chart-1: #2ecc71;
-  --chart-2: #ff4d5e;
-  --chart-3: #9aa3ae;
-  --chart-4: #1a1f27;
-  --chart-5: #f2f5f8;
+  --background: #0b1018;
+  --foreground: #e8eef6;
+  --card: #10161f;
+  --card-foreground: #e8eef6;
+  --popover: #1a232e;
+  --popover-foreground: #e8eef6;
+  --primary: #e8eef6;
+  --primary-foreground: #0b1018;
+  --secondary: #171e28;
+  --secondary-foreground: #e8eef6;
+  --muted: #171e28;
+  --muted-foreground: #8b97a8;
+  --accent: #1c2430;
+  --accent-foreground: #e8eef6;
+  --destructive: #ee5a68;
+  --border: #243040;
+  --input: #243040;
+  --ring: #6b8caf;
+  --bid: #3dcc7a;
+  --ask: #ee5a68;
+  --warn: #e0b04a;
+  --chart-1: #3dcc7a;
+  --chart-2: #ee5a68;
+  --chart-3: #8b97a8;
+  --chart-4: #171e28;
+  --chart-5: #e8eef6;
   --radius: 0.25rem;
-  --sidebar: #0e1116;
-  --sidebar-foreground: #f2f5f8;
-  --sidebar-primary: #2ecc71;
-  --sidebar-primary-foreground: #0a0c0f;
-  --sidebar-accent: #1a1f27;
-  --sidebar-accent-foreground: #f2f5f8;
-  --sidebar-border: #252b34;
-  --sidebar-ring: #2ecc71;
+  --sidebar: #10161f;
+  --sidebar-foreground: #e8eef6;
+  --sidebar-primary: #e8eef6;
+  --sidebar-primary-foreground: #0b1018;
+  --sidebar-accent: #171e28;
+  --sidebar-accent-foreground: #e8eef6;
+  --sidebar-border: #243040;
+  --sidebar-ring: #6b8caf;
 }
 
 * {
@@ -115,9 +120,9 @@ body,
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-canvas);
-  color: var(--color-text);
-  font-size: 14px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -128,8 +133,8 @@ body {
 }
 
 .panel {
-  background: var(--color-panel);
-  border: 1px solid var(--color-rule);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
 .panel-drag {
@@ -169,11 +174,11 @@ body {
 }
 
 .react-grid-item > .react-resizable-handle::after {
-  border-color: var(--color-muted) !important;
+  border-color: var(--muted-foreground) !important;
 }
 
 .react-grid-placeholder {
-  background: rgba(46, 204, 113, 0.1) !important;
+  background: color-mix(in srgb, var(--bid) 12%, transparent) !important;
 }
 
 [data-fade="x"] {
@@ -200,7 +205,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-elevated);
+  background: var(--secondary);
   border-radius: 2px;
 }
 

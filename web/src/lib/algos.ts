@@ -191,6 +191,15 @@ export function algoFillProgress(algo: {
   return { filled, remaining, total, pct };
 }
 
+export function algoCapturedPnl(algo: {
+  algo_type?: string | null;
+  captured_pnl?: string | null;
+}): number | null {
+  if (algo.algo_type !== "chase-grid") return null;
+  const n = parseFloat(algo.captured_pnl ?? "0");
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function algoAvgFillPrice(
   fills?: { price?: string | null; qty?: string | null }[] | null,
 ): number | null {

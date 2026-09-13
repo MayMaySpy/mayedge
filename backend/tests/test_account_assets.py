@@ -4,7 +4,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from mayedge.lighter.account import AccountService
-from mayedge.lighter.equity import portfolio_margin_usd
+from mayedge.lighter.equity import portfolio_margin_usd, trade_available_usd
 from mayedge.lighter.parse import merge_account_assets
 
 
@@ -38,6 +38,17 @@ class PortfolioMarginTests(TestCase):
             places=2,
         )
 
+    def test_trade_available_adds_asset_ltv_to_usdc_free(self) -> None:
+        # 975.61 USDC free + 1 ETH × 2464.57 × 0.7 LTV
+        self.assertAlmostEqual(
+            trade_available_usd(975.61, 2716.81, 991.611),
+            2700.81,
+            places=2,
+        )
+
+    def test_trade_available_matches_usdc_when_no_assets(self) -> None:
+        self.assertAlmostEqual(trade_available_usd(975.61, 991.611, 991.611), 975.61, places=2)
+
 
 class AccountStatsWireTests(TestCase):
     def test_user_stats_available_and_margin(self) -> None:
@@ -63,7 +74,31 @@ class AccountStatsWireTests(TestCase):
             )
         acc = [m for m in captured if m.get("type") == "account"][-1]
         self.assertEqual(acc["available"], "975.61")
-        self.assertEqual(acc["trade_available"], "975.61")
+        self.assertAlmostEqual(float(acc["trade_available"]), 2700.81, places=2)
         self.assertNotIn("trading_equity", acc)
         self.assertNotIn("spot_equity", acc)
         self.assertAlmostEqual(float(acc["portfolio_margin"]), 2716.81, places=2)
+
+    def test_user_stats_trade_available_stays_usdc_without_assets(self) -> None:
+        svc = AccountService()
+        gw = MagicMock()
+        gw.get_market_by_index.return_value = None
+        gw.get_market.return_value = None
+        captured: list[dict] = []
+        gw.broadcast.side_effect = captured.append
+        with patch("mayedge.lighter.account.gateway", gw):
+            svc.handle_account_ws(
+                {
+                    "type": "update/user_stats",
+                    "stats": {
+                        "collateral": "1050.76",
+                        "portfolio_value": "1048.04",
+                        "available_balance": "975.61",
+                        "cross_stats": {"portfolio_value": "991.611"},
+                    },
+                }
+            )
+        acc = [m for m in captured if m.get("type") == "account"][-1]
+        self.assertEqual(acc["available"], "975.61")
+        self.assertEqual(acc["trade_available"], "975.61")
+        self.assertAlmostEqual(float(acc["portfolio_margin"]), 991.611, places=3)

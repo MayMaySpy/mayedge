@@ -56,7 +56,7 @@ function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[]
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
-  return "text-muted";
+  return "text-muted-foreground";
 }
 
 const EMPTY_TRADES: AccountTrade[] = [];
@@ -169,7 +169,7 @@ export function TradeHistoryTab({
         </div>
       ) : !merged.length ? (
         <Empty className="rounded-none border-0 p-4">
-          <EmptyDescription className="text-[11px] text-muted">
+          <EmptyDescription className="text-[11px] text-muted-foreground">
             {!tradingEnabled
               ? "Connect API key to view trade history"
               : scope === "pair" && market
@@ -208,7 +208,7 @@ export function TradeHistoryTab({
                     }
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >
-                    <TableCell className="text-muted">{tradeTime(t.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{tradeTime(t.timestamp)}</TableCell>
                     <TableCell>{t.symbol}</TableCell>
                     <TableCell className={t.side === "buy" ? "text-bid" : "text-ask"}>
                       {t.side}
@@ -221,7 +221,7 @@ export function TradeHistoryTab({
                     <TableCell className={cn("text-right", pnlClass(pnl))}>
                       {formatSigned(t.pnl)}
                     </TableCell>
-                    <TableCell className="text-right text-muted">
+                    <TableCell className="text-right text-muted-foreground">
                       {t.is_maker ? "maker" : "taker"}
                     </TableCell>
                   </TableRow>

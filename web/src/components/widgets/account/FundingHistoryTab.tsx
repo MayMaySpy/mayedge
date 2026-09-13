@@ -29,7 +29,7 @@ function fundingTime(ts: number) {
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
-  return "text-muted";
+  return "text-muted-foreground";
 }
 
 interface FundingHistoryTabProps {
@@ -133,7 +133,7 @@ export function FundingHistoryTab({
         </div>
       ) : !rows.length ? (
         <Empty className="rounded-none border-0 p-4">
-          <EmptyDescription className="text-[11px] text-muted">
+          <EmptyDescription className="text-[11px] text-muted-foreground">
             {!tradingEnabled
               ? "Connect API key to view funding history"
               : scope === "pair" && market
@@ -171,13 +171,13 @@ export function FundingHistoryTab({
                     }
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >
-                    <TableCell className="text-muted">{fundingTime(f.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{fundingTime(f.timestamp)}</TableCell>
                     <TableCell>{f.symbol}</TableCell>
                     <TableCell className={f.side === "long" ? "text-bid" : "text-ask"}>
                       {f.side}
                     </TableCell>
                     <TableCell className="text-right">{formatSize(f.position_size)}</TableCell>
-                    <TableCell className="text-right text-muted">
+                    <TableCell className="text-right text-muted-foreground">
                       {ratePct != null ? formatPct(ratePct, 4) : "—"}
                     </TableCell>
                     <TableCell className={cn("text-right", pnlClass(change))}>

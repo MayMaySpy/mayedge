@@ -148,11 +148,13 @@ class GridRuntime:
     merged_opened_at: int = 0
     clip_kinds: dict[int, str] = field(default_factory=dict)
     handled_fill_qty: dict[int, Decimal] = field(default_factory=dict)
+    captured_pnl: Decimal = Decimal("0")
 
     def to_json(self) -> dict[str, Any]:
         return {
             "inventory": str(self.inventory),
             "inventory_vwap": str(self.inventory_vwap) if self.inventory_vwap is not None else None,
+            "captured_pnl": str(self.captured_pnl),
             "lots": [lot.to_json() for lot in self.lots],
             "hot_cells": [
                 {"cell_price": str(h.cell_price), "until_ms": h.until_ms} for h in self.hot_cells
@@ -183,7 +185,9 @@ class GridRuntime:
                     )
                 )
         kinds_raw = raw.get("clip_kinds") or {}
-        clip_kinds = {int(k): str(v) for k, v in kinds_raw.items()} if isinstance(kinds_raw, dict) else {}
+        clip_kinds = (
+            {int(k): str(v) for k, v in kinds_raw.items()} if isinstance(kinds_raw, dict) else {}
+        )
         handled_raw = raw.get("handled_fill_qty") or {}
         handled_fill_qty = (
             {int(k): Decimal(str(v)) for k, v in handled_raw.items()}
@@ -197,7 +201,9 @@ class GridRuntime:
         return cls(
             inventory=Decimal(str(raw.get("inventory") or "0")),
             inventory_vwap=Decimal(str(inv_vwap)) if inv_vwap is not None else None,
-            lots=[Lot.from_json(item) for item in (raw.get("lots") or []) if isinstance(item, dict)],
+            lots=[
+                Lot.from_json(item) for item in (raw.get("lots") or []) if isinstance(item, dict)
+            ],
             hot_cells=hot,
             reentry_until=int(raw.get("reentry_until") or 0),
             grid_anchor=Decimal(str(anchor)) if anchor is not None else None,
@@ -207,6 +213,7 @@ class GridRuntime:
             merged_opened_at=int(raw.get("merged_opened_at") or 0),
             clip_kinds=clip_kinds,
             handled_fill_qty=handled_fill_qty,
+            captured_pnl=Decimal(str(raw.get("captured_pnl") or "0")),
         )
 
 
@@ -308,7 +315,9 @@ def _chase_side_quote(
     return SideQuote(GridAction.REST, price=q.price, qty=q.qty, reason=None)
 
 
-def _hot_cell_blocks(side: Side, price: Decimal, runtime: GridRuntime, params: GridParams, now: int) -> bool:
+def _hot_cell_blocks(
+    side: Side, price: Decimal, runtime: GridRuntime, params: GridParams, now: int
+) -> bool:
     if now < runtime.reentry_until:
         return True
     tol = grid_step(price, params.reentry_bps) if price > 0 else Decimal("0")
@@ -383,6 +392,69 @@ def add_fill_to_lots(
     )
 
 
+def align_runtime_to_position(
+    runtime: GridRuntime,
+    *,
+    venue_size: Decimal,
+    entry: Decimal | None,
+    params: GridParams,
+    market: MarketView,
+    now: int,
+) -> None:
+    """Snap lots + inventory to the venue position. Clip fills can drift; the book cannot."""
+    want_qty = abs(venue_size)
+    want_side: LotSide | None = None if venue_size == 0 else ("long" if venue_size > 0 else "short")
+    matching = (
+        sum(
+            (lot.qty for lot in runtime.lots if want_side is not None and lot.side == want_side),
+            Decimal("0"),
+        )
+        if want_side is not None
+        else Decimal("0")
+    )
+    extras = any(
+        lot.qty > 0 and (want_side is None or lot.side != want_side) for lot in runtime.lots
+    )
+    if runtime.inventory == venue_size and matching == want_qty and not extras:
+        return
+
+    runtime.inventory = venue_size
+    runtime.inventory_vwap = entry if venue_size != 0 else None
+    if venue_size == 0 or want_side is None:
+        runtime.lots = []
+        runtime.merged_active = False
+        return
+
+    runtime.lots = [lot for lot in runtime.lots if lot.side == want_side and lot.qty > 0]
+    have = sum((lot.qty for lot in runtime.lots), Decimal("0"))
+    if have > want_qty:
+        reduce_lots(
+            runtime,
+            close_side=want_side,
+            qty=have - want_qty,
+            now=now,
+            reentry_cooldown_ms=0,
+            fill_vwap=None,
+        )
+        have = sum((lot.qty for lot in runtime.lots), Decimal("0"))
+    if have < want_qty:
+        px = entry or runtime.inventory_vwap
+        if px is None or px <= 0:
+            px = (market.bid if want_side == "long" else market.ask) or Decimal("0")
+        add_fill_to_lots(
+            runtime,
+            side="buy" if want_side == "long" else "sell",
+            fill_qty=want_qty - have,
+            fill_vwap=px,
+            params=params,
+            market=market,
+            now=now,
+        )
+    runtime.inventory = venue_size
+    if entry is not None and entry > 0:
+        runtime.inventory_vwap = entry
+
+
 def apply_inventory_delta(
     runtime: GridRuntime,
     *,
@@ -399,14 +471,28 @@ def apply_inventory_delta(
             runtime.inventory_vwap = fill_price
         else:
             runtime.inventory_vwap = (
-                (abs(prev) * (runtime.inventory_vwap or fill_price) + abs(delta) * fill_price)
-                / abs(new_inv)
-            )
+                abs(prev) * (runtime.inventory_vwap or fill_price) + abs(delta) * fill_price
+            ) / abs(new_inv)
     elif new_inv == 0:
         runtime.inventory_vwap = None
     elif (prev > 0 > new_inv) or (prev < 0 < new_inv):
         runtime.inventory_vwap = fill_price
     runtime.inventory = new_inv
+
+
+def lot_close_pnl(lot: Lot, qty: Decimal, close_px: Decimal) -> Decimal:
+    """Gross quote PnL from closing `qty` of `lot` at `close_px`."""
+    if qty <= 0:
+        return Decimal("0")
+    if lot.side == "long":
+        return (close_px - lot.vwap) * qty
+    return (lot.vwap - close_px) * qty
+
+
+def _credit_close(runtime: GridRuntime, lot: Lot, qty: Decimal, close_px: Decimal | None) -> None:
+    if close_px is None or qty <= 0:
+        return
+    runtime.captured_pnl += lot_close_pnl(lot, qty, close_px)
 
 
 def reduce_lots(
@@ -416,6 +502,7 @@ def reduce_lots(
     qty: Decimal,
     now: int,
     reentry_cooldown_ms: int,
+    fill_vwap: Decimal | None = None,
 ) -> Decimal:
     """FIFO-close lots on close_side. Returns qty not absorbed (flip remainder)."""
     leftover = qty
@@ -426,6 +513,7 @@ def reduce_lots(
                 keep.append(lot)
             continue
         take = min(lot.qty, leftover)
+        _credit_close(runtime, lot, take, fill_vwap)
         lot.qty -= take
         leftover -= take
         runtime.hot_cells.append(
@@ -461,6 +549,7 @@ def apply_chase_fill(
             qty=fill_qty,
             now=now,
             reentry_cooldown_ms=params.reentry_cooldown_ms,
+            fill_vwap=fill_vwap,
         )
         apply_inventory_delta(runtime, delta=delta, fill_price=fill_vwap)
         if leftover > 0:
@@ -500,6 +589,7 @@ def credit_tp_fill(
     leftover = qty
     if lot is not None and lot.qty > 0:
         take = min(lot.qty, leftover)
+        _credit_close(runtime, lot, take, fill_vwap)
         lot.qty -= take
         leftover -= take
         runtime.hot_cells.append(
@@ -518,10 +608,9 @@ def credit_tp_fill(
             qty=leftover,
             now=now,
             reentry_cooldown_ms=params.reentry_cooldown_ms,
+            fill_vwap=fill_vwap,
         )
-    apply_inventory_delta(
-        runtime, delta=-qty if side == "sell" else qty, fill_price=fill_vwap
-    )
+    apply_inventory_delta(runtime, delta=-qty if side == "sell" else qty, fill_price=fill_vwap)
 
 
 def credit_grid_fill(
@@ -659,9 +748,7 @@ def decide(
     reason = None
     if not resting:
         reason = (
-            (buy_q.reason if buy_q else None)
-            or (sell_q.reason if sell_q else None)
-            or "waiting"
+            (buy_q.reason if buy_q else None) or (sell_q.reason if sell_q else None) or "waiting"
         )
 
     return GridPlan(

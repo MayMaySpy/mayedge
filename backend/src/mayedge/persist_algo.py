@@ -313,6 +313,9 @@ def _public_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         }
         for f in raw["fills"]
     ]
+    params = raw.get("params_json") if isinstance(raw.get("params_json"), dict) else {}
+    runtime = params.get("runtime") if isinstance(params, dict) else None
+    runtime = runtime if isinstance(runtime, dict) else {}
     working = None
     working_bid = None
     working_ask = None
@@ -359,4 +362,8 @@ def _public_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         "working": working,
         "working_bid": working_bid,
         "working_ask": working_ask,
+        "inventory": runtime.get("inventory"),
+        "inventory_vwap": runtime.get("inventory_vwap"),
+        "captured_pnl": runtime.get("captured_pnl"),
+        "profit_bps": params.get("profit_bps") if isinstance(params, dict) else None,
     }

@@ -41,7 +41,7 @@ export function FillNotice({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="text-xs font-medium text-text">{title}</p>
         {description ? (
-          <p className="font-mono text-[11px] leading-snug wrap-break-word text-muted">{description}</p>
+          <p className="font-mono text-[11px] leading-snug wrap-break-word text-muted-foreground">{description}</p>
         ) : null}
       </div>
     </div>

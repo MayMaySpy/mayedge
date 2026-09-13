@@ -133,6 +133,12 @@ class LiquidationGroupTests(unittest.TestCase):
         self.assertAlmostEqual(float(rows[0]["size"]), 4)
         self.assertAlmostEqual(float(rows[0]["usd_amount"]), 400)
 
+    def test_snapshot_ingest_does_not_broadcast(self) -> None:
+        fills = [self._fill(100 + i, ask_id=100 + i) for i in range(8)]
+        self.feed.ingest(1, fills, get_market=lambda _i: self.eth, snapshot=True)
+        self.assertEqual(len(self.feed.recent()), 8)
+        self.assertFalse(any(m.get("type") == "liquidations" for m in self.out))
+
     def test_buy_taker_groups_on_bid_id(self) -> None:
         fills = [
             self._fill(10 + i, ask_id=800 + i, bid_id=777, is_maker_ask=True)

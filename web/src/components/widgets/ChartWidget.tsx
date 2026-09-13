@@ -10,6 +10,7 @@ import {
   type MouseEventParams,
 } from "lightweight-charts";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { api, type Candle } from "@/lib/api";
@@ -123,7 +124,7 @@ function OhlcReadout({
   showVolume?: boolean;
 }) {
   if (!bar) {
-    return <span className="font-mono text-[11px] text-muted">—</span>;
+    return <span className="font-mono text-[11px] text-muted-foreground">—</span>;
   }
   const up = bar.close >= bar.open;
   const tone = up ? "text-bid" : "text-ask";
@@ -137,8 +138,8 @@ function OhlcReadout({
       {chg != null && <span className={cn("shrink-0", tone)}>{formatPct(chg)}</span>}
       {showVolume ? (
         <span className="inline-flex shrink-0 items-baseline gap-1">
-          <span className="text-muted">V</span>
-          <span className="text-muted">{formatBarVolume(bar.volume ?? 0)}</span>
+          <span className="text-muted-foreground">V</span>
+          <span className="text-muted-foreground">{formatBarVolume(bar.volume ?? 0)}</span>
         </span>
       ) : null}
     </span>
@@ -158,7 +159,7 @@ function OhlcField({
 }) {
   return (
     <span className="inline-flex shrink-0 items-baseline gap-1">
-      <span className="text-muted">{k}</span>
+      <span className="text-muted-foreground">{k}</span>
       <span className={className}>{formatPrice(v, decimals)}</span>
     </span>
   );
@@ -504,23 +505,21 @@ export const ChartWidget = memo(function ChartWidget({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-7 shrink-0 items-center border-b border-rule">
+      <div className="flex h-8 shrink-0 items-center border-b border-border">
         <div className="panel-drag flex min-w-0 flex-1 cursor-move items-center gap-2 px-2">
           <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
         </div>
         <div className="flex shrink-0 items-center gap-px pr-1">
-          <button
-            type="button"
-            aria-pressed={volOn}
+          <Toggle
+            variant="seg"
+            size="sm"
+            pressed={volOn}
             title={volOn ? "Hide volume" : "Show volume"}
-            className={cn(
-              "h-5 rounded-sm px-1.5 font-mono text-[10px]",
-              volOn ? "bg-rule text-text" : "text-muted hover:text-text"
-            )}
-            onClick={toggleVol}
+            className="h-6 px-1.5 font-mono text-[11px]"
+            onPressedChange={() => toggleVol()}
           >
             Vol
-          </button>
+          </Toggle>
           <ToggleGroup
             type="single"
             size="sm"

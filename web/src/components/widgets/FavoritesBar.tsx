@@ -24,7 +24,7 @@ const DRAG_PX = 4;
 const toneClass = {
   bid: "text-bid",
   ask: "text-ask",
-  muted: "text-muted",
+  muted: "text-muted-foreground",
 } as const;
 
 export const FavoritesBar = memo(function FavoritesBar({
@@ -130,7 +130,7 @@ export const FavoritesBar = memo(function FavoritesBar({
   };
 
   return (
-    <div className="relative flex h-8 shrink-0 min-w-0 items-center border-b border-rule bg-panel">
+    <div className="relative flex h-9 shrink-0 min-w-0 items-center border-b border-border bg-card">
       <div
         ref={rowRef}
         data-fade="x"
@@ -154,7 +154,7 @@ export const FavoritesBar = memo(function FavoritesBar({
             >
               <div
                 className={cn(
-                  "flex items-center gap-1 overflow-visible rounded-full px-1 py-0.5 text-sm transition-colors hover:bg-elevated",
+              "flex items-center gap-1 overflow-visible rounded-lg px-1.5 py-0.5 text-sm transition-colors hover:bg-accent",
                   on && "bg-elevated"
                 )}
               >
@@ -165,13 +165,13 @@ export const FavoritesBar = memo(function FavoritesBar({
                 >
                   <TokenMark symbol={m.symbol} className="size-4" />
                   <span className="text-text">{m.symbol}</span>
-                  <span className="tabular-nums text-muted">{favPriceLabel(m)}</span>
+                  <span className="tabular-nums text-muted-foreground">{favPriceLabel(m)}</span>
                   <span className={cn("tabular-nums", toneClass[tone])}>{formatPct(change)}</span>
                 </button>
                 <button
                   type="button"
                   aria-label={`Reorder ${m.symbol}`}
-                  className="flex size-5 shrink-0 cursor-grab touch-none items-center justify-center text-muted hover:text-text active:cursor-grabbing"
+                  className="flex size-5 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground hover:text-text active:cursor-grabbing"
                   onPointerDown={(e) => onGripDown(e, m.symbol)}
                 >
                   <GripVertical className="size-3.5" />

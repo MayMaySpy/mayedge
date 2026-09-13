@@ -236,6 +236,7 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bo
             market_index,
             liq_candidates,
             get_market=gw.get_market_by_index,
+            snapshot=snapshot,
         )
 
     if market_index != gw._current_market_index:

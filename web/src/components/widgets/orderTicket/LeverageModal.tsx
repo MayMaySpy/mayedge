@@ -93,7 +93,7 @@ export function LeverageModal({
             </Button>
           </form>
           {draftDirty && snappedDraft != null ? (
-            <p className="text-[11px] text-muted">
+            <p className="text-[11px] text-muted-foreground">
               Snaps to <span className="font-mono tabular-nums text-text">{snappedDraft}x</span>
             </p>
           ) : null}

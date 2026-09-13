@@ -61,7 +61,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-5 whitespace-nowrap px-2 text-left align-middle font-mono text-[10px] font-normal text-muted",
+        "h-6 whitespace-nowrap px-2 text-left align-middle font-mono text-[11px] font-normal text-muted-foreground",
         className
       )}
       {...props}
@@ -74,7 +74,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "whitespace-nowrap px-2 py-0.5 align-middle font-mono text-[11px] text-text",
+        "whitespace-nowrap px-2 py-1 align-middle font-mono text-[12px] text-foreground",
         className
       )}
       {...props}
@@ -86,7 +86,7 @@ function TableCaption({ className, ...props }: React.ComponentProps<"caption">) 
   return (
     <caption
       data-slot="table-caption"
-      className={cn("mt-2 text-[11px] text-muted", className)}
+      className={cn("mt-2 text-[11px] text-muted-foreground", className)}
       {...props}
     />
   );

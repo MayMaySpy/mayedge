@@ -1,20 +1,19 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { FieldGroup } from "@/components/ui/field";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
 import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins";
@@ -34,7 +33,6 @@ import {
   makerMinSize,
   maxOrderSize,
   minSizeHint,
-  ORDER_KINDS,
   persistSlipPct,
   snapLeverage,
   suggestedLeverage,
@@ -43,7 +41,6 @@ import {
   type OrderKind,
 } from "./math";
 import { SizeField } from "./SizeField";
-import { cn } from "@/lib/utils";
 
 interface OrderTicketProps {
   market: Market | null;
@@ -127,10 +124,8 @@ export function OrderTicket({
         <PanelHeader title="Order" onClose={onClose} />
         <Empty className="rounded-none border-0">
           <EmptyHeader>
-            <EmptyTitle className="text-sm text-text">No market selected</EmptyTitle>
-            <EmptyDescription className="text-[11px] text-muted">
-              Pick a pair from the chart or favorites
-            </EmptyDescription>
+            <EmptyTitle>No market selected</EmptyTitle>
+            <EmptyDescription>Pick a pair from the header or favorites</EmptyDescription>
           </EmptyHeader>
         </Empty>
       </div>
@@ -352,49 +347,84 @@ export function OrderTicket({
           onValueChange={(v) => setKind(v as OrderKind)}
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <div className="flex h-7 shrink-0 items-center border-b border-rule pr-1">
-            <TabsList className="h-7 min-w-0 flex-1 justify-start gap-0 border-b-0 px-1.5">
-              {ORDER_KINDS.filter((k) => k.id !== "algo").map((k) => (
-                <TabsTrigger key={k.id} value={k.id} className="h-7 flex-1 px-1 text-xs">
-                  {k.label}
-                </TabsTrigger>
-              ))}
-              <Select
-                value={algo}
-                onOpenChange={(open) => {
-                  if (open) setKind("algo");
-                }}
-                onValueChange={(v) => {
-                  if (ALGOS.some((a) => a.id === v)) {
-                    setAlgo(v as AlgoId);
-                    setKind("algo");
-                  }
+          <div className="flex shrink-0 flex-col gap-2 border-b border-border p-1.5">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 min-w-0 flex-1"
+                onClick={() => {
+                  setLevDraft(String(lev));
+                  setLevOpen(true);
                 }}
               >
-                <SelectTrigger
+                <span className="font-mono tabular-nums">{lev}x</span>
+              </Button>
+              {!singleAction ? (
+                <Button
+                  type="button"
+                  variant={reduceOnly ? "secondary" : "outline"}
                   size="sm"
-                  aria-label="Algo"
-                  className={cn(
-                    "h-7 min-w-0 flex-1 justify-center rounded-none border-0 border-b bg-transparent px-1 text-xs shadow-none dark:bg-transparent dark:hover:bg-transparent",
-                    kind === "algo"
-                      ? "border-text font-medium text-text"
-                      : "border-transparent text-muted"
-                  )}
+                  className="h-7 min-w-0 flex-1"
+                  aria-pressed={reduceOnly}
+                  title="Reduces position only — will not open or flip"
+                  onClick={() => setReduceOnly((v) => !v)}
                 >
-                  {kind === "algo" ? algoById(algo).label : "Algo"}
-                </SelectTrigger>
-                <SelectContent position="popper" align="center">
-                  <SelectGroup>
+                  Close
+                </Button>
+              ) : null}
+              {onClose ? <PanelCloseButton onClose={onClose} /> : null}
+            </div>
+            <div className="flex items-center gap-1">
+              <ToggleGroup
+                type="single"
+                variant="ghost"
+                size="sm"
+                spacing={0}
+                value={kind === "algo" ? "" : kind}
+                onValueChange={(v) => {
+                  if (v === "market" || v === "limit") setKind(v);
+                }}
+                aria-label="Order type"
+              >
+                <ToggleGroupItem value="market" className="h-7 px-2.5">
+                  Market
+                </ToggleGroupItem>
+                <ToggleGroupItem value="limit" className="h-7 px-2.5">
+                  Limit
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <div className="min-w-0 flex-1" />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 shrink-0"
+                  >
+                    {kind === "algo" ? algoById(algo).label : "Algo"}
+                    <ChevronDown data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-36">
+                  <DropdownMenuGroup>
                     {ALGOS.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
+                      <DropdownMenuItem
+                        key={a.id}
+                        onSelect={() => {
+                          setAlgo(a.id);
+                          setKind("algo");
+                        }}
+                      >
                         {a.label}
-                      </SelectItem>
+                      </DropdownMenuItem>
                     ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </TabsList>
-            {onClose ? <PanelCloseButton onClose={onClose} /> : null}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
@@ -450,58 +480,21 @@ export function OrderTicket({
               </TabsContent>
             </FieldGroup>
           </ScrollArea>
-
-          <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2">
-              {!singleAction ? (
-              <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-                <Switch
-                  id="close-only"
-                  checked={reduceOnly}
-                  onCheckedChange={setReduceOnly}
-                  aria-label="Close"
-                />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <FieldLabel
-                      htmlFor="close-only"
-                      className="text-xs font-normal text-muted peer-data-[state=checked]:text-text"
-                    >
-                      Close
-                    </FieldLabel>
-                  </TooltipTrigger>
-                  <TooltipContent>Reduces position only — will not open or flip</TooltipContent>
-                </Tooltip>
-              </Field>
-              ) : (
-                <span className="text-[10px] text-muted">Inventory cap per side</span>
-              )}
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setLevDraft(String(lev));
-                  setLevOpen(true);
-                }}
-                className="shrink-0"
-              >
-                <span className="font-mono tabular-nums">{lev}x</span>
-                <ChevronDown data-icon="inline-end" />
-              </Button>
-          </div>
         </Tabs>
 
-        <Separator />
-        <div className="shrink-0 px-2.5 py-2">
-          {sharedBlocked ? (
-            <p className="mb-1 text-center text-xs text-muted">{sharedBlocked}</p>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border px-2.5 py-2">
+          {sharedBlocked && feed.ready === false ? (
+            <Alert variant="warn">{sharedBlocked}</Alert>
+          ) : sharedBlocked && !tradingEnabled ? (
+            <Alert>{sharedBlocked}</Alert>
+          ) : sharedBlocked ? (
+            <p className="text-center text-xs text-muted-foreground">{sharedBlocked}</p>
           ) : null}
           {singleAction ? (
             <Button
               type="button"
               variant="outline"
-              className="h-9 w-full truncate px-1.5 text-sm font-semibold text-text"
+              className="h-8 w-full truncate"
               disabled={loading || !!sharedBlocked || !!actionBlocked}
               title={sharedBlocked ?? actionBlocked ?? undefined}
               onClick={() => void send("buy")}
@@ -509,36 +502,36 @@ export function OrderTicket({
               {busy ? "Sending…" : sharedBlocked || actionBlocked || orderCtaLabel("buy")}
             </Button>
           ) : (
-          <div className="grid grid-cols-2 gap-1">
-            <Button
-              type="button"
-              variant="buy"
-              className="h-9 truncate px-1.5 text-sm font-semibold"
-              disabled={loading || !!buyBlocked}
-              title={buyBlocked ?? undefined}
-              onClick={() => void send("buy")}
-            >
-              {busy === "buy"
-                ? "Sending…"
-                : !sharedBlocked && buyBlocked
-                  ? buyBlocked
-                  : orderCtaLabel("buy")}
-            </Button>
-            <Button
-              type="button"
-              variant="sell"
-              className="h-9 truncate px-1.5 text-sm font-semibold"
-              disabled={loading || !!sellBlocked}
-              title={sellBlocked ?? undefined}
-              onClick={() => void send("sell")}
-            >
-              {busy === "sell"
-                ? "Sending…"
-                : !sharedBlocked && sellBlocked
-                  ? sellBlocked
-                  : orderCtaLabel("sell")}
-            </Button>
-          </div>
+            <div className="grid grid-cols-2 gap-1">
+              <Button
+                type="button"
+                variant="buy"
+                className="h-8 truncate"
+                disabled={loading || !!buyBlocked}
+                title={buyBlocked ?? undefined}
+                onClick={() => void send("buy")}
+              >
+                {busy === "buy"
+                  ? "Sending…"
+                  : !sharedBlocked && buyBlocked
+                    ? buyBlocked
+                    : orderCtaLabel("buy")}
+              </Button>
+              <Button
+                type="button"
+                variant="sell"
+                className="h-8 truncate"
+                disabled={loading || !!sellBlocked}
+                title={sellBlocked ?? undefined}
+                onClick={() => void send("sell")}
+              >
+                {busy === "sell"
+                  ? "Sending…"
+                  : !sharedBlocked && sellBlocked
+                    ? sellBlocked
+                    : orderCtaLabel("sell")}
+              </Button>
+            </div>
           )}
         </div>
       </form>

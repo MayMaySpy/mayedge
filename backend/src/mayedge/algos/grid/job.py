@@ -25,6 +25,8 @@ from mayedge.algos.chase.util import (
 from mayedge.algos.grid import util as grid_util
 from mayedge.algos.grid.config import (
     ACK_WAIT_MS,
+    GRID_COI_BASE,
+    GRID_COI_END,
     MIN_PLACE_GAP_MS,
     MIN_REQUOTE_MS,
 )
@@ -36,10 +38,11 @@ from mayedge.algos.grid.decide import (
     ALGO_VERSION,
     GridAction,
     GridParams,
+    GridPlan,
     GridRuntime,
     SideQuote,
     TpTarget,
-    apply_inventory_delta,
+    align_runtime_to_position,
     credit_grid_fill,
     decide,
 )
@@ -258,6 +261,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             "be_bps": _fmt(p.be_bps) if p else None,
             "inventory": _fmt(st.runtime.inventory),
             "inventory_vwap": _fmt(st.runtime.inventory_vwap),
+            "captured_pnl": _fmt(st.runtime.captured_pnl) or "0",
             "remaining": _fmt(st.remaining),
             "filled": _fmt(st.filled),
             "quote_action": st.quote_action,
@@ -317,6 +321,37 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             self._state.runtime.inventory_vwap = entry if entry > 0 else None
             self._state.runtime.grid_anchor = entry if entry > 0 else None
             return
+
+    def _venue_position(self) -> tuple[Decimal, Decimal | None]:
+        payload = self._exec().cached_account_payload() or {}
+        for pos in payload.get("positions") or []:
+            if isinstance(pos, dict):
+                mi = int(pos.get("market_index") or 0)
+                size = _dec(pos.get("size") or "0")
+                entry_raw = pos.get("avg_entry_price") or pos.get("entry_price")
+            else:
+                mi = int(getattr(pos, "market_index", 0) or 0)
+                size = _dec(getattr(pos, "size", "0") or "0")
+                entry_raw = getattr(pos, "entry_price", None)
+            if mi != self._state.market_index:
+                continue
+            entry = _dec(entry_raw) if entry_raw not in (None, "") else Decimal("0")
+            return size, entry if entry > 0 else None
+        return Decimal("0"), None
+
+    def _align_runtime_to_venue(self, view: MarketView) -> None:
+        params = self._state.params
+        if params is None:
+            return
+        size, entry = self._venue_position()
+        align_runtime_to_position(
+            self._state.runtime,
+            venue_size=size,
+            entry=entry,
+            params=params,
+            market=view,
+            now=grid_util.now_ms(),
+        )
 
     async def _place_side(
         self,
@@ -458,21 +493,86 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             if attempt + 1 < STOP_CANCEL_TRIES:
                 await asyncio.sleep(STOP_CANCEL_GAP_S)
 
+    def _keep_child_cois(self, plan: GridPlan) -> set[int]:
+        keep: set[int] = set()
+        if plan.buy is not None and plan.buy.action == GridAction.REST:
+            clip = self._chase_clip("buy")
+            if clip:
+                keep.add(clip.client_order_index)
+        if plan.sell is not None and plan.sell.action == GridAction.REST:
+            clip = self._chase_clip("sell")
+            if clip:
+                keep.add(clip.client_order_index)
+        wanted = {t.lot_id for t in plan.tps}
+        for lot in self._state.runtime.lots:
+            if lot.lot_id not in wanted or lot.tp_clip_seq is None:
+                continue
+            clip = next(
+                (
+                    c
+                    for c in self._state.ledger.clips
+                    if c.seq == lot.tp_clip_seq and c.status == "live"
+                ),
+                None,
+            )
+            if clip:
+                keep.add(clip.client_order_index)
+        return keep
+
+    async def _sweep_dead_children(self, keep_cois: set[int]) -> None:
+        """Pull chase/TP children that the ledger dropped or no longer wants."""
+        for clip in list(self._state.ledger.live_clips()):
+            if clip.client_order_index in keep_cois:
+                continue
+            await self._cancel_clip(clip)
+            if grid_util.now_ms() < self._backoff_until:
+                return
+        payload = self._exec().cached_account_payload() or {}
+        for raw in payload.get("open_orders") or []:
+            if not isinstance(raw, dict):
+                coi = int(getattr(raw, "client_order_index", 0) or 0)
+                mi = int(getattr(raw, "market_index", 0) or self._state.market_index)
+                oid = int(getattr(raw, "order_index", 0) or 0) or coi
+            else:
+                coi = int(raw.get("client_order_index") or 0)
+                mi = int(raw.get("market_index") or self._state.market_index)
+                oid = int(raw.get("order_index") or 0) or coi
+            if mi != self._state.market_index:
+                continue
+            if not (GRID_COI_BASE <= coi < GRID_COI_END):
+                continue
+            if coi in keep_cois:
+                continue
+            try:
+                await self._exec().cancel_order(mi, oid)
+                self._last_tx_ms = grid_util.now_ms()
+            except Exception as e:
+                if _is_order_not_found(e) or _is_min_size(e):
+                    continue
+                if self._handle_tx_err(e):
+                    return
+                logger.warning("grid sweep cancel failed: %s", e)
+                return
+
     async def _ensure_tp(self, target: TpTarget) -> None:
-        lot = next((item for item in self._state.runtime.lots if item.lot_id == target.lot_id), None)
+        lot = next(
+            (item for item in self._state.runtime.lots if item.lot_id == target.lot_id), None
+        )
         if not lot or lot.qty <= 0:
             return
         live = None
         if lot.tp_clip_seq is not None:
             live = next(
-                (c for c in self._state.ledger.clips if c.seq == lot.tp_clip_seq and c.status == "live"),
+                (
+                    c
+                    for c in self._state.ledger.clips
+                    if c.seq == lot.tp_clip_seq and c.status == "live"
+                ),
                 None,
             )
         if live is None:
             quote = SideQuote(GridAction.REST, price=target.price, qty=target.qty)
-            clip = await self._place_side(
-                target.side, quote, kind="tp", reduce_only=True
-            )
+            clip = await self._place_side(target.side, quote, kind="tp", reduce_only=True)
             if clip:
                 lot.tp_clip_seq = clip.seq
             return
@@ -490,7 +590,9 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                 lot.tp_clip_seq = clip.seq
             return
         if live.price != target.price or live.qty != target.qty:
-            await self._modify_side(live, SideQuote(GridAction.REST, price=target.price, qty=target.qty))
+            await self._modify_side(
+                live, SideQuote(GridAction.REST, price=target.price, qty=target.qty)
+            )
 
     async def _execute_be(self, side: str, qty: Decimal) -> None:
         coi = self._next_coi()
@@ -507,8 +609,9 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
         rt = self._state.runtime
         rt.merged_active = False
         rt.lots = [lot for lot in rt.lots if not lot.merged]
-        rt.reentry_until = now + (self._state.params.post_be_cooldown_ms if self._state.params else 60_000)
-        apply_inventory_delta(rt, delta=-qty if side == "sell" else qty, fill_price=Decimal("0"))
+        rt.reentry_until = now + (
+            self._state.params.post_be_cooldown_ms if self._state.params else 60_000
+        )
         self._reconcile_master()
 
     async def _manage_side(
@@ -547,7 +650,11 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
 
     async def _evaluate(self) -> None:
         async with self._lock:
-            if self._stop.is_set() or self._state.status != ChaseStatus.RUNNING or not self._state.params:
+            if (
+                self._stop.is_set()
+                or self._state.status != ChaseStatus.RUNNING
+                or not self._state.params
+            ):
                 return
             if not self._exec().enabled:
                 self._state.status = ChaseStatus.ERROR
@@ -589,36 +696,16 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             params = self._state.params
             if params is None:
                 return
-            lots_before = list(self._state.runtime.lots)
+            self._align_runtime_to_venue(view)
             plan = decide(params, view, self._state.runtime, now=now)
             self._state.quote_action = plan.quote_action
             self._state.reason = plan.reason
 
-            wanted_tp = {t.lot_id for t in plan.tps}
-            seen_cancel: set[int] = set()
-            for lot in lots_before:
-                if lot.lot_id in wanted_tp or lot.tp_clip_seq is None:
-                    continue
-                if lot.tp_clip_seq in seen_cancel:
-                    continue
-                clip = next(
-                    (c for c in self._state.ledger.clips if c.seq == lot.tp_clip_seq),
-                    None,
-                )
-                if clip and clip.status == "live":
-                    seen_cancel.add(lot.tp_clip_seq)
-                    await self._cancel_clip(clip)
-
-            live_tp_seqs = {
-                lot.tp_clip_seq for lot in self._state.runtime.lots if lot.tp_clip_seq is not None
-            }
-            for clip in list(self._state.ledger.live_clips()):
-                if self._clip_kind(clip) != "tp" or clip.seq in live_tp_seqs:
-                    continue
-                if clip.seq in seen_cancel:
-                    continue
-                seen_cancel.add(clip.seq)
-                await self._cancel_clip(clip)
+            await self._sweep_dead_children(self._keep_child_cois(plan))
+            if grid_util.now_ms() < self._backoff_until:
+                self._sync_rest_from_live()
+                self._publish()
+                return
 
             if plan.be is not None and plan.be.qty > 0:
                 await self._execute_be(plan.be.side, plan.be.qty)
@@ -628,10 +715,15 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
 
             cooling = self._last_chase_tx_ms > 0 and now - self._last_chase_tx_ms < MIN_REQUOTE_MS
             await self._manage_side("buy", plan.buy, kind="chase_buy", view=view, cooling=cooling)
-            await self._manage_side("sell", plan.sell, kind="chase_sell", view=view, cooling=cooling)
+            await self._manage_side(
+                "sell", plan.sell, kind="chase_sell", view=view, cooling=cooling
+            )
 
             for target in plan.tps:
-                if self._last_tx_ms > 0 and grid_util.now_ms() - self._last_tx_ms < MIN_PLACE_GAP_MS:
+                if (
+                    self._last_tx_ms > 0
+                    and grid_util.now_ms() - self._last_tx_ms < MIN_PLACE_GAP_MS
+                ):
                     break
                 await self._ensure_tp(target)
 
@@ -649,7 +741,10 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                 "display_qty": row.get("display_qty") or raw.get("display_qty") or "0",
                 "offset_bps": row.get("offset_bps") or raw.get("offset_bps") or "4",
                 "profit_bps": row.get("profit_bps") or raw.get("profit_bps") or "0",
-                "grid_bps": row.get("grid_bps") or raw.get("grid_bps") or row.get("profit_bps") or "0",
+                "grid_bps": row.get("grid_bps")
+                or raw.get("grid_bps")
+                or row.get("profit_bps")
+                or "0",
                 "price_floor": row.get("price_floor") or raw.get("price_floor") or "0",
                 "price_ceiling": row.get("price_ceiling") or raw.get("price_ceiling") or "0",
                 "be_delay_ms": row.get("be_delay_ms")
@@ -723,7 +818,11 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             raise ValueError("Floor must be below ceiling")
 
         bid_s, ask_s = self._exec().best_bid_ask(market_index)
-        ref = _dec(bid_s) if bid_s else (_dec(ask_s) if ask_s else (params.price_floor + params.price_ceiling) / 2)
+        ref = (
+            _dec(bid_s)
+            if bid_s
+            else (_dec(ask_s) if ask_s else (params.price_floor + params.price_ceiling) / 2)
+        )
         check_notional(params.max_inventory, ref, settings.max_order_notional)
 
         self._state = GridState(
@@ -790,9 +889,10 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             return
         if self._state.status != ChaseStatus.RUNNING:
             return
-        book = kind in ("order_book", "order_book_snapshot", "order_book_delta") and msg.get(
-            "market_index"
-        ) == self._state.market_index
+        book = (
+            kind in ("order_book", "order_book_snapshot", "order_book_delta")
+            and msg.get("market_index") == self._state.market_index
+        )
         if book or kind == "account":
             self._wake.set()
 

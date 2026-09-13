@@ -3,14 +3,13 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/** Small hide control — shared by mosaic headers and chart chrome. */
 export function PanelCloseButton({ onClose, label = "Hide panel" }: { onClose: () => void; label?: string }) {
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className="size-5 shrink-0 text-muted hover:text-text"
+      className="size-6 shrink-0"
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
@@ -22,9 +21,6 @@ export function PanelCloseButton({ onClose, label = "Hide panel" }: { onClose: (
   );
 }
 
-/**
- * Uniform mosaic panel chrome — h-7 drag bar, muted title, optional trailing actions.
- */
 export function PanelHeader({
   title,
   trailing,
@@ -43,12 +39,12 @@ export function PanelHeader({
   return (
     <div
       className={cn(
-        "panel-drag flex h-7 shrink-0 cursor-move items-center gap-2 border-b border-rule px-2",
+        "panel-drag flex h-8 shrink-0 cursor-move items-center gap-2 border-b border-border px-2",
         className
       )}
     >
       {typeof title === "string" ? (
-        <span className="text-[11px] font-medium text-muted">{title}</span>
+        <span className="text-xs font-medium text-foreground">{title}</span>
       ) : (
         title
       )}

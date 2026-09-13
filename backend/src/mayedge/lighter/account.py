@@ -14,7 +14,7 @@ import websockets
 from mayedge import feed_health
 from mayedge.config import settings
 from mayedge.lighter.channels import split_ws_type
-from mayedge.lighter.equity import portfolio_margin_usd
+from mayedge.lighter.equity import portfolio_margin_usd, trade_available_usd
 from mayedge.lighter.errors import RATE_MSG, VenueBlocked, venue_client_error
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
@@ -150,12 +150,15 @@ class AccountService:
             }
         return out
 
-    def _paint_margin(self) -> None:
-        cross = to_float(self._summary.cross_portfolio_value)
+    def _paint_margin(self, summary: AccountSummary | None = None) -> None:
+        s = summary or self._summary
+        cross = to_float(s.cross_portfolio_value)
         if cross <= 0:
-            cross = to_float(self._summary.portfolio_value)
-        self._summary.portfolio_margin = str(
-            portfolio_margin_usd(cross, self._assets, self._live_asset_meta())
+            cross = to_float(s.portfolio_value)
+        tav = portfolio_margin_usd(cross, self._assets, self._live_asset_meta())
+        s.portfolio_margin = str(tav)
+        s.trade_available = str(
+            trade_available_usd(to_float(s.available), tav, cross)
         )
 
     def _emit_account(self) -> None:
@@ -545,6 +548,7 @@ class AccountService:
         )
         if orders_loaded:
             self._orders_hydrated = True
+        self._paint_margin(summary)
         return summary
 
     async def fetch_account_trades(

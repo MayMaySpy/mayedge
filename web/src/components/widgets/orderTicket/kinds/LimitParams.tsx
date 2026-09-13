@@ -1,10 +1,8 @@
 import { FieldGroup } from "@/components/ui/field";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatPrice } from "@/lib/utils";
 import { decimalInput } from "@/lib/numbers";
 import { TIF_CHIPS } from "../math";
-import { TicketField } from "../ui";
+import { TicketChips, TicketField } from "../ui";
 
 interface LimitParamsProps {
   price: string;
@@ -64,28 +62,16 @@ export function LimitParams({
           })),
         }}
       />
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
-        spacing={2}
+      <TicketChips
+        ariaLabel="Time in force"
         value={tif}
-        onValueChange={(v) => {
-          if (v) onTifChange(v as (typeof TIF_CHIPS)[number]["id"]);
-        }}
-        aria-label="Time in force"
-      >
-        {TIF_CHIPS.map((t) => (
-          <ToggleGroupItem key={t.id} value={t.id} aria-label={t.hint}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="flex size-full items-center justify-center">{t.label}</span>
-              </TooltipTrigger>
-              <TooltipContent>{t.hint}</TooltipContent>
-            </Tooltip>
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+        onValueChange={(v) => onTifChange(v as (typeof TIF_CHIPS)[number]["id"])}
+        items={TIF_CHIPS.map((t) => ({
+          value: t.id,
+          label: t.label,
+          title: t.hint,
+        }))}
+      />
     </FieldGroup>
   );
 }

@@ -1,8 +1,9 @@
 import { memo, useMemo, useState } from "react";
+import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { HeaderNumberInput } from "@/components/desk/HeaderNumberInput";
-import { Empty, EmptyDescription } from "@/components/ui/empty";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -107,53 +108,49 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
         title="Liqs"
         onClose={onClose}
         trailing={
-          <div className="flex items-center gap-2">
-            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-              <FieldLabel htmlFor="liqs-min-usd" className="font-mono text-[10px] text-muted">
-                ≥$
-              </FieldLabel>
-              <HeaderNumberInput
-                id="liqs-min-usd"
-                min={0}
-                step={100}
-                value={minUsd}
-                widthClass="w-[4.25rem] text-right"
-                onChange={(n) => {
-                  setMinUsd(n);
-                  persist(MIN_USD_KEY, String(n));
-                }}
-              />
-            </Field>
-            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-              <FieldLabel htmlFor="liqs-sig-usd" className="font-mono text-[10px] text-muted">
-                sig
-              </FieldLabel>
-              <HeaderNumberInput
-                id="liqs-sig-usd"
-                min={0}
-                step={1000}
-                value={sigUsd}
-                widthClass="w-[4.75rem] text-right"
-                onChange={(n) => {
-                  setSigUsd(n);
-                  persist(SIG_USD_KEY, String(n));
-                }}
-              />
-            </Field>
-            <Field orientation="horizontal" className="w-auto items-center gap-1.5">
-              <FieldLabel htmlFor="liqs-sig-color" className="font-mono text-[10px] text-muted">
-                color
-              </FieldLabel>
-              <Switch
-                id="liqs-sig-color"
-                checked={sigColor}
-                onCheckedChange={(on) => {
-                  setSigColor(on);
-                  persist(SIG_COLOR_KEY, on ? "1" : "0");
-                }}
-              />
-            </Field>
-          </div>
+          <FilterPopover>
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="liqs-min-usd">Min USD</FieldLabel>
+                <HeaderNumberInput
+                  id="liqs-min-usd"
+                  min={0}
+                  step={100}
+                  value={minUsd}
+                  widthClass="w-full text-right"
+                  onChange={(n) => {
+                    setMinUsd(n);
+                    persist(MIN_USD_KEY, String(n));
+                  }}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="liqs-sig-usd">Significant USD</FieldLabel>
+                <HeaderNumberInput
+                  id="liqs-sig-usd"
+                  min={0}
+                  step={1000}
+                  value={sigUsd}
+                  widthClass="w-full text-right"
+                  onChange={(n) => {
+                    setSigUsd(n);
+                    persist(SIG_USD_KEY, String(n));
+                  }}
+                />
+              </Field>
+              <Field orientation="horizontal" className="items-center justify-between">
+                <FieldLabel htmlFor="liqs-sig-color">Color significant</FieldLabel>
+                <Switch
+                  id="liqs-sig-color"
+                  checked={sigColor}
+                  onCheckedChange={(on) => {
+                    setSigColor(on);
+                    persist(SIG_COLOR_KEY, on ? "1" : "0");
+                  }}
+                />
+              </Field>
+            </FieldGroup>
+          </FilterPopover>
         }
       />
 
@@ -173,8 +170,11 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
             {rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={6} className="h-16 p-0">
-                  <Empty className="rounded-none border-0 py-4">
-                    <EmptyDescription className="text-[11px] text-muted">Waiting…</EmptyDescription>
+                  <Empty>
+                    <EmptyHeader>
+                      <EmptyTitle>No liquidations</EmptyTitle>
+                      <EmptyDescription>Waiting for fills above the min size</EmptyDescription>
+                    </EmptyHeader>
                   </Empty>
                 </TableCell>
               </TableRow>
@@ -191,12 +191,12 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                     title={`${kind} ${pairLabel(l.symbol)}${l.fill_count != null && l.fill_count > 1 ? ` · ${l.fill_count} fills` : ""}${significant ? " · significant" : ""}`}
                     onClick={() => onOpenPair?.(l.symbol)}
                   >
-                    <TableCell className="text-muted">{formatTime(l.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatTime(l.timestamp)}</TableCell>
                     <TableCell className={cn(l.side === "buy" ? "text-bid" : "text-ask")}>
                       {pairLabel(l.symbol)}
                     </TableCell>
-                    <TableCell className="text-muted">{kind}</TableCell>
-                    <TableCell className="text-right text-muted">
+                    <TableCell className="text-muted-foreground">{kind}</TableCell>
+                    <TableCell className="text-right text-muted-foreground">
                       {formatSize(l.size)}
                       {l.fill_count != null && l.fill_count > 1 ? (
                         <span className="ml-1 text-[10px]">×{l.fill_count}</span>
@@ -206,7 +206,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                     <TableCell
                       className={cn(
                         "text-right",
-                        tint ? (l.side === "buy" ? "text-bid" : "text-ask") : "text-muted"
+                        tint ? (l.side === "buy" ? "text-bid" : "text-ask") : "text-muted-foreground"
                       )}
                     >
                       {formatUsd(usd)}

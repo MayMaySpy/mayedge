@@ -256,11 +256,17 @@ class TestFifoReduce(unittest.TestCase):
             ],
         )
         leftover = reduce_lots(
-            rt, close_side="long", qty=D("1"), now=1_000, reentry_cooldown_ms=30_000
+            rt,
+            close_side="long",
+            qty=D("1"),
+            now=1_000,
+            reentry_cooldown_ms=30_000,
+            fill_vwap=D("100.40"),
         )
         self.assertEqual(leftover, D("0"))
         self.assertEqual([lot.lot_id for lot in rt.lots], ["b"])
         self.assertEqual(len(rt.hot_cells), 1)
+        self.assertEqual(rt.captured_pnl, D("0.40"))
 
     def test_chase_sell_against_long_does_not_open_short(self) -> None:
         rt = GridRuntime(
@@ -283,6 +289,7 @@ class TestFifoReduce(unittest.TestCase):
         self.assertEqual(rt.inventory, D("1"))
         self.assertEqual([lot.lot_id for lot in rt.lots], ["b"])
         self.assertTrue(all(lot.side == "long" for lot in rt.lots))
+        self.assertEqual(rt.captured_pnl, D("0.10"))
 
     def test_reduce_through_zero_opens_remainder(self) -> None:
         rt = GridRuntime(
@@ -303,6 +310,7 @@ class TestFifoReduce(unittest.TestCase):
         self.assertEqual(len(rt.lots), 1)
         self.assertEqual(rt.lots[0].side, "short")
         self.assertEqual(rt.lots[0].qty, D("2"))
+        self.assertEqual(rt.captured_pnl, D("0.10"))
 
 
 class TestWouldCross(unittest.TestCase):
@@ -355,6 +363,7 @@ class TestCreditGridFill(unittest.TestCase):
         self.assertEqual(rt.inventory, D("14"))
         self.assertEqual(len(rt.lots), 1)
         self.assertEqual(rt.lots[0].qty, D("14"))
+        self.assertEqual(rt.captured_pnl, D("0.8"))
 
     def test_tp_fill_after_merge_fifo_closes_remaining_lots(self) -> None:
         merged = Lot("m", D("100"), D("16"), D("100"), "long", D("100.4"), merged=True)
@@ -373,6 +382,7 @@ class TestCreditGridFill(unittest.TestCase):
         self.assertEqual(rt.inventory, D("-14"))
         self.assertEqual(rt.lots, [])
         self.assertFalse(rt.merged_active)
+        self.assertEqual(rt.captured_pnl, D("6.4"))
 
     def test_cancelled_chase_buy_still_opens_a_lot(self) -> None:
         rt = GridRuntime()
@@ -398,6 +408,24 @@ class TestCreditGridFill(unittest.TestCase):
         )
         self.assertEqual(rt.inventory, D("0"))
         self.assertEqual(rt.lots, [])
+        self.assertEqual(rt.captured_pnl, D("0.4"))
+
+
+class TestCapturedPnl(unittest.TestCase):
+    def test_short_tp_is_entry_minus_cover(self) -> None:
+        lot = Lot("a", D("100"), D("2"), D("100"), "short", D("99.6"))
+        rt = GridRuntime(inventory=D("-2"), lots=[lot])
+        credit_tp_fill(
+            rt, side="buy", qty=D("2"), fill_vwap=D("99.6"), params=params(), now=1_000, lot=lot
+        )
+        self.assertEqual(rt.captured_pnl, D("0.8"))
+        self.assertEqual(rt.inventory, D("0"))
+
+    def test_runtime_round_trips_captured_pnl(self) -> None:
+        rt = GridRuntime(captured_pnl=D("12.50"), inventory=D("4"))
+        restored = GridRuntime.from_json(rt.to_json())
+        self.assertEqual(restored.captured_pnl, D("12.50"))
+        self.assertEqual(restored.inventory, D("4"))
 
 
 if __name__ == "__main__":

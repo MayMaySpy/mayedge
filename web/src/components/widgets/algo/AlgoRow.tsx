@@ -8,13 +8,20 @@ import { algoLabelForType } from "@/lib/algoPlugins";
 import {
   algoAvgFillPrice,
   algoCanResume,
+  algoCapturedPnl,
   algoFillProgress,
   algoIsWorking,
   algoPhase,
   algoReasonLabel,
 } from "@/lib/algos";
 import type { AlgoClip, AlgoFill, AlgoState } from "@/lib/api";
-import { cn, formatPrice, formatSize } from "@/lib/utils";
+import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+
+function pnlClass(value: number) {
+  if (value > 0) return "text-bid";
+  if (value < 0) return "text-ask";
+  return "text-muted-foreground";
+}
 
 function clock(ts: number | null | undefined) {
   if (!ts) return "—";
@@ -82,6 +89,7 @@ export function AlgoRow({
   const isGrid = algo.algo_type === "chase-grid";
   const twoSided = isGrid;
   const { filled, remaining, total, pct } = algoFillProgress(algo);
+  const capturedPnl = algoCapturedPnl(algo);
   const vwap = parseFloat(algo.inventory_vwap ?? "");
   const avgFill = twoSided
     ? (Number.isFinite(vwap) && vwap > 0 ? vwap : null)
@@ -134,7 +142,7 @@ export function AlgoRow({
         >
           <ChevronDown
             className={cn(
-              "size-3.5 shrink-0 text-muted transition-transform",
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
               !expanded && "-rotate-90"
             )}
           />
@@ -144,7 +152,7 @@ export function AlgoRow({
           <span className="truncate font-mono text-[12px] font-medium text-text">
             {algo.symbol ?? "—"}
           </span>
-          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted">{kind}</span>
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{kind}</span>
           <Badge variant={badgeVariant} className="ml-auto shrink-0">
             {phase.label}
           </Badge>
@@ -158,11 +166,19 @@ export function AlgoRow({
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <div className="min-w-0 font-mono text-[12px] tabular-nums text-text">
           <span>{formatSize(remaining)}</span>
-          <span className="text-muted"> / {master}</span>
-          <span className="ml-2 text-[10px] text-muted">filled {formatSize(filled)}</span>
+          <span className="text-muted-foreground"> / {master}</span>
+          <span className="ml-2 text-[10px] text-muted-foreground">filled {formatSize(filled)}</span>
           {avgFill != null && (
-            <span className="ml-2 text-[10px] text-muted" title="Volume-weighted average fill">
+            <span className="ml-2 text-[10px] text-muted-foreground" title="Volume-weighted average fill">
               avg <span className="text-text">{formatPrice(avgFill)}</span>
+            </span>
+          )}
+          {capturedPnl != null && (
+            <span
+              className="ml-2 text-[10px] text-muted-foreground"
+              title="Realized from closed lots, before fees"
+            >
+              pnl <span className={pnlClass(capturedPnl)}>{formatSigned(capturedPnl)}</span>
             </span>
           )}
         </div>
@@ -211,7 +227,7 @@ export function AlgoRow({
         )}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted">
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-muted-foreground">
         <span>
           Clip <span className="text-text">{formatSize(algo.display_qty)}</span>
         </span>
@@ -246,7 +262,7 @@ export function AlgoRow({
         {algo.algo_id && (
           <button
             type="button"
-            className="text-muted hover:text-text"
+            className="text-muted-foreground hover:text-text"
             onClick={() => copyId(algo.algo_id!)}
           >
             {algo.algo_id}
@@ -258,7 +274,7 @@ export function AlgoRow({
         <div
           className={cn(
             "mt-1 truncate font-mono text-[11px]",
-            algo.status === "error" ? "text-ask" : phase.tone === "warn" ? "text-warn" : "text-muted"
+            algo.status === "error" ? "text-ask" : phase.tone === "warn" ? "text-warn" : "text-muted-foreground"
           )}
         >
           {status}
@@ -269,7 +285,7 @@ export function AlgoRow({
         <div className="mt-2 flex flex-col gap-1 pt-1">
           <Separator />
           {isGrid && (algo.lots?.length ?? 0) > 0 && (
-            <div className="flex flex-col gap-0.5 font-mono text-[10px] text-muted">
+            <div className="flex flex-col gap-0.5 font-mono text-[10px] text-muted-foreground">
               {(algo.lots ?? []).map((lot) => (
                 <div key={lot.lot_id} className="flex gap-2">
                   <span className="text-text">tp</span>
@@ -284,7 +300,7 @@ export function AlgoRow({
           {twoSided && liveBid && (
             <div className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className="text-bid">bid</span>
-              <span className="text-muted">
+              <span className="text-muted-foreground">
                 {formatSize(liveBid.remaining)} @ {formatPrice(liveBid.price)}
               </span>
             </div>
@@ -292,7 +308,7 @@ export function AlgoRow({
           {twoSided && liveAsk && (
             <div className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className="text-ask">ask</span>
-              <span className="text-muted">
+              <span className="text-muted-foreground">
                 {formatSize(liveAsk.remaining)} @ {formatPrice(liveAsk.price)}
               </span>
             </div>
@@ -300,7 +316,7 @@ export function AlgoRow({
           {liveTps.map((clip) => (
             <div key={clip.seq} className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className={clip.side === "buy" ? "text-bid" : "text-ask"}>profit</span>
-              <span className="text-muted">
+              <span className="text-muted-foreground">
                 {formatSize(clip.remaining)} @ {formatPrice(clip.price)}
               </span>
             </div>
@@ -309,23 +325,23 @@ export function AlgoRow({
             <div className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className={buy ? "text-bid" : "text-ask"}>live</span>
               <span className="text-text">{venueRef(live)}</span>
-              <span className="text-muted">
+              <span className="text-muted-foreground">
                 {formatSize(live.remaining)} @ {formatPrice(live.price)}
               </span>
-              <span className="ml-auto text-muted">{clock(live.placed_at)}</span>
+              <span className="ml-auto text-muted-foreground">{clock(live.placed_at)}</span>
             </div>
           )}
           {fills.length === 0 && !live && !liveBid && !liveAsk && liveTps.length === 0 && (
-            <div className="font-mono text-[10px] text-muted">No clips yet</div>
+            <div className="font-mono text-[10px] text-muted-foreground">No clips yet</div>
           )}
           {fills.map((f) => (
             <div key={`f-${f.seq}`} className="flex items-baseline gap-2 font-mono text-[10px]">
               <span className="text-text">fill</span>
-              <span className="text-muted">{venueRef(f)}</span>
+              <span className="text-muted-foreground">{venueRef(f)}</span>
               <span className="text-text">
                 {formatSize(f.qty)} @ {formatPrice(f.price)}
               </span>
-              <span className="ml-auto text-muted">{clock(f.ts)}</span>
+              <span className="ml-auto text-muted-foreground">{clock(f.ts)}</span>
             </div>
           ))}
         </div>

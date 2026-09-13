@@ -44,14 +44,14 @@ export function ChaseParamsSheet({
           addon="bp"
           sanitize={(raw) => raw.replace(/[^\d.]/g, "")}
           onChange={(v) => set({ offsetBps: v })}
-          chips={{
-            ariaLabel: "Offset",
-            value: offsetPreset,
-            onValueChange: (v) => set({ offsetBps: v }),
-            items: OFFSETS.map((b) => ({ value: String(b), label: String(b) })),
-          }}
         />
       </FieldGroup>
+      <TicketChips
+        ariaLabel="Offset"
+        value={offsetPreset}
+        onValueChange={(v) => set({ offsetBps: v })}
+        items={OFFSETS.map((b) => ({ value: String(b), label: `${b} bp` }))}
+      />
       <FieldGroup className="grid grid-cols-2 gap-3">
         <TicketField
           id="algo-floor"

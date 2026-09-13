@@ -1,8 +1,11 @@
 import { ChevronDown, Search, Star, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Popover } from "@base-ui/react";
 import { TokenMark } from "@/components/desk/TokenMark";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { uniqueSymbolMarkets } from "@/lib/algos";
 import type { Market } from "@/lib/api";
 import { useFavorites } from "@/lib/favorites";
@@ -50,10 +53,10 @@ function persistSort(next: PersistedSort) {
 }
 
 function changeClass(change: number | null | undefined) {
-  if (change == null) return "text-muted";
+  if (change == null) return "text-muted-foreground";
   if (change > 0) return "text-bid";
   if (change < 0) return "text-ask";
-  return "text-muted";
+  return "text-muted-foreground";
 }
 
 function fundingClass(rate: number | null | undefined) {
@@ -69,14 +72,6 @@ const COLS: { key: PickerSort; label: string; align: "start" | "end"; width: str
   { key: "oi", label: "Open interest", align: "end", width: "w-[96px]" },
   { key: "funding", label: "Funding", align: "end", width: "w-[88px]" },
 ];
-
-function Kbd({ children }: { children: string }) {
-  return (
-    <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded-[3px] bg-elevated px-1 font-sans text-[10px] font-medium text-muted">
-      {children}
-    </kbd>
-  );
-}
 
 export const MarketPicker = memo(function MarketPicker({
   markets,
@@ -164,39 +159,39 @@ export const MarketPicker = memo(function MarketPicker({
   };
 
   return (
-    <Popover.Root open={open} onOpenChange={show} modal={false}>
-      <Popover.Trigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 justify-start gap-1.5 px-1.5 font-normal"
-          />
-        }
-      >
-        <span className="flex items-center gap-2 text-left">
-          <TokenMark symbol={symbol} className="size-4" />
-          <span className="font-mono text-sm font-medium tracking-tight">{symbol}</span>
-          <span className={cn("font-mono text-[11px]", changeClass(change))}>
-            {formatPct(change)}
+    <Popover open={open} onOpenChange={show}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 justify-start gap-1.5 px-1.5 font-normal"
+        >
+          <span className="flex items-center gap-2 text-left">
+            <TokenMark symbol={symbol} className="size-4" />
+            <span className="font-mono text-sm font-medium tracking-tight">{symbol}</span>
+            <span className={cn("font-mono text-[13px]", changeClass(change))}>
+              {formatPct(change)}
+            </span>
           </span>
-        </span>
-        <ChevronDown className={cn("size-3.5 text-muted transition-transform", open && "rotate-180")} />
-      </Popover.Trigger>
+          <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </Button>
+      </PopoverTrigger>
 
-      <Popover.Portal>
-        <Popover.Positioner side="bottom" align="start" sideOffset={4} className="isolate z-50">
-          <Popover.Popup
-            onKeyDown={onKeyDown}
-            initialFocus={searchRef}
-            className="flex h-[min(70vh,560px)] w-[min(calc(100vw-1.5rem),720px)] origin-(--transform-origin) flex-col overflow-hidden rounded-sm border border-rule bg-panel text-text shadow-[0_16px_48px_rgba(0,0,0,0.45)] outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-          >
-            <Popover.Title className="sr-only">Markets</Popover.Title>
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        onKeyDown={onKeyDown}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          searchRef.current?.focus();
+        }}
+        className="flex h-[min(70vh,560px)] w-[min(calc(100vw-1.5rem),720px)] flex-col overflow-hidden p-0"
+      >
 
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-rule px-3">
-            <Search className="size-3.5 shrink-0 text-muted" />
-            <input
+          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            <Input
               ref={searchRef}
               value={query}
               onChange={(e) => {
@@ -207,21 +202,23 @@ export const MarketPicker = memo(function MarketPicker({
               aria-label="Search markets"
               autoComplete="off"
               spellCheck={false}
-              className="h-full min-w-0 flex-1 bg-transparent font-sans text-sm text-text outline-none placeholder:text-muted"
+              className="h-full border-0 bg-transparent px-0 font-sans shadow-none focus-visible:ring-0"
             />
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               aria-label="Close"
+              className="size-7"
               onClick={() => show(false)}
-              className="inline-flex size-7 items-center justify-center text-muted hover:text-text"
             >
-              <X className="size-3.5" />
-            </button>
+              <X />
+            </Button>
           </div>
 
           {recentMarkets.length > 0 && (
             <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-rule px-3 py-2">
-              <span className="mr-0.5 shrink-0 font-mono text-[10px] tracking-wide text-muted uppercase">
+              <span className="mr-0.5 shrink-0 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
                 Recents
               </span>
               {recentMarkets.map((m) => (
@@ -241,7 +238,7 @@ export const MarketPicker = memo(function MarketPicker({
                     type="button"
                     aria-label={`Remove ${m.symbol} from recent`}
                     onClick={() => removeRecent(m.symbol)}
-                    className="inline-flex h-full items-center pr-1.5 pl-0.5 text-muted hover:text-text"
+                    className="inline-flex h-full items-center pr-1.5 pl-0.5 text-muted-foreground hover:text-text"
                   >
                     <X className="size-3" />
                   </button>
@@ -250,34 +247,24 @@ export const MarketPicker = memo(function MarketPicker({
             </div>
           )}
 
-          <div className="flex h-9 shrink-0 items-center justify-between border-b border-rule px-2">
-            <div className="flex items-center">
-              {(
-                [
-                  ["all", "All"],
-                  ["favorites", "Favorites"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setTab(id);
-                    setHi(0);
-                  }}
-                  className={cn(
-                    "relative h-9 px-2 text-[13px] transition-colors",
-                    tab === id ? "text-text" : "text-muted hover:text-text"
-                  )}
-                >
-                  {label}
-                  {tab === id && (
-                    <span className="absolute inset-x-1.5 bottom-0 h-[1.5px] rounded-full bg-text" />
-                  )}
-                </button>
-              ))}
-            </div>
-            <span className="pr-1 font-mono text-[10px] tracking-wide text-muted uppercase tabular-nums">
+          <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-2">
+            <ToggleGroup
+              type="single"
+              variant="seg"
+              size="sm"
+              spacing={0}
+              value={tab}
+              onValueChange={(v) => {
+                if (v === "all" || v === "favorites") {
+                  setTab(v);
+                  setHi(0);
+                }
+              }}
+            >
+              <ToggleGroupItem value="all">All</ToggleGroupItem>
+              <ToggleGroupItem value="favorites">Favorites</ToggleGroupItem>
+            </ToggleGroup>
+            <span className="pr-1 font-mono text-[11px] text-muted-foreground tabular-nums">
               {rows.length} market{rows.length === 1 ? "" : "s"}
             </span>
           </div>
@@ -290,7 +277,7 @@ export const MarketPicker = memo(function MarketPicker({
                     <th
                       key={col.key}
                       className={cn(
-                        "px-2 font-mono text-[10px] font-normal tracking-wide text-muted uppercase",
+                        "px-2 font-mono text-[10px] font-normal tracking-wide text-muted-foreground uppercase",
                         col.width,
                         col.align === "end" ? "text-right" : "text-left"
                       )}
@@ -314,7 +301,7 @@ export const MarketPicker = memo(function MarketPicker({
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-muted">
+                    <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
                       {tab === "favorites" && !query
                         ? "Star a market to pin it here"
                         : "No markets match"}
@@ -348,7 +335,7 @@ export const MarketPicker = memo(function MarketPicker({
                               aria-label={fav ? `Unpin ${m.symbol}` : `Pin ${m.symbol}`}
                               className={cn(
                                 "inline-flex size-6 shrink-0 items-center justify-center rounded-full",
-                                fav ? "text-warn" : "text-muted hover:text-text"
+                                fav ? "text-warn" : "text-muted-foreground hover:text-text"
                               )}
                               onClick={(e) => {
                                 e.preventDefault();
@@ -361,7 +348,7 @@ export const MarketPicker = memo(function MarketPicker({
                             <TokenMark symbol={m.symbol} />
                             <span className="font-sans text-[13px] text-text">{m.symbol}</span>
                             {m.max_leverage ? (
-                              <span className="text-[12px] text-muted tabular-nums">
+                              <span className="text-[12px] text-muted-foreground tabular-nums">
                                 {m.max_leverage}x
                               </span>
                             ) : null}
@@ -378,10 +365,10 @@ export const MarketPicker = memo(function MarketPicker({
                         >
                           {formatPct(m.change_24h)}
                         </td>
-                        <td className="px-2 text-right font-mono text-[12px] text-muted">
+                        <td className="px-2 text-right font-mono text-[12px] text-muted-foreground">
                           {formatUsdCompact(m.volume_24h) || "—"}
                         </td>
-                        <td className="px-2 text-right font-mono text-[12px] text-muted">
+                        <td className="px-2 text-right font-mono text-[12px] text-muted-foreground">
                           {formatUsdCompact(m.open_interest) || "—"}
                         </td>
                         <td
@@ -400,12 +387,12 @@ export const MarketPicker = memo(function MarketPicker({
             </table>
           </div>
 
-          <div className="flex h-9 shrink-0 items-center gap-4 border-t border-rule px-3 text-[11px] text-muted">
-            <span className="inline-flex items-center gap-1.5">
+          <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-3 text-[11px] text-muted-foreground">
+            <KbdGroup>
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd>
-              Navigate
-            </span>
+              <span>Navigate</span>
+            </KbdGroup>
             <span className="inline-flex items-center gap-1.5">
               <Kbd>↵</Kbd>
               Select
@@ -419,9 +406,7 @@ export const MarketPicker = memo(function MarketPicker({
               Close
             </span>
           </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   );
 });

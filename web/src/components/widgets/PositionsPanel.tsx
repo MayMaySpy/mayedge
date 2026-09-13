@@ -6,7 +6,7 @@ import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTa
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -88,7 +88,7 @@ function livePnl(p: Position, mark: number): number {
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
-  return "text-muted";
+  return "text-muted-foreground";
 }
 
 function formatNotional(value: number): string {
@@ -142,6 +142,7 @@ export function PositionsPanel({
   const bbo = useLiveBbo();
   const feed = useTradingReady({ connected });
   const [tab, setTab] = useState("positions");
+  const [historyKind, setHistoryKind] = useState<"trades" | "funding">("trades");
   const [orderScope, setOrderScope] = useState<"all" | "pair">("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [posSort, setPosSort] = useState<PosSort>({ key: "notional", dir: "desc" });
@@ -286,24 +287,23 @@ export function PositionsPanel({
           <TabsList className="min-w-0 border-b-0">
             <TabsTrigger value="positions">
               Positions
-              <span className="ml-1 font-mono text-[10px] text-muted">({openPositions.length})</span>
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openPositions.length})</span>
             </TabsTrigger>
             <TabsTrigger value="orders">
               Orders
-              <span className="ml-1 font-mono text-[10px] text-muted">({openOrderCount})</span>
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openOrderCount})</span>
             </TabsTrigger>
             <TabsTrigger value="algos">
               Algos
-              <span className="ml-1 font-mono text-[10px] text-muted">({workingAlgos.length})</span>
+              <span className="ml-1 font-mono text-[11px] text-muted-foreground">({workingAlgos.length})</span>
             </TabsTrigger>
-            <TabsTrigger value="trades">Trades</TabsTrigger>
-            <TabsTrigger value="funding">Funding</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
-                  <span className="text-[11px] text-muted">uPnL</span>
+                  <span className="text-[11px] text-muted-foreground">uPnL</span>
                   <span className={cn("font-mono text-[11px] tabular-nums", pnlClass(totalPnl))}>
                     {formatSigned(totalPnl)}
                   </span>
@@ -323,15 +323,16 @@ export function PositionsPanel({
         <TabsContent value="positions" className="min-h-0 flex-1 px-2">
           <ScrollArea className="h-full">
             {!liveRows.length ? (
-              <Empty className="rounded-none border-0 p-4">
-                <EmptyDescription className="text-[11px] text-muted">
-                  {tradingEnabled
-                    ? "No open positions"
-                    : "Connect API key to view positions"}
-                </EmptyDescription>
+              <Empty className="rounded-none border-0 p-6">
+                <EmptyHeader>
+                  <EmptyTitle>No open positions</EmptyTitle>
+                  <EmptyDescription>
+                    {tradingEnabled ? "Start from the ticket" : "Connect an API key to view positions"}
+                  </EmptyDescription>
+                </EmptyHeader>
               </Empty>
             ) : (
-              <Table className="font-mono text-[11px]">
+              <Table className="font-mono text-[12px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-2.5">Market</TableHead>
@@ -403,7 +404,7 @@ export function PositionsPanel({
                           >
                             {p.symbol}
                           </span>
-                          <span className="ml-1.5 text-muted">
+                          <span className="ml-1.5 text-muted-foreground">
                             {p.leverage}x {p.margin_mode}
                           </span>
                         </TableCell>
@@ -420,17 +421,17 @@ export function PositionsPanel({
                             <span
                               className={cn(
                                 "ml-1 text-[10px]",
-                                cushion < 8 ? "text-ask" : "text-muted"
+                                cushion < 8 ? "text-ask" : "text-muted-foreground"
                               )}
                             >
                               ({cushion.toFixed(1)}%)
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className={cn("text-right", pnlClass(pnl))}>
+                        <TableCell className={cn("text-right text-[13px] font-medium", pnlClass(pnl))}>
                           {formatSigned(pnl)}
                         </TableCell>
-                        <TableCell className={cn("text-right", roe != null ? pnlClass(roe) : "text-muted")}>
+                        <TableCell className={cn("text-right", roe != null ? pnlClass(roe) : "text-muted-foreground")}>
                           {roe != null ? formatPct(roe, 1) : "—"}
                         </TableCell>
                         <TableCell className={cn("text-right", pnlClass(fund))}>
@@ -504,7 +505,7 @@ export function PositionsPanel({
             </div>
             {!visibleOrders.length ? (
               <Empty className="rounded-none border-0 p-4">
-                <EmptyDescription className="text-[11px] text-muted">
+                <EmptyDescription className="text-[11px] text-muted-foreground">
                   {orderScope === "pair" && market
                     ? `No open ${market.symbol} orders`
                     : "No open orders"}
@@ -552,7 +553,7 @@ export function PositionsPanel({
                             o.symbol
                           )}
                           {algoKind ? (
-                            <span className="text-[10px] text-muted">{algoKind}</span>
+                            <span className="text-[10px] text-muted-foreground">{algoKind}</span>
                           ) : null}
                         </span>
                       </TableCell>
@@ -563,7 +564,7 @@ export function PositionsPanel({
                       <TableCell className="text-right">{formatSize(o.remaining)}</TableCell>
                       <TableCell className="text-right">
                         {algoKind ? (
-                          <span className="text-[10px] text-muted">algo</span>
+                          <span className="text-[10px] text-muted-foreground">algo</span>
                         ) : (
                           <Button
                             variant="ghost"
@@ -588,22 +589,36 @@ export function PositionsPanel({
           <AlgoOrdersPanel symbol={market?.symbol} tradingEnabled={tradingEnabled} />
         </TabsContent>
 
-        <TabsContent value="trades" className="min-h-0 flex-1 px-2">
-          <TradeHistoryTab
-            market={market}
-            tradingEnabled={tradingEnabled}
-            active={tab === "trades"}
-            onSymbolChange={onSymbolChange}
-          />
-        </TabsContent>
-
-        <TabsContent value="funding" className="min-h-0 flex-1 px-2">
-          <FundingHistoryTab
-            market={market}
-            tradingEnabled={tradingEnabled}
-            active={tab === "funding"}
-            onSymbolChange={onSymbolChange}
-          />
+        <TabsContent value="history" className="flex min-h-0 flex-1 flex-col px-2">
+          <ToggleGroup
+            type="single"
+            variant="seg"
+            size="sm"
+            spacing={0}
+            value={historyKind}
+            onValueChange={(v) => {
+              if (v === "trades" || v === "funding") setHistoryKind(v);
+            }}
+            className="shrink-0 py-1"
+          >
+            <ToggleGroupItem value="trades">Trades</ToggleGroupItem>
+            <ToggleGroupItem value="funding">Funding</ToggleGroupItem>
+          </ToggleGroup>
+          {historyKind === "trades" ? (
+            <TradeHistoryTab
+              market={market}
+              tradingEnabled={tradingEnabled}
+              active={tab === "history"}
+              onSymbolChange={onSymbolChange}
+            />
+          ) : (
+            <FundingHistoryTab
+              market={market}
+              tradingEnabled={tradingEnabled}
+              active={tab === "history"}
+              onSymbolChange={onSymbolChange}
+            />
+          )}
         </TabsContent>
       </Tabs>
     </div>

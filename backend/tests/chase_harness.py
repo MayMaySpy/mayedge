@@ -116,7 +116,9 @@ class FakeGateway:
         """Lookups miss while the book still reports synced (same as market=None)."""
         self.market_missing = True
 
-    def order_book_payload(self, market_index: int, *, bump_seq: bool = False) -> dict[str, Any] | None:
+    def order_book_payload(
+        self, market_index: int, *, bump_seq: bool = False
+    ) -> dict[str, Any] | None:
         if self.bid is None or self.ask is None:
             return None
         if self.market is not None and self.market.market_index != market_index:
@@ -162,13 +164,18 @@ class FakeOrderService:
         self.trades_calls = 0
         self.cached_orders_override: list[dict[str, Any]] | None = None
         self.cancel_keeps_open = False
+        self.positions: list[dict[str, Any]] = []
 
     def cached_account_payload(self) -> dict[str, Any] | None:
         if self.cached_orders_override is not None:
             orders = self.cached_orders_override
         else:
             orders = self.open_orders
-        return {"open_orders": list(orders), "type": "account"}
+        return {
+            "open_orders": list(orders),
+            "positions": list(self.positions),
+            "type": "account",
+        }
 
     def set_summary_sequence(self, *batches: list[dict[str, Any]]) -> None:
         self._summary_sequence = list(batches)

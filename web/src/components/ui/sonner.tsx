@@ -12,7 +12,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme="dark"
       className="toaster group"
-      position="bottom-right"
+      position="bottom-left"
       expand
       gap={12}
       icons={{
