@@ -251,6 +251,23 @@ export interface LiquidationEvent {
   timestamp: number;
 }
 
+export type LiquidationSummaryHours = 1 | 4 | 24;
+
+export interface LiquidationSummaryRow {
+  symbol: string;
+  market_index: number;
+  long_usd: number;
+  short_usd: number;
+  total_usd: number;
+  fill_count: number;
+}
+
+export interface LiquidationSummary {
+  hours: number;
+  since: number;
+  rows: LiquidationSummaryRow[];
+}
+
 export type AlertKind =
   | "oi"
   | "volume"
@@ -299,6 +316,8 @@ export const api = {
     const qs = q.toString();
     return request<LiquidationEvent[]>(`/liquidations${qs ? `?${qs}` : ""}`);
   },
+  liquidationSummary: (hours: LiquidationSummaryHours) =>
+    request<LiquidationSummary>(`/liquidations/summary?hours=${hours}`),
   alerts: (opts?: { limit?: number }) => {
     const q = new URLSearchParams();
     if (opts?.limit != null) q.set("limit", String(opts.limit));

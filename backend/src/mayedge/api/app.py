@@ -29,6 +29,7 @@ from mayedge.lighter.account import account_service
 from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
+from mayedge.persist_liq import liquidation_summary_since_ms
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,18 @@ def create_app() -> FastAPI:
         if ring and min_usd is None and market_index is None:
             return ring[:cap]
         return store.list_liquidations(limit=limit, min_usd=min_usd, market_index=market_index)
+
+    @app.get("/api/liquidations/summary")
+    async def get_liquidation_summary(hours: int = 24) -> dict[str, Any]:
+        try:
+            since = liquidation_summary_since_ms(hours)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {
+            "hours": hours,
+            "since": since,
+            "rows": store.summarize_liquidations(since_ms=since),
+        }
 
     @app.get("/api/markets")
     async def list_markets() -> list[dict[str, Any]]:

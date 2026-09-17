@@ -10,6 +10,15 @@ from mayedge.db import _LIQ_MAX_AGE_MS, _LIQ_MAX_ROWS, _connect, _lock
 
 logger = logging.getLogger(__name__)
 
+LIQ_SUMMARY_HOURS = (1, 4, 24)
+
+
+def liquidation_summary_since_ms(hours: int, now_ms: int | None = None) -> int:
+    if hours not in LIQ_SUMMARY_HOURS:
+        raise ValueError("hours must be 1, 4, or 24")
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    return now - hours * 3_600_000
+
 
 def insert_liquidations(rows: list[dict[str, Any]]) -> int:
     """Insert liquidation events; ignore duplicate trade_ids. Returns inserted count."""
@@ -86,6 +95,43 @@ def list_liquidations(
             "usd_amount": r["usd_amount"],
             "timestamp": r["ts"],
             "group_id": r["group_id"] or "",
+        }
+        for r in rows
+    ]
+
+
+def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
+    """Aggregate persisted fills in the window: long = sell, short = buy."""
+    cutoff = int(since_ms)
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            """
+            SELECT
+                symbol,
+                market_index,
+                SUM(CASE WHEN side = 'sell'
+                    THEN CAST(COALESCE(NULLIF(usd_amount, ''), '0') AS REAL) ELSE 0 END) AS long_usd,
+                SUM(CASE WHEN side = 'buy'
+                    THEN CAST(COALESCE(NULLIF(usd_amount, ''), '0') AS REAL) ELSE 0 END) AS short_usd,
+                SUM(CAST(COALESCE(NULLIF(usd_amount, ''), '0') AS REAL)) AS total_usd,
+                COUNT(*) AS fill_count
+            FROM liquidations
+            WHERE ts >= ?
+            GROUP BY symbol, market_index
+            HAVING total_usd > 0
+            ORDER BY total_usd DESC, symbol ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+    return [
+        {
+            "symbol": r["symbol"],
+            "market_index": r["market_index"],
+            "long_usd": float(r["long_usd"] or 0),
+            "short_usd": float(r["short_usd"] or 0),
+            "total_usd": float(r["total_usd"] or 0),
+            "fill_count": int(r["fill_count"] or 0),
         }
         for r in rows
     ]

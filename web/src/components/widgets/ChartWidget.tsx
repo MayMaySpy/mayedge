@@ -13,7 +13,10 @@ import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "reac
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
-import { api, type Candle } from "@/lib/api";
+import { loadLiqHours } from "@/components/widgets/LiquidationHeatTable";
+import { ScanBoard, type ScanTab } from "@/components/widgets/ScanBoard";
+import { api, type Candle, type LiquidationSummaryHours, type Market } from "@/lib/api";
+import { rankRelativeStrength } from "@/lib/relativeStrength";
 import {
   foldMinutes,
   formatBarVolume,
@@ -38,7 +41,13 @@ type Timeframe = (typeof TIMEFRAMES)[number];
 
 const TF_KEY = "mayedge-chart-tf";
 const VOL_KEY = "mayedge-chart-vol";
+const MODE_KEY = "mayedge-chart-mode";
+const SCAN_TAB_KEY = "mayedge-scan-tab";
 const RIGHT_OFFSET = 8;
+
+const CHART_MODES = ["price", "scan"] as const;
+type ChartMode = (typeof CHART_MODES)[number];
+const SCAN_TABS = ["rel", "liqs"] as const;
 
 const TF_SECONDS: Record<Exclude<Timeframe, "1s">, number> = {
   "1m": 60,
@@ -56,6 +65,8 @@ interface ChartWidgetProps {
   onOverlayAction?: (action: OverlayAction, overlay: ChartOverlay) => void;
   onClose?: () => void;
   children?: ReactNode;
+  markets?: readonly Market[];
+  onSymbolChange?: (symbol: string) => void;
 }
 
 function priceFormat(decimals: number) {
@@ -83,6 +94,36 @@ function loadVol(): boolean {
   } catch {
     return false;
   }
+}
+
+function loadMode(): ChartMode {
+  try {
+    const raw = localStorage.getItem(MODE_KEY);
+    if (raw === "rs" || raw === "scan") {
+      if (raw === "rs") {
+        try {
+          localStorage.setItem(MODE_KEY, "scan");
+        } catch {
+          /* ignore */
+        }
+      }
+      return "scan";
+    }
+    if (raw === "price") return "price";
+  } catch {
+    /* ignore */
+  }
+  return "price";
+}
+
+function loadScanTab(): ScanTab {
+  try {
+    const raw = localStorage.getItem(SCAN_TAB_KEY);
+    if (raw === "rel" || raw === "liqs") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "rel";
 }
 
 const EMPTY_CANDLES: Candle[] = [];
@@ -165,6 +206,25 @@ function OhlcField({
   );
 }
 
+function LiqsReadout({ hours }: { hours: LiquidationSummaryHours }) {
+  return (
+    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{hours}h liqs</span>
+  );
+}
+
+function NumeraireReadout({ change }: { change: number | null }) {
+  if (change == null) {
+    return <span className="font-mono text-[11px] text-muted-foreground">BTC 24h —</span>;
+  }
+  const tone = change > 0 ? "text-bid" : change < 0 ? "text-ask" : "text-muted-foreground";
+  return (
+    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden font-mono text-[11px] tabular-nums">
+      <span className="text-muted-foreground">vs BTC</span>
+      <span className={cn("shrink-0", tone)}>{formatPct(change)}</span>
+    </span>
+  );
+}
+
 export const ChartWidget = memo(function ChartWidget({
   symbol,
   priceDecimals = 2,
@@ -172,15 +232,21 @@ export const ChartWidget = memo(function ChartWidget({
   onOverlayAction,
   onClose,
   children,
+  markets = [],
+  onSymbolChange,
 }: ChartWidgetProps) {
   const [tf, setTf] = useState<Timeframe>(loadTf);
   const [volOn, setVolOn] = useState(loadVol);
+  const [mode, setMode] = useState<ChartMode>(loadMode);
+  const [scanTab, setScanTab] = useState<ScanTab>(loadScanTab);
+  const [liqHours, setLiqHours] = useState<LiquidationSummaryHours>(() => loadLiqHours(24));
+  const isPrice = mode === "price";
   const [hist, setHist] = useState<{ key: string; candles: Candle[] }>({
     key: "",
     candles: [],
   });
   const [hover, setHover] = useState<{ key: string; bar: Ohlc } | null>(null);
-  const candles1s = useLiveCandles1s(tf === "1s");
+  const candles1s = useLiveCandles1s(isPrice && tf === "1s");
   const minuteCandles = useLiveMinuteCandles();
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -216,7 +282,7 @@ export const ChartWidget = memo(function ChartWidget({
   }, [volOn]);
 
   useEffect(() => {
-    if (tf === "1s") return;
+    if (!isPrice || tf === "1s") return;
     const key = `${symbol}:${tf}`;
     let cancelled = false;
     api
@@ -230,10 +296,10 @@ export const ChartWidget = memo(function ChartWidget({
     return () => {
       cancelled = true;
     };
-  }, [symbol, tf]);
+  }, [symbol, tf, isPrice]);
 
   useEffect(() => {
-    if (tf !== "1s") return;
+    if (!isPrice || tf !== "1s") return;
     let cancelled = false;
     api
       .candles(symbol, "1s", 3600)
@@ -244,7 +310,7 @@ export const ChartWidget = memo(function ChartWidget({
     return () => {
       cancelled = true;
     };
-  }, [symbol, tf]);
+  }, [symbol, tf, isPrice]);
 
   const display = useMemo(() => {
     if (tf === "1s") return candles1s;
@@ -254,6 +320,7 @@ export const ChartWidget = memo(function ChartWidget({
   }, [tf, candles1s, minuteCandles, histBars]);
 
   useEffect(() => {
+    if (!isPrice) return;
     if (!containerRef.current || !wrapRef.current) return;
 
     const wrap = wrapRef.current;
@@ -369,9 +436,9 @@ export const ChartWidget = memo(function ChartWidget({
       volSeriesRef.current = null;
       tradingLinesRef.current = null;
     };
-    // Chart is created once; price format is applied in the effect below.
+    // Recreate when returning to the price chart; format is applied below.
     // oxlint-disable-next-line exhaustive-deps
-  }, []);
+  }, [isPrice]);
 
   useEffect(() => {
     seriesRef.current?.applyOptions({ priceFormat: priceFormat(priceDecimals) });
@@ -488,8 +555,32 @@ export const ChartWidget = memo(function ChartWidget({
     }
   };
 
+  const selectMode = (next: ChartMode) => {
+    if (next === mode) return;
+    setMode(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const selectScanTab = (next: ScanTab) => {
+    if (next === scanTab) return;
+    setScanTab(next);
+    try {
+      localStorage.setItem(SCAN_TAB_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const lastBar = display.length ? ohlcOf(display[display.length - 1]) : null;
   const ohlc = hoverBar ?? lastBar;
+  const numeraireChange24h = useMemo(
+    () => rankRelativeStrength(markets).numeraireChange24h,
+    [markets]
+  );
 
   const toggleVol = () => {
     setVolOn((on) => {
@@ -507,48 +598,127 @@ export const ChartWidget = memo(function ChartWidget({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-8 shrink-0 items-center border-b border-border">
         <div className="panel-drag flex min-w-0 flex-1 cursor-move items-center gap-2 px-2">
-          <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
+          {isPrice ? (
+            <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
+          ) : scanTab === "liqs" ? (
+            <LiqsReadout hours={liqHours} />
+          ) : (
+            <NumeraireReadout change={numeraireChange24h} />
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-px pr-1">
-          <Toggle
-            variant="seg"
-            size="sm"
-            pressed={volOn}
-            title={volOn ? "Hide volume" : "Show volume"}
-            className="h-6 px-1.5 font-mono text-[11px]"
-            onPressedChange={() => toggleVol()}
-          >
-            Vol
-          </Toggle>
           <ToggleGroup
             type="single"
             size="sm"
             spacing={0}
-            value={tf}
+            value={mode}
             onValueChange={(v) => {
-              if (v && (TIMEFRAMES as readonly string[]).includes(v)) {
-                selectTf(v as Timeframe);
+              if (v && (CHART_MODES as readonly string[]).includes(v)) {
+                selectMode(v as ChartMode);
               }
             }}
           >
-            {TIMEFRAMES.map((t) => (
+            <ToggleGroupItem
+              value="price"
+              title="Price chart"
+              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+            >
+              Chart
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="scan"
+              title="Scan: Rel vs BTC and liquidations"
+              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+            >
+              Scan
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {!isPrice ? (
+            <ToggleGroup
+              type="single"
+              size="sm"
+              spacing={0}
+              value={scanTab}
+              onValueChange={(v) => {
+                if (v && (SCAN_TABS as readonly string[]).includes(v)) {
+                  selectScanTab(v as ScanTab);
+                }
+              }}
+            >
               <ToggleGroupItem
-                key={t}
-                value={t}
+                value="rel"
+                title="Relative strength vs BTC"
                 className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
               >
-                {t}
+                Rel
               </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+              <ToggleGroupItem
+                value="liqs"
+                title="Liquidations in window"
+                className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              >
+                Liqs
+              </ToggleGroupItem>
+            </ToggleGroup>
+          ) : null}
+          {isPrice ? (
+            <>
+              <Toggle
+                variant="seg"
+                size="sm"
+                pressed={volOn}
+                title={volOn ? "Hide volume" : "Show volume"}
+                className="h-6 px-1.5 font-mono text-[11px]"
+                onPressedChange={() => toggleVol()}
+              >
+                Vol
+              </Toggle>
+              <ToggleGroup
+                type="single"
+                size="sm"
+                spacing={0}
+                value={tf}
+                onValueChange={(v) => {
+                  if (v && (TIMEFRAMES as readonly string[]).includes(v)) {
+                    selectTf(v as Timeframe);
+                  }
+                }}
+              >
+                {TIMEFRAMES.map((t) => (
+                  <ToggleGroupItem
+                    key={t}
+                    value={t}
+                    className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                  >
+                    {t}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </>
+          ) : null}
           {onClose ? <PanelCloseButton onClose={onClose} /> : null}
         </div>
       </div>
-      <div ref={wrapRef} className="relative min-h-0 flex-1">
-        <div ref={containerRef} className="absolute inset-0" />
-        {children ? (
-          <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">{children}</div>
-        ) : null}
+      <div ref={wrapRef} className="relative flex min-h-0 flex-1 flex-col">
+        {isPrice ? (
+          <>
+            <div ref={containerRef} className="absolute inset-0" />
+            {children ? (
+              <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+                {children}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <ScanBoard
+            tab={scanTab}
+            hours={liqHours}
+            onHoursChange={setLiqHours}
+            markets={markets}
+            symbol={symbol}
+            onSymbolChange={onSymbolChange}
+          />
+        )}
       </div>
     </div>
   );

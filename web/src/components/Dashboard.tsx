@@ -104,16 +104,20 @@ function WidgetShell({ children }: { children: ReactNode }) {
 function ChartPanel({
   symbol,
   market,
+  markets,
   tradingEnabled,
   connected,
   onOverlayAction,
+  onSymbolChange,
   onClose,
 }: {
   symbol: string;
   market: Market | null;
+  markets: Market[];
   tradingEnabled: boolean;
   connected: boolean;
   onOverlayAction: (action: OverlayAction, overlay: ChartOverlay) => void;
+  onSymbolChange: (symbol: string) => void;
   onClose?: () => void;
 }) {
   const accountSnap = useLiveAccount();
@@ -221,6 +225,8 @@ function ChartPanel({
       overlays={overlays}
       onOverlayAction={onOverlayAction}
       onClose={onClose}
+      markets={markets}
+      onSymbolChange={onSymbolChange}
     >
       <QuickTradePanel market={market} tradingEnabled={tradingEnabled} connected={connected} />
     </ChartWidget>
@@ -531,9 +537,11 @@ export function Dashboard() {
                   <ChartPanel
                     symbol={symbol}
                     market={market}
+                    markets={markets}
                     tradingEnabled={deskTradingEnabled}
                     connected={ws.connected}
                     onOverlayAction={handleOverlayAction}
+                    onSymbolChange={setSymbol}
                     onClose={panelClose("chart")}
                   />
                 </WidgetShell>

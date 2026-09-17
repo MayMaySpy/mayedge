@@ -281,6 +281,7 @@ from mayedge.persist_algo import (  # noqa: E402
 from mayedge.persist_liq import (  # noqa: E402
     insert_liquidations,
     list_liquidations,
+    summarize_liquidations,
 )
 
 __all__ = [
@@ -288,6 +289,7 @@ __all__ = [
     "init_db",
     "insert_liquidations",
     "list_liquidations",
+    "summarize_liquidations",
     "load_active_runs",
     "load_counters",
     "load_history",

@@ -150,3 +150,60 @@ class LiquidationGroupTests(unittest.TestCase):
         self.assertEqual(rows[0]["trade_id"], "1:liquidation:777")
         self.assertEqual(rows[0]["fill_count"], 3)
 
+
+class LiquidationSummaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = TemporaryDirectory()
+        path = str(Path(self._td.name) / "mayedge.db")
+        self._patch = patch.object(settings, "db_path", path)
+        self._patch.start()
+        store.close_db()
+        store.init_db()
+
+    def tearDown(self) -> None:
+        store.close_db()
+        self._patch.stop()
+        self._td.cleanup()
+
+    def test_splits_long_and_short_usd_per_market(self) -> None:
+        now = 1_700_000_000_000
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, symbol="ETH", market_index=1, side="sell", usd_amount="4000", ts=now),
+                _row(trade_id=2, symbol="ETH", market_index=1, side="sell", usd_amount="2000", ts=now),
+                _row(trade_id=3, symbol="ETH", market_index=1, side="buy", usd_amount="1000", ts=now),
+                _row(trade_id=4, symbol="BTC", market_index=2, side="buy", usd_amount="5000", ts=now),
+            ]
+        )
+        rows = store.summarize_liquidations(since_ms=now - 60_000)
+        by_sym = {r["symbol"]: r for r in rows}
+        self.assertEqual(by_sym["ETH"]["long_usd"], 6000.0)
+        self.assertEqual(by_sym["ETH"]["short_usd"], 1000.0)
+        self.assertEqual(by_sym["ETH"]["total_usd"], 7000.0)
+        self.assertEqual(by_sym["ETH"]["fill_count"], 3)
+        self.assertEqual(by_sym["ETH"]["market_index"], 1)
+        self.assertEqual(by_sym["BTC"]["long_usd"], 0.0)
+        self.assertEqual(by_sym["BTC"]["short_usd"], 5000.0)
+        self.assertEqual(by_sym["BTC"]["total_usd"], 5000.0)
+
+    def test_excludes_fills_before_the_window(self) -> None:
+        now = 1_700_000_000_000
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, symbol="ETH", usd_amount="9000", ts=now - 120_000),
+                _row(trade_id=2, symbol="ETH", usd_amount="1000", ts=now),
+            ]
+        )
+        rows = store.summarize_liquidations(since_ms=now - 60_000)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["total_usd"], 1000.0)
+        self.assertEqual(rows[0]["fill_count"], 1)
+
+    def test_summary_window_is_hours_back_from_now(self) -> None:
+        from mayedge.persist_liq import liquidation_summary_since_ms
+
+        self.assertEqual(liquidation_summary_since_ms(24, now_ms=1_700_000_000_000), 1_699_913_600_000)
+        self.assertEqual(liquidation_summary_since_ms(1, now_ms=1_700_000_000_000), 1_699_996_400_000)
+        with self.assertRaises(ValueError):
+            liquidation_summary_since_ms(2, now_ms=1_700_000_000_000)
+
