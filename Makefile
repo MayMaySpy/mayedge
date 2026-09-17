@@ -2,10 +2,13 @@ VPS ?= mayedge
 REMOTE ?= /opt/mayedge
 RSYNC_EXCL := deploy/rsync-exclude
 
-.PHONY: help up down-local logs-local push-env deploy serve check logs down
+.PHONY: help ci ci-backend ci-web up down-local logs-local push-env deploy serve check logs down
 
 help:
 	@printf '%s\n' \
+		'make ci            local GitHub Actions checks (backend + web)' \
+		'make ci-backend   ruff, basedpyright, unittest' \
+		'make ci-web        lint, test, build' \
 		'make up            local docker compose up --build' \
 		'make down-local    local docker compose down' \
 		'make logs-local    local compose logs' \
@@ -16,6 +19,19 @@ help:
 		'make logs          VPS compose logs' \
 		'make down          VPS compose down (volume kept)' \
 		'VPS=$(VPS)  REMOTE=$(REMOTE)'
+
+# Same jobs as .github/workflows/ci.yml (install steps omitted).
+ci: ci-backend ci-web
+
+ci-backend:
+	cd backend && uv run ruff check src tests
+	cd backend && uv run basedpyright src tests
+	cd backend && uv run python -m unittest discover -s tests -v
+
+ci-web:
+	cd web && npm run lint
+	cd web && npm test
+	cd web && npm run build
 
 up:
 	docker compose up -d --build

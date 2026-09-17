@@ -8,14 +8,15 @@ from mayedge.algos.book import find_book, find_book_by_algo_id
 
 
 class DeskRegistryTests(unittest.TestCase):
-    def test_books_include_chase_twap_and_ladder(self) -> None:
+    def test_books_include_chase_twap_ladder_and_grid(self) -> None:
         types = {book.algo_type for book in desk.books}
-        self.assertEqual(types, {"chase-iceberg", "advanced-twap", "ladder"})
+        self.assertEqual(types, {"chase-iceberg", "advanced-twap", "ladder", "chase-grid"})
 
     def test_get_book_by_type(self) -> None:
         self.assertIs(desk.get_book("chase-iceberg"), desk.chase_book)
         self.assertIs(desk.get_book("advanced-twap"), desk.twap_book)
         self.assertIs(desk.get_book("ladder"), desk.ladder_book)
+        self.assertIs(desk.get_book("chase-grid"), desk.grid_book)
         self.assertIsNone(desk.get_book("unknown-algo"))
 
     def test_find_book_helpers(self) -> None:

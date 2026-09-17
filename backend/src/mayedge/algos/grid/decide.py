@@ -12,8 +12,10 @@ from mayedge.algos.chase.iceberg import (
     Action,
     ChaseIcebergParams,
     MarketView,
-    decide as chase_decide,
     round_passive,
+)
+from mayedge.algos.chase.iceberg import (
+    decide as chase_decide,
 )
 from mayedge.algos.grid.config import DEFAULT_BE_BPS, MAX_UNMATCHED_TPS
 
@@ -671,9 +673,12 @@ def decide(
         clip = min(params.display_qty, cap - inv)
         if clip >= market.min_qty:
             buy_q = _chase_side_quote("buy", params, market, clip_qty=clip)
-            if buy_q.action == GridAction.REST and buy_q.price is not None:
-                if _hot_cell_blocks("buy", buy_q.price, runtime, params, now):
-                    buy_q = SideQuote(GridAction.PAUSE, reason="reentry_cooldown")
+            if (
+                buy_q.action == GridAction.REST
+                and buy_q.price is not None
+                and _hot_cell_blocks("buy", buy_q.price, runtime, params, now)
+            ):
+                buy_q = SideQuote(GridAction.PAUSE, reason="reentry_cooldown")
         else:
             buy_q = SideQuote(GridAction.PAUSE, reason="below_min_qty")
     elif inv < 0:
@@ -685,9 +690,12 @@ def decide(
         clip = min(params.display_qty, cap + inv)
         if clip >= market.min_qty:
             sell_q = _chase_side_quote("sell", params, market, clip_qty=clip)
-            if sell_q.action == GridAction.REST and sell_q.price is not None:
-                if _hot_cell_blocks("sell", sell_q.price, runtime, params, now):
-                    sell_q = SideQuote(GridAction.PAUSE, reason="reentry_cooldown")
+            if (
+                sell_q.action == GridAction.REST
+                and sell_q.price is not None
+                and _hot_cell_blocks("sell", sell_q.price, runtime, params, now)
+            ):
+                sell_q = SideQuote(GridAction.PAUSE, reason="reentry_cooldown")
         else:
             sell_q = SideQuote(GridAction.PAUSE, reason="below_min_qty")
     elif inv > 0:

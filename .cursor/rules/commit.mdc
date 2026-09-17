@@ -1,0 +1,14 @@
+---
+description: Run local CI before every git commit or push
+alwaysApply: true
+---
+
+# Local CI before commit
+
+Do not `git commit` or `git push` until `make ci` has passed in this session against the files that will be published.
+
+`make ci` is the local copy of `.github/workflows/ci.yml` (ruff, basedpyright, unittest, oxlint, vitest, production build). If only backend or only web changed, `make ci-backend` or `make ci-web` is enough.
+
+If CI fails: fix, re-run the failed target, then commit. Do not commit lint failures as a follow-up.
+
+Do not add a CONTRIBUTING.md for this. This rule is the commit helper.

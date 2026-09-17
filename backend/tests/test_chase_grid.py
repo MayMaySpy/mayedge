@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from mayedge.algos.chase.iceberg import Action, MarketView
+from mayedge.algos.chase.iceberg import MarketView
 from mayedge.algos.grid.config import MAX_UNMATCHED_TPS
 from mayedge.algos.grid.decide import (
     ALGO_ID,

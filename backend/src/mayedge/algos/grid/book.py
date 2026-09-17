@@ -10,7 +10,12 @@ from mayedge import db as store
 from mayedge import feed_health
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END, HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
+from mayedge.algos.grid.config import (
+    GRID_COI_BASE,
+    GRID_COI_END,
+    HISTORY_CAP,
+    RESTORE_FEED_TIMEOUT_S,
+)
 from mayedge.algos.grid.decide import ALGO_ID, GridParams
 from mayedge.algos.grid.job import GridRunner
 from mayedge.numbers import fmt_decimal, parse_decimal
