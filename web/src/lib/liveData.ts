@@ -18,6 +18,12 @@ export interface Trade {
 type Book = { bids: OrderBookLevel[]; asks: OrderBookLevel[] };
 /** Best bid/ask prices only — for consumers that don't need depth. */
 export type Bbo = { bid: string | null; ask: string | null };
+/** Best Bid and Best Ask together, each with resting size. */
+export type TopOfBook = {
+  bid: OrderBookLevel | null;
+  ask: OrderBookLevel | null;
+};
+const EMPTY_TOP: TopOfBook = { bid: null, ask: null };
 
 const MAX_TRADES = 200;
 const MAX_1S = 3600;
@@ -33,11 +39,15 @@ const bookListeners = new Set<() => void>();
 let bbo: Bbo = { bid: null, ask: null };
 const bboListeners = new Set<() => void>();
 
+let top: TopOfBook = EMPTY_TOP;
+const topListeners = new Set<() => void>();
+
 /** Coalesce React notifies — never flush inside the WS handler (that freezes paint). */
 const BOOK_UI_MS = 150;
 let bookFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let bookNotifyPending = false;
 let bboNotifyPending = false;
+let topNotifyPending = false;
 let lastBookFlushAt = 0;
 
 let trades: Trade[] = [];
@@ -56,20 +66,48 @@ function bboFromBook(next: Book): Bbo {
   return { bid: topPrice(next.bids), ask: topPrice(next.asks) };
 }
 
+function topLevel(levels: OrderBookLevel[]): OrderBookLevel | null {
+  const l = levels[0];
+  if (!l?.price) return null;
+  if (!(parseFloat(l.size) || 0)) return null;
+  return l;
+}
+
+function topFromBook(next: Book): TopOfBook {
+  const bid = topLevel(next.bids);
+  const ask = topLevel(next.asks);
+  if (!bid && !ask) return EMPTY_TOP;
+  return { bid, ask };
+}
+
+function sameLevel(a: OrderBookLevel | null, b: OrderBookLevel | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.price === b.price && a.size === b.size;
+}
+
+function sameTop(a: TopOfBook, b: TopOfBook): boolean {
+  return sameLevel(a.bid, b.bid) && sameLevel(a.ask, b.ask);
+}
+
 function flushBookNotifies() {
   bookFlushTimer = null;
   lastBookFlushAt = performance.now();
   const notifyBook = bookNotifyPending;
   const notifyBbo = bboNotifyPending;
+  const notifyTop = topNotifyPending;
   bookNotifyPending = false;
   bboNotifyPending = false;
+  topNotifyPending = false;
   if (notifyBook) bookListeners.forEach((fn) => fn());
   if (notifyBbo) bboListeners.forEach((fn) => fn());
+  if (notifyTop) topListeners.forEach((fn) => fn());
 }
 
-function scheduleBookNotify(opts: { book: boolean; bbo: boolean }) {
+function scheduleBookNotify(opts: { book: boolean; bbo: boolean; top: boolean }) {
   if (opts.book) bookNotifyPending = true;
   if (opts.bbo) bboNotifyPending = true;
+  if (opts.top) topNotifyPending = true;
   if (bookFlushTimer != null) return;
   const wait = Math.max(0, BOOK_UI_MS - (performance.now() - lastBookFlushAt));
   bookFlushTimer = setTimeout(flushBookNotifies, wait);
@@ -87,16 +125,20 @@ function sidesEqual(a: OrderBookLevel[], b: OrderBookLevel[]): boolean {
 function publishBook(next: Book) {
   const sameBids = sidesEqual(book.bids, next.bids);
   const sameAsks = sidesEqual(book.asks, next.asks);
-  if (sameBids && sameAsks) return;
   const merged: Book = {
     bids: sameBids ? book.bids : next.bids,
     asks: sameAsks ? book.asks : next.asks,
   };
   const nextBbo = bboFromBook(merged);
   const bboChanged = nextBbo.bid !== bbo.bid || nextBbo.ask !== bbo.ask;
+  const nextTop = topFromBook(merged);
+  const topChanged = !sameTop(top, nextTop);
+  const bookChanged = !sameBids || !sameAsks;
+  if (!bookChanged && !bboChanged && !topChanged) return;
   book = merged;
   if (bboChanged) bbo = nextBbo;
-  scheduleBookNotify({ book: true, bbo: bboChanged });
+  if (topChanged) top = nextTop;
+  scheduleBookNotify({ book: bookChanged, bbo: bboChanged, top: topChanged });
 }
 
 /** Backend already sorts; just drop empties and cap depth. */
@@ -309,6 +351,18 @@ export function getBbo() {
   return bbo;
 }
 
+export function subscribeTopOfBook(onChange: () => void) {
+  topListeners.add(onChange);
+  return () => {
+    topListeners.delete(onChange);
+  };
+}
+
+export function getTopOfBook(): TopOfBook {
+  if (!bookSynced) return EMPTY_TOP;
+  return top;
+}
+
 /** Full replace from gateway snapshot (or legacy `order_book`). */
 export function applyBookSnapshot(
   next: Book,
@@ -332,6 +386,8 @@ export function applyBookDelta(
   if (!bookSynced) return false;
   if (typeof prevSeq === "number" && Number.isFinite(prevSeq) && prevSeq !== bookSeq) {
     bookSynced = false;
+    if (top !== EMPTY_TOP) top = EMPTY_TOP;
+    topListeners.forEach((fn) => fn());
     return false;
   }
   if (typeof seq === "number" && Number.isFinite(seq)) bookSeq = seq;
@@ -353,21 +409,31 @@ export function setBook(next: Book) {
 export function clearBook() {
   bookSeq = 0;
   bookSynced = false;
-  if (book.bids.length === 0 && book.asks.length === 0 && bbo.bid == null && bbo.ask == null) {
+  const topChanged = top !== EMPTY_TOP;
+  if (
+    book.bids.length === 0 &&
+    book.asks.length === 0 &&
+    bbo.bid == null &&
+    bbo.ask == null &&
+    !topChanged
+  ) {
     return;
   }
   book = { bids: [], asks: [] };
   const bboChanged = bbo.bid != null || bbo.ask != null;
   if (bboChanged) bbo = { bid: null, ask: null };
+  if (topChanged) top = EMPTY_TOP;
   if (bookFlushTimer != null) {
     clearTimeout(bookFlushTimer);
     bookFlushTimer = null;
   }
   bookNotifyPending = false;
   bboNotifyPending = false;
+  topNotifyPending = false;
   lastBookFlushAt = 0;
   bookListeners.forEach((fn) => fn());
   if (bboChanged) bboListeners.forEach((fn) => fn());
+  if (topChanged) topListeners.forEach((fn) => fn());
 }
 
 export function getBookSeq() {
@@ -382,6 +448,7 @@ export function setBookSynced(synced: boolean) {
   if (bookSynced === synced) return;
   bookSynced = synced;
   bookListeners.forEach((fn) => fn());
+  topListeners.forEach((fn) => fn());
 }
 
 export function subscribeTrades(onChange: () => void) {
@@ -554,6 +621,11 @@ export function useLiveBook() {
 /** Best bid/ask only — avoids re-rendering on depth-only book updates. */
 export function useLiveBbo() {
   return useSyncExternalStore(subscribeBbo, getBbo, getBbo);
+}
+
+/** Top of Book — notifies when Best Bid/Ask price or size changes, not deeper levels. */
+export function useLiveTopOfBook() {
+  return useSyncExternalStore(subscribeTopOfBook, getTopOfBook, getTopOfBook);
 }
 
 export function useLiveTrades() {

@@ -32,6 +32,18 @@ _Avoid_: RSI, ratio, beta, vs BTC price
 The chart-panel view of cross-market boards (Relative Strength, liquidations). Not a price chart.
 _Avoid_: RS (as a chart mode), analytics, mosaic
 
+**Best Bid**:
+The highest bid on the live ladder, with resting size.
+_Avoid_: bid (unqualified), buy wall
+
+**Best Ask**:
+The lowest ask on the live ladder, with resting size.
+_Avoid_: ask (unqualified), sell wall, offer (unqualified)
+
+**Top of Book**:
+Best Bid and Best Ask together.
+_Avoid_: using “BBO” for the price-only snapshot; mid; quote; calling the Book panel “top of book”
+
 **Long liquidation**:
 A forced close of longs. Stored as `side: sell`.
 _Avoid_: short squeeze, ask print (unqualified)

@@ -30,7 +30,14 @@ import {
   type ChartOverlay,
   type OverlayAction,
 } from "@/lib/chartTradingLines";
-import { rollLiveCandles, seedCandles1s, useLiveCandles1s, useLiveMinuteCandles } from "@/lib/liveData";
+import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
+import {
+  rollLiveCandles,
+  seedCandles1s,
+  useLiveCandles1s,
+  useLiveMinuteCandles,
+  useLiveTopOfBook,
+} from "@/lib/liveData";
 import { theme } from "@/lib/theme";
 import { cn, formatPct, formatPrice } from "@/lib/utils";
 
@@ -41,6 +48,7 @@ type Timeframe = (typeof TIMEFRAMES)[number];
 
 const TF_KEY = "mayedge-chart-tf";
 const VOL_KEY = "mayedge-chart-vol";
+const BBO_KEY = "mayedge-chart-bbo";
 const MODE_KEY = "mayedge-chart-mode";
 const SCAN_TAB_KEY = "mayedge-scan-tab";
 const RIGHT_OFFSET = 8;
@@ -91,6 +99,14 @@ function loadTf(): Timeframe {
 function loadVol(): boolean {
   try {
     return localStorage.getItem(VOL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function loadBbo(): boolean {
+  try {
+    return localStorage.getItem(BBO_KEY) === "1";
   } catch {
     return false;
   }
@@ -237,6 +253,7 @@ export const ChartWidget = memo(function ChartWidget({
 }: ChartWidgetProps) {
   const [tf, setTf] = useState<Timeframe>(loadTf);
   const [volOn, setVolOn] = useState(loadVol);
+  const [bboOn, setBboOn] = useState(loadBbo);
   const [mode, setMode] = useState<ChartMode>(loadMode);
   const [scanTab, setScanTab] = useState<ScanTab>(loadScanTab);
   const [liqHours, setLiqHours] = useState<LiquidationSummaryHours>(() => loadLiqHours(24));
@@ -248,13 +265,17 @@ export const ChartWidget = memo(function ChartWidget({
   const [hover, setHover] = useState<{ key: string; bar: Ohlc } | null>(null);
   const candles1s = useLiveCandles1s(isPrice && tf === "1s");
   const minuteCandles = useLiveMinuteCandles();
+  const top = useLiveTopOfBook();
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const tradingLinesRef = useRef<TradingLinesPrimitive | null>(null);
+  const topOfBookRef = useRef<TopOfBookPrimitive | null>(null);
   const overlaysRef = useRef(overlays);
+  const topRef = useRef(top);
+  const bboOnRef = useRef(bboOn);
   const onActionRef = useRef(onOverlayAction);
   const volOnRef = useRef(volOn);
   const primedRef = useRef(false);
@@ -280,6 +301,14 @@ export const ChartWidget = memo(function ChartWidget({
   useEffect(() => {
     volOnRef.current = volOn;
   }, [volOn]);
+
+  useEffect(() => {
+    topRef.current = top;
+  }, [top]);
+
+  useEffect(() => {
+    bboOnRef.current = bboOn;
+  }, [bboOn]);
 
   useEffect(() => {
     if (!isPrice || tf === "1s") return;
@@ -381,6 +410,11 @@ export const ChartWidget = memo(function ChartWidget({
     series.attachPrimitive(tradingLines);
     tradingLinesRef.current = tradingLines;
 
+    const topOfBook = new TopOfBookPrimitive();
+    series.attachPrimitive(topOfBook);
+    topOfBookRef.current = topOfBook;
+    topOfBook.setTop(bboOnRef.current ? topRef.current : null);
+
     const onClick = (param: { hoveredInfo?: { objectId?: unknown }; hoveredObjectId?: unknown }) => {
       const action = parseOverlayAction(param.hoveredInfo?.objectId ?? param.hoveredObjectId);
       if (!action) return;
@@ -435,6 +469,7 @@ export const ChartWidget = memo(function ChartWidget({
       seriesRef.current = null;
       volSeriesRef.current = null;
       tradingLinesRef.current = null;
+      topOfBookRef.current = null;
     };
     // Recreate when returning to the price chart; format is applied below.
     // oxlint-disable-next-line exhaustive-deps
@@ -545,6 +580,12 @@ export const ChartWidget = memo(function ChartWidget({
     primitive.setLines(lines);
   }, [overlays]);
 
+  useEffect(() => {
+    const primitive = topOfBookRef.current;
+    if (!primitive) return;
+    primitive.setTop(bboOn ? top : null);
+  }, [top, bboOn]);
+
   const selectTf = (next: Timeframe) => {
     if (next === tf) return;
     setTf(next);
@@ -587,6 +628,18 @@ export const ChartWidget = memo(function ChartWidget({
       const next = !on;
       try {
         localStorage.setItem(VOL_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const toggleBbo = () => {
+    setBboOn((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem(BBO_KEY, next ? "1" : "0");
       } catch {
         /* ignore */
       }
@@ -672,6 +725,16 @@ export const ChartWidget = memo(function ChartWidget({
                 onPressedChange={() => toggleVol()}
               >
                 Vol
+              </Toggle>
+              <Toggle
+                variant="seg"
+                size="sm"
+                pressed={bboOn}
+                title="Top of book"
+                className="h-6 px-1.5 font-mono text-[11px]"
+                onPressedChange={() => toggleBbo()}
+              >
+                B/A
               </Toggle>
               <ToggleGroup
                 type="single"

@@ -11,6 +11,7 @@ import {
   getCandles1s,
   getMarketQuotes,
   getMinuteCandles,
+  getTopOfBook,
   isBookSynced,
   overlayQuote,
   prependTrades,
@@ -32,6 +33,102 @@ describe("applyBookDelta", () => {
     );
     expect(ok).toBe(false);
     expect(isBookSynced()).toBe(false);
+  });
+});
+
+describe("getTopOfBook", () => {
+  afterEach(() => {
+    clearBook();
+  });
+
+  it("yields Best Bid and Best Ask price and size from a snapshot", () => {
+    applyBookSnapshot({
+      bids: [
+        { price: "100", size: "1.5" },
+        { price: "99", size: "8" },
+      ],
+      asks: [
+        { price: "101", size: "2.25" },
+        { price: "102", size: "4" },
+      ],
+    });
+    expect(getTopOfBook()).toEqual({
+      bid: { price: "100", size: "1.5" },
+      ask: { price: "101", size: "2.25" },
+    });
+  });
+
+  it("treats a missing or zero-size side as empty", () => {
+    applyBookSnapshot({
+      bids: [{ price: "100", size: "0" }],
+      asks: [{ price: "101", size: "3" }],
+    });
+    expect(getTopOfBook()).toEqual({
+      bid: null,
+      ask: { price: "101", size: "3" },
+    });
+  });
+
+  it("updates when only the Best Bid size changes", () => {
+    applyBookSnapshot(
+      { bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] },
+      10
+    );
+    applyBookDelta({ bids: [{ price: "100", size: "4" }], asks: [] }, { seq: 11, prevSeq: 10 });
+    expect(getTopOfBook()).toEqual({
+      bid: { price: "100", size: "4" },
+      ask: { price: "101", size: "1" },
+    });
+  });
+
+  it("does not change when a deeper level updates", () => {
+    applyBookSnapshot(
+      {
+        bids: [
+          { price: "100", size: "1" },
+          { price: "99", size: "8" },
+        ],
+        asks: [{ price: "101", size: "1" }],
+      },
+      10
+    );
+    applyBookDelta({ bids: [{ price: "99", size: "9" }], asks: [] }, { seq: 11, prevSeq: 10 });
+    expect(getTopOfBook()).toEqual({
+      bid: { price: "100", size: "1" },
+      ask: { price: "101", size: "1" },
+    });
+  });
+
+  it("is empty after clearBook", () => {
+    applyBookSnapshot({ bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] });
+    clearBook();
+    expect(getTopOfBook()).toEqual({ bid: null, ask: null });
+  });
+
+  it("is empty while the book is unsynced", () => {
+    applyBookSnapshot(
+      { bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] },
+      10
+    );
+    applyBookDelta({ bids: [{ price: "100", size: "2" }], asks: [] }, { seq: 11, prevSeq: 9 });
+    expect(isBookSynced()).toBe(false);
+    expect(getTopOfBook()).toEqual({ bid: null, ask: null });
+  });
+
+  it("returns Top of Book again after a snapshot following a seq gap", () => {
+    applyBookSnapshot(
+      { bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] },
+      10
+    );
+    applyBookDelta({ bids: [{ price: "100", size: "2" }], asks: [] }, { seq: 11, prevSeq: 9 });
+    applyBookSnapshot(
+      { bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] },
+      20
+    );
+    expect(getTopOfBook()).toEqual({
+      bid: { price: "100", size: "1" },
+      ask: { price: "101", size: "1" },
+    });
   });
 });
 
