@@ -9,7 +9,11 @@ import lighter
 
 from mayedge.config import settings
 from mayedge.lighter.account import account_service
-from mayedge.lighter.coi import init_manual_coi_seq, next_manual_client_order_index
+from mayedge.lighter.coi import (
+    init_manual_coi_seq,
+    is_algo_client_order,
+    next_manual_client_order_index,
+)
 from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import (
@@ -360,6 +364,39 @@ class OrderService:
             self._raise_order_err(err, meta)
         tx_hash = self._require_tx(resp, err, action="Modify")
         return {"tx_hash": tx_hash}
+
+    async def amend_ticket(self, market_index: int, order_index: int, price: str) -> dict[str, Any]:
+        live = account_service.find_open_order(market_index, order_index)
+        if live is None:
+            raise ValueError("Order not found")
+        if is_algo_client_order(live.client_order_index):
+            raise ValueError("Cannot amend a Clip")
+        return await self.modify_order(
+            market_index,
+            order_index,
+            price,
+            size=live.remaining,
+        )
+
+    async def cancel_tickets(
+        self, side: str, market_index: int | None = None
+    ) -> dict[str, Any]:
+        if side not in ("buy", "sell"):
+            raise ValueError("side must be buy or sell")
+        n = 0
+        for order in account_service.list_open_orders():
+            if order.side != side:
+                continue
+            if market_index is not None and order.market_index != market_index:
+                continue
+            if is_algo_client_order(order.client_order_index):
+                continue
+            try:
+                await self.cancel_order(order.market_index, order.order_index)
+            except Exception as e:
+                return {"cancelled": n, "error": str(e)}
+            n += 1
+        return {"cancelled": n}
 
     async def cancel_order(self, market_index: int, order_index: int) -> dict[str, Any]:
         _tx, resp, err = await self._retry_nonce(

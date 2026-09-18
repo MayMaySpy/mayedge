@@ -179,6 +179,39 @@ export function PositionsPanel({
     }
   };
 
+  const cancelTickets = async (side: "buy" | "sell") => {
+    if (!tradingEnabled) {
+      notifyErr("Trading not configured");
+      return;
+    }
+    if (!feed.ready) {
+      notifyErr(feed.reason ?? "Feed not ready");
+      return;
+    }
+    const marketIndex = orderScope === "pair" ? market?.market_index : null;
+    if (orderScope === "pair" && marketIndex == null) return;
+    const noun = side === "buy" ? "bids" : "asks";
+    const key = `cancel-${side}`;
+    setBusy(key);
+    try {
+      const out = await api.cancelTickets(side, marketIndex);
+      const n = out.cancelled;
+      if (out.error) {
+        notifyErr(n > 0 ? `Cancelled ${n} ${noun}; ${out.error}` : out.error);
+        return;
+      }
+      if (n === 0) {
+        notifyErr(side === "buy" ? "No buy Tickets" : "No sell Tickets");
+        return;
+      }
+      notifyOk(`Cancelled ${n} ${noun}`);
+    } catch (e) {
+      notifyErr(e instanceof Error ? e.message : "Cancel failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const run = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     if (!tradingEnabled) {
       notifyErr("Trading not configured");
@@ -242,6 +275,9 @@ export function PositionsPanel({
 
   const listedAll = userOrders;
   const listedPair = pairUserOrders;
+  const scopedTickets = orderScope === "pair" ? listedPair : listedAll;
+  const bidTickets = scopedTickets.filter((o) => o.side === "buy").length;
+  const askTickets = scopedTickets.filter((o) => o.side === "sell").length;
   const visibleOrders = orderScope === "pair" ? pairOrders : allOrders;
   const openOrderCount = allOrders.length;
 
@@ -488,7 +524,27 @@ export function PositionsPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!tradingEnabled || !market || listedPair.length === 0}
+                  className="text-bid hover:text-bid"
+                  title="Cancel buy Tickets"
+                  disabled={!tradingEnabled || busy != null || bidTickets === 0}
+                  onClick={() => void cancelTickets("buy")}
+                >
+                  Bids {bidTickets}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-ask hover:text-ask"
+                  title="Cancel sell Tickets"
+                  disabled={!tradingEnabled || busy != null || askTickets === 0}
+                  onClick={() => void cancelTickets("sell")}
+                >
+                  Asks {askTickets}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!tradingEnabled || busy != null || !market || listedPair.length === 0}
                   onClick={cancelPair}
                 >
                   Cancel {market?.symbol ?? "pair"}
@@ -496,7 +552,7 @@ export function PositionsPanel({
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!tradingEnabled || listedAll.length === 0}
+                  disabled={!tradingEnabled || busy != null || listedAll.length === 0}
                   onClick={cancelAll}
                 >
                   Cancel all

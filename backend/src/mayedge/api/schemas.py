@@ -41,7 +41,21 @@ class CancelOrderRequest(BaseModel):
         return int(self.order_index)
 
 
+class AmendOrderRequest(BaseModel):
+    market_index: int
+    order_index: int | str
+    price: str
+
+    def order_index_int(self) -> int:
+        return int(self.order_index)
+
+
 class CancelAllRequest(BaseModel):
+    market_index: int | None = None
+
+
+class CancelSideRequest(BaseModel):
+    side: TradeSide
     market_index: int | None = None
 
 

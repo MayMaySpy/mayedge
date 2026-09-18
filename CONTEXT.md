@@ -4,6 +4,8 @@ Personal Lighter perp trading desk: live markets, a chart, and execution.
 
 ## Language
 
+### Markets
+
 **Market**:
 A Lighter-listed instrument. The desk prefers the perp when a spot twin exists.
 _Avoid_: pair (for a single listing)
@@ -16,17 +18,19 @@ _Avoid_: using “pair” for “all markets”
 A Market’s 24h price change in percent points (`+3` means `+3.00%`).
 _Avoid_: return, pct, 24h (unqualified)
 
-**Strength**:
-Size-weight skew in a ladder plan.
-_Avoid_: calling Relative Strength “strength” without “relative”
-
 **Numeraire**:
 The Market whose Daily Change is subtracted when ranking Relative Strength. v1 is always BTC.
 _Avoid_: quote, base, benchmark, index
 
 **Relative Strength (RS)**:
 A Market’s 24h excess return versus the Numeraire: Daily Change of the Market minus Daily Change of BTC. Same percent-point units. BTC versus itself is `0`. If either Daily Change is missing, RS is unknown, not `0`.
-_Avoid_: RSI, ratio, beta, vs BTC price
+_Avoid_: RSI, ratio, beta, vs BTC price, Strength (unqualified)
+
+**Favorites**:
+Operator-pinned Markets on the header strip. Independent of Watchlist.
+_Avoid_: Watchlist, stars, bookmarks
+
+### Chart views
 
 **Scan**:
 The chart-panel view of cross-market boards (Relative Strength, liquidations). Not a price chart.
@@ -42,7 +46,7 @@ _Avoid_: group, basket, folder, preset (unqualified)
 
 **Watchlist**:
 The Markets in a Watch Set. Cap 8. Order is add order (newest first), not Path rank, not alphabetic.
-_Avoid_: favorites, pairs, basket (unqualified), ranking by Path
+_Avoid_: Favorites, pairs, basket (unqualified), ranking by Path
 
 **Watch pane**:
 One of up to four Path charts on Watch. Each pane shows one Watch Set.
@@ -56,17 +60,63 @@ _Avoid_: Daily Change, Relative Strength, return, pair (for a listing)
 The price used to sample a Path: last trade, else mark, else mid. Missing is unknown, not `0`.
 _Avoid_: close, using Daily Change as a Path sample
 
+### Book
+
 **Best Bid**:
-The highest bid on the live ladder, with resting size.
-_Avoid_: bid (unqualified), buy wall
+The highest bid on the live book, with resting size.
+_Avoid_: bid (unqualified), buy wall, ladder (for the live book)
 
 **Best Ask**:
-The lowest ask on the live ladder, with resting size.
-_Avoid_: ask (unqualified), sell wall, offer (unqualified)
+The lowest ask on the live book, with resting size.
+_Avoid_: ask (unqualified), sell wall, offer (unqualified), ladder (for the live book)
 
 **Top of Book**:
 Best Bid and Best Ask together.
 _Avoid_: using “BBO” for the price-only snapshot; mid; quote; calling the Book panel “top of book”
+
+### Execution
+
+**Ticket**:
+An operator-placed working order on a Market. Not a Clip. Bulk side cancel pulls Tickets only.
+_Avoid_: parent (unqualified), manual order, limit (for the working order itself)
+
+**Quick size**:
+The single size the floating Buy/Sell buttons and an armed price-axis rest both use.
+_Avoid_: preset, clip size, ticket size (that's the Order panel)
+
+**Clip**:
+A child working order owned by an algo job. Identified by client_order_index. Not a Ticket.
+_Avoid_: child (unqualified), slice (that's TWAP), rung (that's Ladder)
+
+**Amend**:
+An in-place change to a live working order’s price or size. Not cancel+replace.
+_Avoid_: modify, update, replace
+
+**Chase**:
+An algo that parks one Clip behind the touch and requotes as the book walks, up to a cap.
+_Avoid_: iceberg (unqualified), MM, chasing (unqualified)
+
+**Grid**:
+An algo that chases inside a price band and takes profit with reduce-only Clips. Will not start on a Market that already has another desk algo live.
+_Avoid_: grid bot, DCA
+
+**Ladder**:
+An algo that keeps N live rungs on static prices.
+_Avoid_: scale, iceberg, using “ladder” for the live book
+
+**Strength**:
+Size-weight skew in a Ladder plan.
+_Avoid_: calling Relative Strength “strength” without “relative”
+
+**TWAP**:
+An algo that slices a parent size across time into Clips.
+_Avoid_: VWAP, iceberg
+
+**Kill**:
+Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied.
+_Avoid_: panic, shutdown, flatten (as a synonym for Kill)
+
+### Liquidations
 
 **Long liquidation**:
 A forced close of longs. Stored as `side: sell`.

@@ -6,9 +6,9 @@ import GridLayout, {
 } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { notifyErr, notifyOk } from "@/lib/notify";
+import { notifyErr, notifyOk, notifyOrder } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
-import { ChartWidget, type ChartOverlay, type OverlayAction } from "@/components/widgets/ChartWidget";
+import { ChartWidget, type ChartOverlay, type OverlayAction, type TicketAmend, type TicketPlace } from "@/components/widgets/ChartWidget";
 import { Header } from "@/components/widgets/Header";
 import { LiqsPanel } from "@/components/widgets/LiqsPanel";
 import { AlertsPanel } from "@/components/widgets/AlertsPanel";
@@ -31,6 +31,8 @@ import { api, isLongPosition, type Market } from "@/lib/api";
 import { algoIsLive, algoOrderKind, preferPerpMarket } from "@/lib/algos";
 import { theme } from "@/lib/theme";
 import { useTradingReady } from "@/hooks/useTradingReady";
+import { buildQuickLimit } from "@/lib/quickTrade";
+import { getQuickSize } from "@/lib/quickSizes";
 import {
   defaultPanelVisibility,
   PANEL_CATALOG,
@@ -121,6 +123,7 @@ function ChartPanel({
   onSymbolChange: (symbol: string) => void;
   onClose?: () => void;
 }) {
+  const feed = useTradingReady({ connected });
   const accountSnap = useLiveAccount();
   const bbo = useLiveBbo();
   const algoBook = useLiveAlgos();
@@ -219,12 +222,69 @@ function ChartPanel({
     return lines;
   }, [accountSnap, algoBook.working, symbol, tradingEnabled, liveMark, market]);
 
+  const handleTicketAmend = useCallback(async (amend: TicketAmend) => {
+    try {
+      await api.amendOrder(amend.marketIndex, amend.orderIndex, amend.price);
+      notifyOk("Order amended");
+    } catch (e) {
+      notifyErr(e instanceof Error ? e.message : "Amend failed");
+    }
+  }, []);
+
+  const handleTicketPlace = useCallback(
+    async (place: TicketPlace) => {
+      if (!market || !tradingEnabled) {
+        notifyErr("Trading not configured");
+        return;
+      }
+      if (!feed.ready) {
+        notifyErr(feed.reason ?? "Feed not ready");
+        return;
+      }
+      const built = buildQuickLimit({
+        qty: getQuickSize(),
+        side: place.side,
+        price: place.price,
+        market,
+        account: accountSnap,
+        bbo,
+      });
+      if (!built.ok) {
+        notifyErr(built.error);
+        return;
+      }
+      try {
+        await api.placeLimitOrder({
+          market_index: market.market_index,
+          side: place.side,
+          size: built.size,
+          price: built.price,
+          time_in_force: "gtt",
+          reduce_only: false,
+        });
+        notifyOrder({
+          kind: "limit",
+          side: place.side,
+          size: built.size,
+          symbol: market.symbol,
+          price: built.price,
+        });
+      } catch (e) {
+        notifyErr(e instanceof Error ? e.message : "Order failed");
+      }
+    },
+    [accountSnap, bbo, feed.ready, feed.reason, market, tradingEnabled]
+  );
+
   return (
     <ChartWidget
       symbol={symbol}
       priceDecimals={market?.price_decimals ?? 2}
+      livePrice={liveMark > 0 ? liveMark : null}
       overlays={overlays}
       onOverlayAction={onOverlayAction}
+      onTicketAmend={handleTicketAmend}
+      onTicketPlace={handleTicketPlace}
       onClose={onClose}
       markets={markets}
       onSymbolChange={onSymbolChange}

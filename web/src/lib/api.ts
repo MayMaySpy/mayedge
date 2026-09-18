@@ -335,10 +335,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ market_index, order_index: String(order_index) }),
     }),
+  amendOrder: (market_index: number, order_index: string | number, price: string) =>
+    request("/orders/modify", {
+      method: "POST",
+      body: JSON.stringify({ market_index, order_index: String(order_index), price }),
+    }),
   cancelAll: (market_index?: number | null) =>
     request("/orders/cancel-all", {
       method: "POST",
       body: JSON.stringify({ market_index: market_index ?? null }),
+    }),
+  cancelTickets: (side: "buy" | "sell", market_index?: number | null) =>
+    request<{ cancelled: number; error?: string }>("/orders/cancel-side", {
+      method: "POST",
+      body: JSON.stringify({ side, market_index: market_index ?? null }),
     }),
   updateLeverage: (market_index: number, leverage: number, cross: boolean) =>
     request("/leverage", {

@@ -33,6 +33,14 @@ import {
   type OverlayAction,
 } from "@/lib/chartTradingLines";
 import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
+import { useAxisTicket } from "@/lib/axisTicket";
+import { getQuickSize } from "@/lib/quickSizes";
+import {
+  createTicketAmend,
+  type TicketAmend,
+  type TicketAmendHost,
+} from "@/lib/ticketAmend";
+import { createTicketPlace, type TicketPlace } from "@/lib/ticketPlace";
 import {
   rollLiveCandles,
   seedCandles1s,
@@ -41,7 +49,7 @@ import {
   useLiveTopOfBook,
 } from "@/lib/liveData";
 import { theme } from "@/lib/theme";
-import { cn, formatPct, formatPrice } from "@/lib/utils";
+import { cn, formatPct, formatPrice, formatSize } from "@/lib/utils";
 import {
   WATCH_WINDOWS,
   WATCH_WINDOW_SEC,
@@ -51,7 +59,7 @@ import {
 } from "@/lib/watchWindow";
 import { SquareArrowOutUpRight } from "lucide-react";
 
-export type { ChartOverlay, OverlayAction };
+export type { ChartOverlay, OverlayAction, TicketAmend, TicketPlace };
 
 const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1h", "4h", "1d"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
@@ -80,11 +88,52 @@ interface ChartWidgetProps {
   symbol: string;
   priceDecimals?: number;
   overlays?: ChartOverlay[];
+  livePrice?: number | null;
   onOverlayAction?: (action: OverlayAction, overlay: ChartOverlay) => void;
+  onTicketAmend?: (amend: TicketAmend) => void;
+  onTicketPlace?: (place: TicketPlace) => void;
   onClose?: () => void;
   children?: ReactNode;
   markets?: readonly Market[];
   onSymbolChange?: (symbol: string) => void;
+}
+
+function chartPoint(el: HTMLElement, e: PointerEvent) {
+  const r = el.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function chartRegion(
+  chart: IChartApi,
+  pt: { x: number; y: number }
+): "axis" | "pane" | "elsewhere" {
+  let paneW = 0;
+  let paneH = 0;
+  try {
+    const pane = chart.paneSize();
+    paneW = pane?.width ?? 0;
+    paneH = pane?.height ?? 0;
+  } catch {
+    return "elsewhere";
+  }
+  if (!(paneW > 0) || !(paneH > 0) || pt.x < 0 || pt.y < 0 || pt.y > paneH) return "elsewhere";
+  if (pt.x >= paneW) return "axis";
+  return "pane";
+}
+
+function axisGhost(price: number, side: "buy" | "sell"): ChartOverlay {
+  const qty = getQuickSize();
+  const n = parseFloat(qty);
+  const size = Number.isFinite(n) && n > 0 ? formatSize(n) : "";
+  return {
+    id: "axis-ghost",
+    kind: "order",
+    price,
+    color: side === "buy" ? theme.bid : theme.ask,
+    label: size ? `${side === "buy" ? "BUY" : "SELL"} ${size}` : side === "buy" ? "BUY" : "SELL",
+    side,
+    interactive: false,
+  };
 }
 
 function priceFormat(decimals: number) {
@@ -256,7 +305,10 @@ export const ChartWidget = memo(function ChartWidget({
   symbol,
   priceDecimals = 2,
   overlays = [],
+  livePrice = null,
   onOverlayAction,
+  onTicketAmend,
+  onTicketPlace,
   onClose,
   children,
   markets = [],
@@ -292,6 +344,17 @@ export const ChartWidget = memo(function ChartWidget({
   const topRef = useRef(top);
   const bboOnRef = useRef(bboOn);
   const onActionRef = useRef(onOverlayAction);
+  const onAmendRef = useRef(onTicketAmend);
+  const onPlaceRef = useRef(onTicketPlace);
+  const livePriceRef = useRef(livePrice);
+  const priceDecimalsRef = useRef(priceDecimals);
+  const amendRef = useRef<ReturnType<typeof createTicketAmend> | null>(null);
+  const placeRef = useRef<ReturnType<typeof createTicketPlace> | null>(null);
+  const ghostRef = useRef<ChartOverlay | null>(null);
+  const suppressClickRef = useRef(false);
+  const paintLinesRef = useRef<() => void>(() => {});
+  const { armed: axisArmed, setArmed: setAxisArmed } = useAxisTicket();
+  const axisArmedRef = useRef(axisArmed);
   const volOnRef = useRef(volOn);
   const primedRef = useRef(false);
   const lastMetaRef = useRef<{ first: number; time: number; len: number } | null>(null);
@@ -307,11 +370,39 @@ export const ChartWidget = memo(function ChartWidget({
 
   useEffect(() => {
     overlaysRef.current = overlays;
+    amendRef.current?.setOverlays(overlays);
   }, [overlays]);
 
   useEffect(() => {
     onActionRef.current = onOverlayAction;
   }, [onOverlayAction]);
+
+  useEffect(() => {
+    onAmendRef.current = onTicketAmend;
+  }, [onTicketAmend]);
+
+  useEffect(() => {
+    onPlaceRef.current = onTicketPlace;
+  }, [onTicketPlace]);
+
+  useEffect(() => {
+    livePriceRef.current = livePrice;
+    placeRef.current?.setLivePrice(livePrice);
+  }, [livePrice]);
+
+  useEffect(() => {
+    priceDecimalsRef.current = priceDecimals;
+    amendRef.current?.setPriceDecimals(priceDecimals);
+    placeRef.current?.setPriceDecimals(priceDecimals);
+  }, [priceDecimals]);
+
+  useEffect(() => {
+    axisArmedRef.current = axisArmed;
+    placeRef.current?.setArmed(axisArmed);
+    if (!axisArmed) {
+      ghostRef.current = null;
+    }
+  }, [axisArmed]);
 
   useEffect(() => {
     volOnRef.current = volOn;
@@ -430,7 +521,121 @@ export const ChartWidget = memo(function ChartWidget({
     topOfBookRef.current = topOfBook;
     topOfBook.setTop(bboOnRef.current ? topRef.current : null);
 
+    const paintLines = () => {
+      const lines: ChartOverlay[] = [];
+      for (const o of overlaysRef.current) {
+        if (!Number.isFinite(o.price) || o.price <= 0) continue;
+        lines.push(o);
+      }
+      const preview = amendRef.current?.preview();
+      const painted = preview
+        ? lines.map((o) => (o.id === preview.overlayId ? { ...o, price: preview.price } : o))
+        : lines;
+      const ghost = ghostRef.current;
+      tradingLines.setLines(ghost ? [...painted, ghost] : painted);
+    };
+    paintLinesRef.current = paintLines;
+
+    const host: TicketAmendHost & {
+      regionAt: (pt: { x: number; y: number }) => "axis" | "pane" | "elsewhere";
+    } = {
+      priceAtY(y) {
+        const px = series.coordinateToPrice(y);
+        return px != null && Number.isFinite(px) ? px : null;
+      },
+      setPanEnabled(enabled) {
+        chart.applyOptions({ handleScroll: enabled, handleScale: enabled });
+      },
+      hit(pt) {
+        return tradingLines.hitAt(pt.x, pt.y);
+      },
+      regionAt(pt) {
+        return chartRegion(chart, pt);
+      },
+    };
+
+    const amend = createTicketAmend(host, {
+      onAmend: (a) => onAmendRef.current?.(a),
+    });
+    amend.setPriceDecimals(priceDecimalsRef.current);
+    amend.setOverlays(overlaysRef.current);
+    amendRef.current = amend;
+
+    const place = createTicketPlace(host, {
+      onPlace: (p) => onPlaceRef.current?.(p),
+    });
+    place.setPriceDecimals(priceDecimalsRef.current);
+    place.setLivePrice(livePriceRef.current);
+    place.setArmed(axisArmedRef.current);
+    placeRef.current = place;
+
+    const el = containerRef.current;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 || !el) return;
+      const pt = chartPoint(el, e);
+      if (amend.pointerDown(pt)) {
+        suppressClickRef.current = true;
+        try {
+          el.setPointerCapture(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        paintLines();
+        return;
+      }
+      place.pointerDown(pt);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!el) return;
+      const pt = chartPoint(el, e);
+      amend.pointerMove(pt);
+      place.pointerMove(pt);
+      const hover = place.hover(pt);
+      ghostRef.current = hover ? axisGhost(Number(hover.price), hover.side) : null;
+      const region = host.regionAt(pt);
+      if (amend.preview()) el.style.cursor = "ns-resize";
+      else if (axisArmedRef.current && region === "axis") el.style.cursor = "ns-resize";
+      else el.style.cursor = "";
+      paintLines();
+    };
+    const finishPointer = (e: PointerEvent) => {
+      if (!el) return;
+      const pt = chartPoint(el, e);
+      amend.pointerUp();
+      place.pointerUp(pt);
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      paintLines();
+    };
+    const onPointerCancel = () => {
+      amend.pointerCancel();
+      place.pointerCancel();
+      ghostRef.current = null;
+      if (el) el.style.cursor = "";
+      paintLines();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      amend.pointerCancel();
+      place.pointerCancel();
+      ghostRef.current = null;
+      paintLines();
+    };
+    el?.addEventListener("pointerdown", onPointerDown);
+    el?.addEventListener("pointermove", onPointerMove);
+    el?.addEventListener("pointerup", finishPointer);
+    el?.addEventListener("pointercancel", onPointerCancel);
+    document.addEventListener("keydown", onKeyDown);
+    paintLines();
+
     const onClick = (param: { hoveredInfo?: { objectId?: unknown }; hoveredObjectId?: unknown }) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
       const action = parseOverlayAction(param.hoveredInfo?.objectId ?? param.hoveredObjectId);
       if (!action) return;
       const overlay = overlaysRef.current.find((o) => o.id === action.id);
@@ -477,6 +682,16 @@ export const ChartWidget = memo(function ChartWidget({
 
     return () => {
       ro.disconnect();
+      el?.removeEventListener("pointerdown", onPointerDown);
+      el?.removeEventListener("pointermove", onPointerMove);
+      el?.removeEventListener("pointerup", finishPointer);
+      el?.removeEventListener("pointercancel", onPointerCancel);
+      document.removeEventListener("keydown", onKeyDown);
+      amend.destroy();
+      place.destroy();
+      amendRef.current = null;
+      placeRef.current = null;
+      paintLinesRef.current = () => {};
       chart.unsubscribeClick(onClick);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
@@ -585,15 +800,8 @@ export const ChartWidget = memo(function ChartWidget({
   }, [display, tf, volOn, paintGen]);
 
   useEffect(() => {
-    const primitive = tradingLinesRef.current;
-    if (!primitive) return;
-    const lines: ChartOverlay[] = [];
-    overlays.forEach((o) => {
-      if (!Number.isFinite(o.price) || o.price <= 0) return;
-      lines.push(o);
-    });
-    primitive.setLines(lines);
-  }, [overlays]);
+    paintLinesRef.current();
+  }, [overlays, axisArmed]);
 
   useEffect(() => {
     const primitive = topOfBookRef.current;
@@ -671,7 +879,7 @@ export const ChartWidget = memo(function ChartWidget({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative flex h-8 shrink-0 items-center border-b border-border">
-        <div className="panel-drag z-[1] flex min-w-0 flex-1 cursor-move items-center gap-2 overflow-hidden px-2">
+        <div className="panel-drag z-1 flex min-w-0 flex-1 cursor-move items-center gap-2 overflow-hidden px-2">
           {isPrice ? (
             <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
           ) : isScan && scanTab === "liqs" ? (
@@ -680,7 +888,7 @@ export const ChartWidget = memo(function ChartWidget({
             <NumeraireReadout change={numeraireChange24h} />
           ) : null}
         </div>
-        <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 z-2 flex items-center justify-center">
           <ToggleGroup
             type="single"
             size="sm"
@@ -721,7 +929,7 @@ export const ChartWidget = memo(function ChartWidget({
             </ToggleGroupItem>
           </ToggleGroup>
         </div>
-        <div className="relative z-[1] flex shrink-0 items-center gap-px pr-1">
+        <div className="relative z-1 flex shrink-0 items-center gap-px pr-1">
           {isScan ? (
             <ToggleGroup
               type="single"
@@ -807,6 +1015,16 @@ export const ChartWidget = memo(function ChartWidget({
                 onPressedChange={() => toggleBbo()}
               >
                 B/A
+              </Toggle>
+              <Toggle
+                variant="seg"
+                size="sm"
+                pressed={axisArmed}
+                title="Rest a Ticket on the price axis at Quick size. Below live price buys, above sells."
+                className="h-6 px-1.5 font-mono text-[11px]"
+                onPressedChange={(next) => setAxisArmed(next)}
+              >
+                Axis
               </Toggle>
               <ToggleGroup
                 type="single"

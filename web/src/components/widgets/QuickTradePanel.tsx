@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
-import { parseDecimal } from "@/lib/numbers";
 import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
 import { useQuickSize } from "@/lib/quickSizes";
-import { maxOrderSize } from "@/components/widgets/orderTicket/math";
+import { parseQuickSize } from "@/lib/quickTrade";
+import { useAxisTicket } from "@/lib/axisTicket";
 import { cn } from "@/lib/utils";
 
 const POS_KEY = "mayedge-quick-panel-pos";
@@ -45,15 +45,6 @@ function slipFrac() {
   return 0.01;
 }
 
-function trimQty(n: number, decimals: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "";
-  const d = Math.max(0, Math.min(decimals, 6));
-  const f = 10 ** d;
-  const q = Math.floor(n * f + 1e-9) / f;
-  if (q <= 0) return "";
-  return q.toFixed(d).replace(/\.?0+$/, "") || "0";
-}
-
 interface QuickTradePanelProps {
   market: Market | null;
   tradingEnabled: boolean;
@@ -65,6 +56,7 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
   const account = useLiveAccount();
   const bbo = useLiveBbo();
   const { qty, setQty } = useQuickSize();
+  const { armed: axisArmed } = useAxisTicket();
   const [pos, setPos] = useState<Pos>(loadPos);
   const [loading, setLoading] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -133,41 +125,14 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
     });
   };
 
-  const maxForSide = (side: "buy" | "sell") => {
-    if (!market) return 0;
-    const bid = parseFloat(bbo.bid ?? "");
-    const ask = parseFloat(bbo.ask ?? "");
-    const spot = bid > 0 && ask > 0 ? (bid + ask) / 2 : ask > 0 ? ask : bid;
-    const posn = account?.positions.find((p) => p.market_index === market.market_index);
-    const signedPos = posn ? parseFloat(posn.size) : 0;
-    const lev = posn?.leverage ?? 1;
-    const available = parseFloat(account?.trade_available ?? account?.available ?? "0");
-    const px = side === "buy" ? (ask > 0 ? ask : spot) : bid > 0 ? bid : spot;
-    return maxOrderSize({
-      available,
-      leverage: lev,
-      price: px,
-      signedPos,
-      side,
-      reduceOnly: false,
-    });
-  };
-
   const fire = async (side: "buy" | "sell") => {
     if (!market || !tradingEnabled || !feed.ready || loading) {
       if (!feed.ready && feed.reason) notifyErr(feed.reason);
       return;
     }
-    const parsed = parseDecimal(qty);
-    const decimals = market.size_decimals ?? 4;
-    const q = parsed != null ? trimQty(parsed, decimals) : "";
-    if (!q) {
-      notifyErr("Set a size");
-      return;
-    }
-    const max = maxForSide(side);
-    if (max > 0 && parsed != null && parsed > max + 1e-9) {
-      notifyErr(`Max ${trimQty(max, decimals)} ${market.symbol}`);
+    const sized = parseQuickSize(qty, market, side, account, bbo);
+    if (!sized.ok) {
+      notifyErr(sized.error);
       return;
     }
     setLoading(true);
@@ -175,11 +140,11 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
       await api.placeMarketOrder({
         market_index: market.market_index,
         side,
-        size: q,
+        size: sized.size,
         slippage: slipFrac(),
         reduce_only: false,
       });
-      notifyOrder({ kind: "market", side, size: q, symbol: market.symbol });
+      notifyOrder({ kind: "market", side, size: sized.size, symbol: market.symbol });
     } catch (err) {
       notifyErr(err instanceof Error ? err.message : "Order failed");
     } finally {
@@ -239,6 +204,11 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
           Sell
         </Button>
       </div>
+      {axisArmed ? (
+        <div className="mt-1 text-center font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+          axis
+        </div>
+      ) : null}
     </div>
   );
 }

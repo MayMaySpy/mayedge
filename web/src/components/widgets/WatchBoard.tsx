@@ -227,7 +227,7 @@ function WatchSetMenu({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 max-w-[10rem] shrink-0 gap-1 px-1.5 font-mono text-[11px] font-medium text-foreground"
+          className="h-6 max-w-40 shrink-0 gap-1 px-1.5 font-mono text-[11px] font-medium text-foreground"
           title="Watch Set"
         >
           <span className="truncate">{current?.name ?? "Set"}</span>

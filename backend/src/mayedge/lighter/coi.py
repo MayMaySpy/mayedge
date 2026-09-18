@@ -3,9 +3,26 @@ from __future__ import annotations
 import threading
 
 from mayedge import db as store
+from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END
+from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
+from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
+from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 
 MANUAL_COI_BASE = 1_000_000_000
 MANUAL_COI_END = 8_000_000_000
+
+_ALGO_COI_BANDS = (
+    (TWAP_COI_BASE, TWAP_COI_END),
+    (CHASE_COI_BASE, CHASE_COI_END),
+    (LADDER_COI_BASE, LADDER_COI_END),
+    (GRID_COI_BASE, GRID_COI_END),
+)
+
+
+def is_algo_client_order(coi: int | None) -> bool:
+    if coi is None:
+        return False
+    return any(base <= coi < end for base, end in _ALGO_COI_BANDS)
 
 _lock = threading.Lock()
 _seq = 0

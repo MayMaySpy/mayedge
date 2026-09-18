@@ -46,6 +46,9 @@ const LEFT = 8;
 const POSITION_X_FRAC = 0.48;
 const PILL_BG = "rgba(14, 17, 22, 0.92)";
 const REV_YELLOW = theme.warn;
+const LINE_HIT = 6;
+
+type HitAction = OverlayActionName | "body";
 
 type HitBox = {
   x: number;
@@ -53,7 +56,7 @@ type HitBox = {
   w: number;
   h: number;
   id: string;
-  action: OverlayActionName;
+  action: HitAction;
 };
 
 type LineGeom = {
@@ -357,6 +360,18 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
     } else if (showCancel) {
       hits.push({ x: tx, y: pillY, w: BTN, h: PILL_H, id: line.id, action: "cancel" });
     }
+    if (interactive && line.kind === "order") {
+      const pillBodyW = width - (showCancel ? BTN : 0);
+      hits.push({ x: pillX, y: pillY, w: Math.max(1, pillBodyW), h: PILL_H, id: line.id, action: "body" });
+      hits.push({
+        x: 0,
+        y: y - LINE_HIT,
+        w: Math.max(paneW, 1),
+        h: LINE_HIT * 2,
+        id: line.id,
+        action: "body",
+      });
+    }
   }
 
   return {
@@ -451,9 +466,20 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
         return {
           externalId: `${box.id}::${box.action}`,
           zOrder: "top" as const,
-          cursorStyle: "pointer",
+          cursorStyle: box.action === "body" ? ("ns-resize" as const) : ("pointer" as const),
         };
       }
+    }
+    return null;
+  }
+
+  hitAt(x: number, y: number): { overlay: ChartOverlay; region: "cancel" | "body" } | null {
+    for (const box of this._hits) {
+      if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) continue;
+      if (box.action !== "cancel" && box.action !== "body") return null;
+      const overlay = this.lineById(box.id);
+      if (!overlay) return null;
+      return { overlay, region: box.action };
     }
     return null;
   }

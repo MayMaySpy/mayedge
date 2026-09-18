@@ -109,6 +109,15 @@ class AccountService:
             out.extend(rows)
         return out
 
+    def find_open_order(self, market_index: int, order_index: int) -> OpenOrder | None:
+        for order in self._flatten_orders():
+            if order.market_index == market_index and order.order_index == order_index:
+                return order
+        return None
+
+    def list_open_orders(self) -> list[OpenOrder]:
+        return list(self._flatten_orders())
+
     def cached_account_payload(self) -> dict[str, Any] | None:
         payload = self._summary.to_public_dict()
         payload["type"] = "account"

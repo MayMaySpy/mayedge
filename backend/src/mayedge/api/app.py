@@ -13,8 +13,10 @@ from mayedge import db as store
 from mayedge import desk, feed_health
 from mayedge.api.schemas import (
     AlgoStopRequest,
+    AmendOrderRequest,
     CancelAllRequest,
     CancelOrderRequest,
+    CancelSideRequest,
     KillRequest,
     LeverageRequest,
     LimitOrderRequest,
@@ -264,6 +266,20 @@ def create_app() -> FastAPI:
         return await _trade(
             lambda: order_service.cancel_order(req.market_index, req.order_index_int()),
         )
+
+    @app.post("/api/orders/modify")
+    async def amend_order(req: AmendOrderRequest) -> dict[str, Any]:
+        _require_trading()
+        return await _trade(
+            lambda: order_service.amend_ticket(
+                req.market_index, req.order_index_int(), req.price
+            ),
+        )
+
+    @app.post("/api/orders/cancel-side")
+    async def cancel_side(req: CancelSideRequest) -> dict[str, Any]:
+        _require_trading()
+        return await _trade(lambda: order_service.cancel_tickets(req.side, req.market_index))
 
     @app.post("/api/orders/cancel-all")
     async def cancel_all(req: CancelAllRequest) -> dict[str, Any]:
