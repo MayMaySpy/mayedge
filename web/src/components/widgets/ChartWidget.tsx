@@ -15,7 +15,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { loadLiqHours } from "@/components/widgets/LiquidationHeatTable";
 import { ScanBoard, type ScanTab } from "@/components/widgets/ScanBoard";
+import { WatchBoard } from "@/components/widgets/WatchBoard";
 import { api, type Candle, type LiquidationSummaryHours, type Market } from "@/lib/api";
+import { openWatchWindow, useWatchPopped } from "@/lib/deskBridge";
 import { rankRelativeStrength } from "@/lib/relativeStrength";
 import {
   foldMinutes,
@@ -40,6 +42,14 @@ import {
 } from "@/lib/liveData";
 import { theme } from "@/lib/theme";
 import { cn, formatPct, formatPrice } from "@/lib/utils";
+import {
+  WATCH_WINDOWS,
+  WATCH_WINDOW_SEC,
+  loadWatchWindow,
+  persistWatchWindow,
+  type WatchWindow,
+} from "@/lib/watchWindow";
+import { SquareArrowOutUpRight } from "lucide-react";
 
 export type { ChartOverlay, OverlayAction };
 
@@ -53,7 +63,7 @@ const MODE_KEY = "mayedge-chart-mode";
 const SCAN_TAB_KEY = "mayedge-scan-tab";
 const RIGHT_OFFSET = 8;
 
-const CHART_MODES = ["price", "scan"] as const;
+const CHART_MODES = ["price", "scan", "watch"] as const;
 type ChartMode = (typeof CHART_MODES)[number];
 const SCAN_TABS = ["rel", "liqs"] as const;
 
@@ -126,6 +136,7 @@ function loadMode(): ChartMode {
       return "scan";
     }
     if (raw === "price") return "price";
+    if (raw === "watch") return "watch";
   } catch {
     /* ignore */
   }
@@ -256,8 +267,12 @@ export const ChartWidget = memo(function ChartWidget({
   const [bboOn, setBboOn] = useState(loadBbo);
   const [mode, setMode] = useState<ChartMode>(loadMode);
   const [scanTab, setScanTab] = useState<ScanTab>(loadScanTab);
+  const [watchWindow, setWatchWindow] = useState<WatchWindow>(loadWatchWindow);
   const [liqHours, setLiqHours] = useState<LiquidationSummaryHours>(() => loadLiqHours(24));
-  const isPrice = mode === "price";
+  const popped = useWatchPopped();
+  const isWatch = mode === "watch" && !popped;
+  const isScan = mode === "scan";
+  const isPrice = !isWatch && !isScan;
   const [hist, setHist] = useState<{ key: string; candles: Candle[] }>({
     key: "",
     candles: [],
@@ -616,6 +631,12 @@ export const ChartWidget = memo(function ChartWidget({
     }
   };
 
+  const selectWatchWindow = (next: WatchWindow) => {
+    if (next === watchWindow) return;
+    setWatchWindow(next);
+    persistWatchWindow(next);
+  };
+
   const lastBar = display.length ? ohlcOf(display[display.length - 1]) : null;
   const ohlc = hoverBar ?? lastBar;
   const numeraireChange24h = useMemo(
@@ -649,23 +670,29 @@ export const ChartWidget = memo(function ChartWidget({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-8 shrink-0 items-center border-b border-border">
-        <div className="panel-drag flex min-w-0 flex-1 cursor-move items-center gap-2 px-2">
+      <div className="relative flex h-8 shrink-0 items-center border-b border-border">
+        <div className="panel-drag z-[1] flex min-w-0 flex-1 cursor-move items-center gap-2 overflow-hidden px-2">
           {isPrice ? (
             <OhlcReadout bar={ohlc} decimals={priceDecimals} showVolume={volOn} />
-          ) : scanTab === "liqs" ? (
+          ) : isScan && scanTab === "liqs" ? (
             <LiqsReadout hours={liqHours} />
-          ) : (
+          ) : isScan ? (
             <NumeraireReadout change={numeraireChange24h} />
-          )}
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-px pr-1">
+        <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center">
           <ToggleGroup
             type="single"
             size="sm"
             spacing={0}
-            value={mode}
+            value={isWatch ? "watch" : mode === "scan" ? "scan" : "price"}
+            className="pointer-events-auto bg-background"
             onValueChange={(v) => {
+              if (v === "watch") {
+                if (popped) openWatchWindow();
+                else selectMode("watch");
+                return;
+              }
               if (v && (CHART_MODES as readonly string[]).includes(v)) {
                 selectMode(v as ChartMode);
               }
@@ -685,8 +712,17 @@ export const ChartWidget = memo(function ChartWidget({
             >
               Scan
             </ToggleGroupItem>
+            <ToggleGroupItem
+              value="watch"
+              title={popped ? "Watch is in its own window" : "Watch: live percent paths"}
+              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+            >
+              Watch
+            </ToggleGroupItem>
           </ToggleGroup>
-          {!isPrice ? (
+        </div>
+        <div className="relative z-[1] flex shrink-0 items-center gap-px pr-1">
+          {isScan ? (
             <ToggleGroup
               type="single"
               size="sm"
@@ -713,6 +749,42 @@ export const ChartWidget = memo(function ChartWidget({
                 Liqs
               </ToggleGroupItem>
             </ToggleGroup>
+          ) : null}
+          {isWatch ? (
+            <>
+            <ToggleGroup
+              type="single"
+              size="sm"
+              spacing={0}
+              value={watchWindow}
+              onValueChange={(v) => {
+                if (v && (WATCH_WINDOWS as readonly string[]).includes(v)) {
+                  selectWatchWindow(v as WatchWindow);
+                }
+              }}
+            >
+              {WATCH_WINDOWS.map((w) => (
+                <ToggleGroupItem
+                  key={w}
+                  value={w}
+                  title="Path window"
+                  className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                >
+                  {w}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <button
+              type="button"
+              title="Pop out Watch"
+              className="inline-flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                if (openWatchWindow()) selectMode("price");
+              }}
+            >
+              <SquareArrowOutUpRight className="size-3.5" />
+            </button>
+          </>
           ) : null}
           {isPrice ? (
             <>
@@ -772,6 +844,13 @@ export const ChartWidget = memo(function ChartWidget({
               </div>
             ) : null}
           </>
+        ) : isWatch ? (
+          <WatchBoard
+            windowSec={WATCH_WINDOW_SEC[watchWindow]}
+            markets={markets}
+            symbol={symbol}
+            onSymbolChange={onSymbolChange}
+          />
         ) : (
           <ScanBoard
             tab={scanTab}

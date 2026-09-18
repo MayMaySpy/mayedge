@@ -17,6 +17,7 @@ import {
   prependTrades,
   rollLiveCandles,
   setMinuteCandles,
+  subscribeQuoteDelta,
   upsertMinuteCandle,
   upsertMinuteCandles,
 } from "@/lib/liveData";
@@ -238,6 +239,19 @@ describe("applyMarketQuotes", () => {
     applyMarketQuotes([{ market_index: 1, mark_price: 100, open_interest: 50 }]);
     applyMarketQuotes([{ market_index: 1, mark_price: 101 }]);
     expect(getMarketQuotes()[1]).toMatchObject({ mark_price: 101, open_interest: 50 });
+  });
+
+  it("fans out only the rows that changed", () => {
+    const seen: { market_index: number; mark_price?: number | null }[][] = [];
+    const stop = subscribeQuoteDelta((rows) => seen.push(rows));
+    applyMarketQuotes([{ market_index: 1, mark_price: 100 }]);
+    applyMarketQuotes([{ market_index: 1, mark_price: 100 }]);
+    applyMarketQuotes([{ market_index: 2, mark_price: 50 }]);
+    stop();
+    expect(seen).toEqual([
+      [{ market_index: 1, mark_price: 100 }],
+      [{ market_index: 2, mark_price: 50 }],
+    ]);
   });
 });
 

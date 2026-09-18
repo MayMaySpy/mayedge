@@ -265,6 +265,7 @@ export type MarketQuote = {
 
 const emptyQuotes: Record<number, MarketQuote> = {};
 let quotes: Record<number, MarketQuote> = emptyQuotes;
+const quoteDeltaListeners = new Set<(rows: MarketQuote[]) => void>();
 
 export function overlayQuote(m: Market, q?: MarketQuote | null): Market {
   if (!q) return m;
@@ -287,6 +288,7 @@ export function overlayQuote(m: Market, q?: MarketQuote | null): Market {
 export function applyMarketQuotes(rows: MarketQuote[]) {
   if (!rows.length) return;
   let changed = false;
+  const changedRows: MarketQuote[] = [];
   const next = { ...quotes };
   for (const row of rows) {
     if (row.market_index == null) continue;
@@ -304,11 +306,13 @@ export function applyMarketQuotes(rows: MarketQuote[]) {
       continue;
     }
     next[row.market_index] = merged;
+    changedRows.push(merged);
     changed = true;
   }
   if (!changed) return;
   quotes = next;
   quoteNotify.notify();
+  quoteDeltaListeners.forEach((fn) => fn(changedRows));
 }
 
 export function getMarketQuotes() {
@@ -322,6 +326,13 @@ export function clearMarketQuotes() {
 
 export function subscribeMarketQuotes(onChange: () => void) {
   return quoteNotify.subscribe(onChange);
+}
+
+export function subscribeQuoteDelta(onRows: (rows: MarketQuote[]) => void) {
+  quoteDeltaListeners.add(onRows);
+  return () => {
+    quoteDeltaListeners.delete(onRows);
+  };
 }
 
 export function useLiveQuotes() {

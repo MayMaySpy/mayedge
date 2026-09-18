@@ -32,6 +32,30 @@ _Avoid_: RSI, ratio, beta, vs BTC price
 The chart-panel view of cross-market boards (Relative Strength, liquidations). Not a price chart.
 _Avoid_: RS (as a chart mode), analytics, mosaic
 
+**Watch**:
+The chart-panel view of live percent paths for a chosen set of Markets, or the same view undocked to its own window. Not Scan, not the price chart.
+_Avoid_: compare, mosaic, heatmap, live (as a chart mode)
+
+**Watch Set**:
+A named Watchlist assigned to a Watch pane. Independent of Favorites.
+_Avoid_: group, basket, folder, preset (unqualified)
+
+**Watchlist**:
+The Markets in a Watch Set. Cap 8. Order is add order (newest first), not Path rank, not alphabetic.
+_Avoid_: favorites, pairs, basket (unqualified), ranking by Path
+
+**Watch pane**:
+One of up to four Path charts on Watch. Each pane shows one Watch Set.
+_Avoid_: tile, mosaic, widget (for a Path chart)
+
+**Path**:
+A Market’s percent change from the first sample in the visible window. Missing Last is unknown, not `0`.
+_Avoid_: Daily Change, Relative Strength, return, pair (for a listing)
+
+**Last**:
+The price used to sample a Path: last trade, else mark, else mid. Missing is unknown, not `0`.
+_Avoid_: close, using Daily Change as a Path sample
+
 **Best Bid**:
 The highest bid on the live ladder, with resting size.
 _Avoid_: bid (unqualified), buy wall

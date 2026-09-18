@@ -19,6 +19,7 @@ import { QuickTradePanel } from "@/components/widgets/QuickTradePanel";
 import { TradesTapeWidget } from "@/components/widgets/TradesTapeWidget";
 import { useMarketWs } from "@/hooks/useMarketWs";
 import { useDeskRoute } from "@/lib/deskRoute";
+import { useDeskWatchBridge } from "@/lib/deskBridge";
 import {
   setAlgo,
   useLiveAccount,
@@ -293,6 +294,8 @@ export function Dashboard() {
     }
     return [...byIndex.values()];
   }, [ws.markets, restMarkets]);
+
+  useDeskWatchBridge({ markets, symbol, onSymbol: setSymbol });
 
   const market = useMemo(
     () => preferPerpMarket(markets, symbol) ?? null,

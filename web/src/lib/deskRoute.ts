@@ -4,7 +4,8 @@ const SYMBOL_KEY = "mayedge-symbol";
 export const DEFAULT_SYMBOL = "LIT";
 const SYMBOL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const LEGACY_VENUE_RE = /^(lighter|hyperliquid)$/i;
-const RESERVED = new Set(["API", "WS", "ASSETS"]);
+export const WATCH_PATH = "/watch";
+const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH"]);
 
 export type ParsedPath = {
   symbol: string;
@@ -32,6 +33,11 @@ export function parsePath(pathname: string): ParsedPath {
 
 export function toPath(symbol: string): string {
   return `/${symbol.toUpperCase()}`;
+}
+
+export function isWatchPath(pathname: string): boolean {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  return parts.length === 1 && parts[0].toUpperCase() === "WATCH";
 }
 
 function readSymbolFromStorage(): string | null {
