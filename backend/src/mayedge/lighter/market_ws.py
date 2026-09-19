@@ -12,7 +12,7 @@ import websockets
 from mayedge import feed_health
 from mayedge.config import settings
 from mayedge.lighter.channels import message_market_index, parse_channel_market, split_ws_type
-from mayedge.lighter.liquidations import LiquidationFeed
+from mayedge.lighter.liquidations import LiquidationFeed, taker_side
 from mayedge.lighter.models import Trade
 
 if TYPE_CHECKING:
@@ -214,6 +214,14 @@ async def handle_ws_message(gw: LighterGateway, msg: dict[str, Any]) -> None:
         gw._apply_market_stats(msg)
 
 
+def _account_index(raw: Any) -> int:
+    try:
+        n = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
 async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bool = False) -> None:
     market_index = message_market_index(msg, "trade")
     if market_index is None:
@@ -256,8 +264,11 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bo
         trade = Trade(
             price=str(t.get("price", "")),
             size=str(t.get("size", t.get("amount", ""))),
-            side="sell" if t.get("is_maker_ask") or t.get("isAsk") else "buy",
+            side=taker_side(t),
             timestamp=int(t.get("timestamp", t.get("time", 0))),
+            tx_hash=str(t.get("tx_hash") or ""),
+            bid_account_id=_account_index(t.get("bid_account_id")),
+            ask_account_id=_account_index(t.get("ask_account_id")),
         )
         new_trades.append(trade)
 

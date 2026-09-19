@@ -165,6 +165,9 @@ class Trade:
     size: str
     side: str
     timestamp: int
+    tx_hash: str = ""
+    bid_account_id: int = 0
+    ask_account_id: int = 0
 
 
 @dataclass
@@ -175,6 +178,18 @@ class Candle:
     low: float
     close: float
     volume: float
+
+
+@dataclass
+class Asset:
+    symbol: str
+    balance: str
+    margin_balance: str
+    available: str
+    index_price: str
+    ltv: str
+    usd: str
+    unrealized_pnl: str = ""
 
 
 @dataclass
@@ -219,6 +234,7 @@ class AccountSummary:
     portfolio_margin: str = "0"
     positions: list[Position] = field(default_factory=list)
     open_orders: list[OpenOrder] = field(default_factory=list)
+    assets: list[Asset] = field(default_factory=list)
     user_tier: str = ""
     maker_fee_bps: str = "0"
     taker_fee_bps: str = "0"
@@ -249,6 +265,19 @@ class AccountSummary:
                     "side": p.side,
                 }
                 for p in self.positions
+            ],
+            "assets": [
+                {
+                    "symbol": a.symbol,
+                    "balance": a.balance,
+                    "margin_balance": a.margin_balance,
+                    "available": a.available,
+                    "index_price": a.index_price,
+                    "ltv": a.ltv,
+                    "usd": a.usd,
+                    "unrealized_pnl": a.unrealized_pnl,
+                }
+                for a in self.assets
             ],
             "open_orders": [
                 {

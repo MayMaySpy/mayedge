@@ -150,6 +150,22 @@ class LiquidationGroupTests(unittest.TestCase):
         self.assertEqual(rows[0]["trade_id"], "1:liquidation:777")
         self.assertEqual(rows[0]["fill_count"], 3)
 
+    def test_maker_ask_is_taker_buy(self) -> None:
+        self.feed.ingest(
+            1,
+            [self._fill(1, ask_id=800, bid_id=777, is_maker_ask=True)],
+            get_market=lambda _i: self.eth,
+        )
+        self.assertEqual(self.feed.recent()[0]["side"], "buy")
+
+    def test_maker_bid_is_taker_sell(self) -> None:
+        self.feed.ingest(
+            1,
+            [self._fill(1, ask_id=555, is_maker_ask=False)],
+            get_market=lambda _i: self.eth,
+        )
+        self.assertEqual(self.feed.recent()[0]["side"], "sell")
+
 
 class LiquidationSummaryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -206,4 +222,42 @@ class LiquidationSummaryTests(unittest.TestCase):
         self.assertEqual(liquidation_summary_since_ms(1, now_ms=1_700_000_000_000), 1_699_996_400_000)
         with self.assertRaises(ValueError):
             liquidation_summary_since_ms(2, now_ms=1_700_000_000_000)
+
+    def test_schema_v4_flips_stored_sides_once(self) -> None:
+        now = 1_700_000_000_000
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, side="buy", ts=now),
+                _row(trade_id=2, side="sell", ts=now),
+            ]
+        )
+        with store._lock:
+            conn = store._connect()
+            store._set_meta(conn, "schema_version", "3")
+            conn.commit()
+            store._migrate(conn)
+            conn.commit()
+            sides = {
+                int(r["trade_id"]): r["side"]
+                for r in conn.execute(
+                    "SELECT trade_id, side FROM liquidations ORDER BY trade_id"
+                )
+            }
+            version = store._meta_int(conn, "schema_version")
+        self.assertEqual(sides[1], "sell")
+        self.assertEqual(sides[2], "buy")
+        self.assertEqual(version, 4)
+
+        with store._lock:
+            conn = store._connect()
+            store._migrate(conn)
+            conn.commit()
+            sides_again = {
+                int(r["trade_id"]): r["side"]
+                for r in conn.execute(
+                    "SELECT trade_id, side FROM liquidations ORDER BY trade_id"
+                )
+            }
+        self.assertEqual(sides_again[1], "sell")
+        self.assertEqual(sides_again[2], "buy")
 

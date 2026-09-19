@@ -521,18 +521,25 @@ class LighterGateway:
         rows = trades if trades is not None else self._recent_trades.get(market_index, [])
         if not rows:
             return None
+        out: list[dict[str, Any]] = []
+        for t in rows:
+            row: dict[str, Any] = {
+                "price": t.price,
+                "size": t.size,
+                "side": t.side,
+                "timestamp": t.timestamp,
+            }
+            if t.tx_hash:
+                row["tx_hash"] = t.tx_hash
+            if t.bid_account_id:
+                row["bid_account_id"] = t.bid_account_id
+            if t.ask_account_id:
+                row["ask_account_id"] = t.ask_account_id
+            out.append(row)
         return {
             "type": "trades",
             "market_index": market_index,
-            "trades": [
-                {
-                    "price": t.price,
-                    "size": t.size,
-                    "side": t.side,
-                    "timestamp": t.timestamp,
-                }
-                for t in rows
-            ],
+            "trades": out,
         }
 
     def recent_liquidations(self) -> list[dict[str, Any]]:

@@ -13,6 +13,9 @@ export interface Trade {
   size: string;
   side: string;
   timestamp: number;
+  tx_hash?: string;
+  bid_account_id?: number;
+  ask_account_id?: number;
 }
 
 type Book = { bids: OrderBookLevel[]; asks: OrderBookLevel[] };
@@ -692,6 +695,7 @@ export function setAccount(next: Account | null) {
   const prev = account;
   const hasOrders = Object.prototype.hasOwnProperty.call(next, "open_orders");
   const hasPositions = Object.prototype.hasOwnProperty.call(next, "positions");
+  const hasAssets = Object.prototype.hasOwnProperty.call(next, "assets");
   account = {
     collateral: preferBalance(prev?.collateral, next.collateral),
     available: preferBalance(prev?.available, next.available),
@@ -700,6 +704,7 @@ export function setAccount(next: Account | null) {
     unrealized_pnl: next.unrealized_pnl ?? prev?.unrealized_pnl ?? "0",
     positions: hasPositions ? (next.positions ?? []) : (prev?.positions ?? []),
     open_orders: hasOrders ? (next.open_orders ?? []) : (prev?.open_orders ?? []),
+    assets: hasAssets ? (next.assets ?? []) : (prev?.assets ?? []),
   };
   accountNotify.notify();
 }

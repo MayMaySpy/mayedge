@@ -91,6 +91,17 @@ export function isLongPosition(p: Pick<Position, "size" | "side">): boolean {
   return parseFloat(p.size) > 0;
 }
 
+export interface Asset {
+  symbol: string;
+  balance: string;
+  margin_balance: string;
+  available: string;
+  index_price: string;
+  ltv: string;
+  usd: string;
+  unrealized_pnl: string;
+}
+
 export interface OpenOrder {
   /** Lighter order id — string because values exceed JS safe integers. */
   order_index: string;
@@ -117,6 +128,7 @@ export interface Account {
   taker_fee_bps?: string;
   positions: Position[];
   open_orders: OpenOrder[];
+  assets?: Asset[];
 }
 
 export interface AccountTrade {
@@ -271,7 +283,6 @@ export interface LiquidationSummary {
 export type AlertKind =
   | "oi"
   | "volume"
-  | "spread"
   | "price"
   | "premium"
   | "dislocation"

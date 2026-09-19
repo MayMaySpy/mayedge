@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { notifyErr, notifyOk } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
+import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
@@ -325,6 +326,12 @@ export function PositionsPanel({
               Positions
               <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openPositions.length})</span>
             </TabsTrigger>
+            <TabsTrigger value="assets">
+              Assets
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                ({account?.assets?.length ?? 0})
+              </span>
+            </TabsTrigger>
             <TabsTrigger value="orders">
               Orders
               <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openOrderCount})</span>
@@ -500,6 +507,15 @@ export function PositionsPanel({
               </Table>
             )}
           </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="assets" className="min-h-0 flex-1 px-2">
+          <AssetsTab
+            assets={account?.assets ?? []}
+            markets={markets}
+            tradingEnabled={tradingEnabled}
+            onSymbolChange={onSymbolChange}
+          />
         </TabsContent>
 
         <TabsContent value="orders" className="min-h-0 flex-1 px-2">

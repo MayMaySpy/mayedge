@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -98,6 +99,49 @@ class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
         ):
             await svc.create_market_order(1, "buy", "1")
         self.assertEqual(ctx.exception.status, 429)
+
+
+class OrderCapRejectTests(IsolatedAsyncioTestCase):
+    def _limit_signer(self) -> MagicMock:
+        signer = MagicMock()
+        signer.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL = 0
+        signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1
+        signer.ORDER_TIME_IN_FORCE_POST_ONLY = 2
+        signer.ORDER_TYPE_LIMIT = 0
+        signer.DEFAULT_28_DAY_ORDER_EXPIRY = 0
+        return signer
+
+    async def test_limit_account_cap_raises(self) -> None:
+        svc = OrderService()
+        svc._signer = self._limit_signer()
+        resp = SimpleNamespace(code=21717, message="max orders per account")
+        svc._signer.create_order = AsyncMock(return_value=(None, resp, None))
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            await svc.create_limit_order(1, "buy", "1", "100")
+        self.assertEqual(str(ctx.exception), "Account order cap reached")
+
+    async def test_market_per_market_cap_raises(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        resp = SimpleNamespace(code=21718, message="max orders per market")
+        svc._signer.create_market_order = AsyncMock(return_value=(None, resp, None))
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.gateway.best_bid_ask",
+                return_value=("100", "100.10"),
+            ),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            await svc.create_market_order(1, "buy", "1")
+        self.assertEqual(str(ctx.exception), "Per-market order cap reached")
 
 
 class AccountRestCooldownTests(IsolatedAsyncioTestCase):

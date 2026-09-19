@@ -117,6 +117,10 @@ class OrderService:
             raise ValueError(
                 f"Min {meta.min_base_amount} {meta.symbol} or ${meta.min_quote_amount}"
             )
+        if "21717" in text:
+            raise ValueError("Account order cap reached")
+        if "21718" in text:
+            raise ValueError("Per-market order cap reached")
         mapped = venue_client_error(err)
         if mapped:
             raise VenueBlocked(*mapped)
@@ -182,9 +186,20 @@ class OrderService:
         code = getattr(resp, "code", None)
         if code is not None and int(code) != 200:
             msg = getattr(resp, "message", None) or f"{action} failed ({code})"
+            if str(code) not in str(msg):
+                msg = f"{msg} ({code})"
             raise ValueError(msg)
         tx_hash = getattr(resp, "tx_hash", None)
         return str(tx_hash) if tx_hash else str(resp)
+
+    def _created_tx_hash(self, resp: Any, err: Any, meta, *, action: str) -> str:
+        if err:
+            self._raise_order_err(err, meta)
+        try:
+            return self._require_tx(resp, None, action=action)
+        except ValueError as e:
+            self._raise_order_err(e, meta)
+            raise
 
     def cached_account_payload(self) -> dict[str, Any] | None:
         return account_service.cached_account_payload()
@@ -230,7 +245,7 @@ class OrderService:
         coi = client_order_index or self._next_client_order_index()
         price_int = self._market_worst_price(meta, is_ask=is_ask, slippage=slippage)
 
-        _tx, tx_hash, err = await self._retry_nonce(
+        _tx, resp, err = await self._retry_nonce(
             lambda: self.signer.create_market_order(
                 market_index=market_index,
                 client_order_index=coi,
@@ -240,8 +255,7 @@ class OrderService:
                 reduce_only=reduce_only,
             )
         )
-        if err:
-            self._raise_order_err(err, meta)
+        tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {"tx_hash": tx_hash, "client_order_index": coi}
 
     async def create_limit_order(
@@ -270,7 +284,7 @@ class OrderService:
         }
         tif = tif_map.get(time_in_force.lower(), self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME)
 
-        _tx, tx_hash, err = await self._retry_nonce(
+        _tx, resp, err = await self._retry_nonce(
             lambda: self.signer.create_order(
                 market_index=market_index,
                 client_order_index=coi,
@@ -283,8 +297,7 @@ class OrderService:
                 order_expiry=self.signer.DEFAULT_28_DAY_ORDER_EXPIRY,
             )
         )
-        if err:
-            self._raise_order_err(err, meta)
+        tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {"tx_hash": tx_hash, "client_order_index": coi}
 
     async def create_twap_order(
@@ -320,7 +333,7 @@ class OrderService:
         expiry_ms = int(time.time() * 1000) + duration_seconds * 1000
         price_int = self._scale_price(str(worst), meta.price_decimals)
 
-        _tx, tx_hash, err = await self.signer.create_order(
+        _tx, resp, err = await self.signer.create_order(
             market_index=market_index,
             client_order_index=coi,
             base_amount=base_amount,
@@ -331,8 +344,7 @@ class OrderService:
             reduce_only=reduce_only,
             order_expiry=expiry_ms,
         )
-        if err:
-            self._raise_order_err(err, meta)
+        tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {"tx_hash": tx_hash, "client_order_index": coi}
 
     async def modify_order(

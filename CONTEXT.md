@@ -116,6 +116,50 @@ _Avoid_: VWAP, iceberg
 Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied.
 _Avoid_: panic, shutdown, flatten (as a synonym for Kill)
 
+### Account
+
+**Account index**:
+Lighter’s integer identifier for an account. Not an L1 address.
+_Avoid_: wallet, L1 address, account_id (unqualified)
+
+**Position**:
+An open perp on a Market. Not an Asset.
+_Avoid_: holding, balance, inventory (for the perp)
+
+**Asset**:
+A token holding on the account (USDC, ETH, …). Not a Position; not a Market.
+_Avoid_: position, coin, token (unqualified), collateral (for the holding itself)
+
+**Balance**:
+An Asset’s total quantity.
+_Avoid_: total (unqualified), wallet, equity
+
+**Margin balance**:
+The quantity of an Asset posted as collateral.
+_Avoid_: margin (unqualified), allocated margin (that’s a Position), collateral (unqualified)
+
+**Asset available**:
+The free quantity of that Asset. Distinct from account buying power.
+_Avoid_: available (unqualified), trade_available, buying power
+
+**LTV**:
+The fraction of an Asset’s index value that counts toward Portfolio Margin. Quote (USDC, USDG) is `100%`.
+_Avoid_: haircut (unqualified), weight, discount
+
+**Asset index**:
+The oracle price used to value an Asset. Not Last, not Daily Change.
+_Avoid_: mark, Last, index (unqualified)
+
+**Asset uPnL**:
+Unrealized PnL of an Asset versus its spot average entry at the Asset index. Quote has none. Unknown without an entry.
+_Avoid_: Position uPnL, mixing into Positions
+
+### Explorer
+
+**Log**:
+A Lighter L2 transaction, identified by `tx_hash`. Not an Ethereum transaction.
+_Avoid_: blockchain (unqualified), Ethereum tx, tx (unqualified)
+
 ### Liquidations
 
 **Long liquidation**:

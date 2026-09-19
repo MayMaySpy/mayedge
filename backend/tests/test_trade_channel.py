@@ -152,7 +152,81 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(self.gw._recent_trades[120][0].price, "7")
+        self.assertEqual(self.gw._recent_trades[120][0].side, "buy")
         self.assertTrue(any(m.get("type") == "trades" for m in self.out))
+
+    async def test_maker_bid_tape_is_taker_sell(self) -> None:
+        self.gw._recent_trades = {120: []}
+        await handle_ws_message(
+            self.gw,
+            {
+                "type": "update/trade_fe",
+                "channel": "trade_fe/120",
+                "trades": [
+                    {
+                        "price": "7",
+                        "size": "1",
+                        "timestamp": 9,
+                        "is_maker_ask": False,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(self.gw._recent_trades[120][0].side, "sell")
+
+    async def test_tape_keeps_log_and_account_indexes(self) -> None:
+        """Lighter trade JSON: tx_hash is the Log; bid/ask_account_id are Account indexes."""
+        self.gw._recent_trades = {120: []}
+        await handle_trades(
+            self.gw,
+            {
+                "channel": "trade:120",
+                "trades": [
+                    {
+                        "price": "2181.83",
+                        "size": "0.1336",
+                        "timestamp": 1773854156654,
+                        "tx_hash": (
+                            "019f2b9c9cc609196316a569541e135a739728e0837fcfb05c913534e305e503"
+                            "c01d5dcfeabeaf81"
+                        ),
+                        "ask_account_id": 57890,
+                        "bid_account_id": 317068,
+                        "is_maker_ask": False,
+                    }
+                ],
+            },
+        )
+        payload = next(m for m in self.out if m.get("type") == "trades")
+        row = payload["trades"][0]
+        self.assertEqual(
+            row["tx_hash"],
+            "019f2b9c9cc609196316a569541e135a739728e0837fcfb05c913534e305e503c01d5dcfeabeaf81",
+        )
+        self.assertEqual(row["ask_account_id"], 57890)
+        self.assertEqual(row["bid_account_id"], 317068)
+        self.assertEqual(row["side"], "sell")
+
+    async def test_tape_omits_empty_log_and_zero_accounts(self) -> None:
+        self.gw._recent_trades = {120: []}
+        await handle_trades(
+            self.gw,
+            {
+                "channel": "trade:120",
+                "trades": [
+                    {
+                        "price": "7",
+                        "size": "1",
+                        "timestamp": 9,
+                        "is_maker_ask": True,
+                    }
+                ],
+            },
+        )
+        row = next(m for m in self.out if m.get("type") == "trades")["trades"][0]
+        self.assertNotIn("tx_hash", row)
+        self.assertNotIn("ask_account_id", row)
+        self.assertNotIn("bid_account_id", row)
 
 
 class TestHandleCandle(unittest.IsolatedAsyncioTestCase):

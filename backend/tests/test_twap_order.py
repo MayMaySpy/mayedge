@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,7 +15,9 @@ class TwapSlippageTests(IsolatedAsyncioTestCase):
         svc._signer.ORDER_TYPE_TWAP = 2
         svc._signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1
         svc._signer.DEFAULT_28_DAY_ORDER_EXPIRY = 0
-        svc._signer.create_order = AsyncMock(return_value=(None, MagicMock(tx_hash="0x"), None))
+        svc._signer.create_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0x"), None)
+        )
         svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
 
         meta = MarketMeta(
@@ -52,7 +55,9 @@ class TwapSlippageTests(IsolatedAsyncioTestCase):
         svc._signer.ORDER_TYPE_TWAP = 2
         svc._signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1
         svc._signer.DEFAULT_28_DAY_ORDER_EXPIRY = 0
-        svc._signer.create_order = AsyncMock(return_value=(None, MagicMock(tx_hash="0x"), None))
+        svc._signer.create_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0x"), None)
+        )
         svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
 
         meta = MarketMeta(

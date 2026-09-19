@@ -25,7 +25,6 @@ _TEST_THR = ExploitThresholds(
     warmup_s=0.0,
     oi_pct_1m=SevPair(3.0, 8.0),
     oi_pct_5m=SevPair(6.0, 15.0),
-    spread_bps=SevPair(15.0, 50.0),
     liq_count=SevPair(3.0, 6.0),
     liq_usd=SevPair(100_000.0, 500_000.0),
     liq_window_s=120.0,
@@ -140,12 +139,11 @@ class ThresholdYamlTest(unittest.TestCase):
         thr = thresholds_from_dict(
             {
                 "funding": {"hourly_pct": [0.2, 0.6]},
-                "spread": {"bps": [40, 100]},
                 "min_severity": 2,
             }
         )
         self.assertEqual(thr.funding_hourly_pct.sev2, 0.2)
-        self.assertEqual(thr.spread_bps.sev3, 100.0)
+        self.assertEqual(thr.min_severity, 2)
 
     def test_load_repo_yaml(self) -> None:
         path = Path(__file__).resolve().parents[1] / "config" / "alerts.yaml"
@@ -209,7 +207,7 @@ class ExploitDetectorTest(unittest.TestCase):
         kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
         self.assertNotIn("oi", kinds)
 
-    def test_spread_blowout_fires(self) -> None:
+    def test_wide_spread_does_not_alert(self) -> None:
         now = time.time()
         self._seed_series(
             1,
@@ -229,7 +227,7 @@ class ExploitDetectorTest(unittest.TestCase):
             self.det.flush()
 
         kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertIn("spread", kinds)
+        self.assertNotIn("spread", kinds)
 
     def test_cooldown_suppresses_duplicate(self) -> None:
         now = time.time()
@@ -240,10 +238,7 @@ class ExploitDetectorTest(unittest.TestCase):
         meta = _meta(
             mark_price=100.0,
             last_trade_price=100.0,
-            best_bid_price=95.0,
-            best_ask_price=105.0,
-            mid_price=100.0,
-            open_interest=1000.0,
+            open_interest=1100.0,
             volume_24h=1e6,
         )
         with patch("mayedge.alerts.time.time", return_value=now):
@@ -252,10 +247,10 @@ class ExploitDetectorTest(unittest.TestCase):
             self.det.on_market_stats(meta)
             self.det.flush()
 
-        spread_events = [
-            e for batch in self.events for e in batch.get("events", []) if e.get("kind") == "spread"
+        oi_events = [
+            e for batch in self.events for e in batch.get("events", []) if e.get("kind") == "oi"
         ]
-        self.assertEqual(len(spread_events), 1)
+        self.assertEqual(len(oi_events), 1)
 
     def test_dislocation_is_mark_vs_mid(self) -> None:
         now = time.time()
@@ -432,7 +427,7 @@ class ExploitDetectorTest(unittest.TestCase):
             warmup_s=0.0,
             min_severity=2,
             max_events_per_flush=2,
-            spread_bps=SevPair(1.0, 2.0),
+            premium_pct=SevPair(0.5, 1.0),
             cooldown_s=0.0,
             level_cooldown_s=0.0,
         )
@@ -446,10 +441,11 @@ class ExploitDetectorTest(unittest.TestCase):
             meta = _meta(
                 market_index=mid,
                 symbol=f"M{mid}",
-                mark_price=100.0,
+                mark_price=102.0,
                 last_trade_price=100.0,
-                best_bid_price=90.0,
-                best_ask_price=110.0,
+                index_price=100.0,
+                best_bid_price=99.9,
+                best_ask_price=100.1,
                 mid_price=100.0,
             )
             with patch("mayedge.alerts.time.time", return_value=now + i):

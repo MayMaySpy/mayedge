@@ -30,7 +30,6 @@ const TOAST_MAX_AGE_MS = 8_000;
 const KIND_LABEL: Record<AlertKind, string> = {
   oi: "OI",
   volume: "Vol",
-  spread: "Spread",
   price: "Price",
   premium: "Premium",
   dislocation: "Disloc",

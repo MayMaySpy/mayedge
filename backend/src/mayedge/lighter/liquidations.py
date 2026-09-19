@@ -31,10 +31,16 @@ def _dec(raw: Any) -> Decimal:
     return d if d.is_finite() else Decimal("0")
 
 
+def taker_side(raw: dict[str, Any]) -> str:
+    """Taker side: is_maker_ask true → maker is ask → taker bought."""
+    if raw.get("is_maker_ask") or raw.get("isAsk"):
+        return "buy"
+    return "sell"
+
+
 def taker_order_id(raw: dict[str, Any]) -> int:
     """Liquidation engine is the taker — group fills of that order, not each match."""
-    maker_ask = bool(raw.get("is_maker_ask") or raw.get("isAsk"))
-    if maker_ask:
+    if taker_side(raw) == "buy":
         return _int_id(raw.get("bid_id", raw.get("bid_id_str")))
     return _int_id(raw.get("ask_id", raw.get("ask_id_str")))
 
@@ -169,7 +175,7 @@ class LiquidationFeed:
             kind = str(t.get("type") or "liquidation")
             if kind not in _LIQ_KINDS:
                 kind = "liquidation"
-            side = "sell" if t.get("is_maker_ask") or t.get("isAsk") else "buy"
+            side = taker_side(t)
             ts = self._ts_ms(t.get("timestamp", t.get("time", 0)))
             size = _dec(t.get("size") or t.get("amount"))
             price = _dec(t.get("price"))

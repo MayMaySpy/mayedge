@@ -21,14 +21,18 @@ from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
 from mayedge.lighter.parse import (
     apply_orders,
+    asset_holding_qty,
+    asset_rows,
     desk_account_trade,
     desk_position_funding,
     incoming_orders_by_market,
     iter_trade_rows,
     merge_account_assets,
     merge_positions,
+    merge_spot_entries,
     parse_order,
     parse_position,
+    public_assets,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +62,7 @@ class AccountService:
         self._summary = AccountSummary(collateral="0", available="0", unrealized_pnl="0")
         self._orders_by_market: dict[int, list[OpenOrder]] = {}
         self._assets: Any = None
+        self._spot_entries: dict[int, str] = {}
         self._asset_meta: dict[str, dict[str, float]] = {}
         self._auth_token_fn: Callable[[], Awaitable[str]] | None = None
         self._orders_hydrated = False
@@ -166,9 +171,7 @@ class AccountService:
             cross = to_float(s.portfolio_value)
         tav = portfolio_margin_usd(cross, self._assets, self._live_asset_meta())
         s.portfolio_margin = str(tav)
-        s.trade_available = str(
-            trade_available_usd(to_float(s.available), tav, cross)
-        )
+        s.trade_available = str(trade_available_usd(to_float(s.available), tav, cross))
 
     def _emit_account(self) -> None:
         for pos in self._summary.positions:
@@ -183,6 +186,9 @@ class AccountService:
             sum(to_float(pos.unrealized_pnl) for pos in self._summary.positions)
         )
         self._paint_margin()
+        self._summary.assets = public_assets(
+            self._assets, self._live_asset_meta(), self._spot_entries
+        )
         gateway.broadcast(self.cached_account_payload() or {})
 
     def _rest_cooling(self) -> bool:
@@ -323,6 +329,7 @@ class AccountService:
         await sub(f"account_all_trades/{account_id}")
         await sub(f"account_all_positions/{account_id}", require_auth=True)
         await sub(f"account_all_assets/{account_id}", require_auth=True)
+        await sub(f"account_spot_avg_entry_prices/{account_id}", require_auth=True)
 
     @staticmethod
     async def _ws_ping(ws: Any, deadline: float) -> None:
@@ -374,13 +381,16 @@ class AccountService:
                 tg.create_task(self._ws_ping(ws, deadline))
                 tg.create_task(recv())
 
-    _ACCOUNT_KINDS = frozenset({
-        "account_all_orders",
-        "account_all_positions",
-        "account_all_trades",
-        "account_all_assets",
-        "user_stats",
-    })
+    _ACCOUNT_KINDS = frozenset(
+        {
+            "account_all_orders",
+            "account_all_positions",
+            "account_all_trades",
+            "account_all_assets",
+            "account_spot_avg_entry_prices",
+            "user_stats",
+        }
+    )
 
     @staticmethod
     def _ws_kind(msg: dict[str, Any]) -> tuple[str, str]:
@@ -428,8 +438,10 @@ class AccountService:
         self._summary.positions = merge_positions(self._summary.positions, raw, snapshot=snapshot)
 
     def touch_marks(self) -> None:
-        """Re-mark open positions from latest market stats and push to the desk."""
-        if not self._summary.positions:
+        """Re-mark Positions and Asset index from latest market stats and push to the desk."""
+        if not self._summary.positions and not any(
+            asset_holding_qty(row) != 0 for row in asset_rows(self._assets)
+        ):
             return
         self._publish()
 
@@ -443,6 +455,9 @@ class AccountService:
         elif kind == "account_all_assets":
             if "assets" in msg:
                 self._remember_assets(msg.get("assets"))
+            self._publish()
+        elif kind == "account_spot_avg_entry_prices":
+            self._spot_entries = merge_spot_entries(self._spot_entries, msg.get("avg_entry_prices"))
             self._publish()
         elif kind == "account_all_trades":
             self._broadcast_trades(msg.get("trades"))
@@ -500,7 +515,7 @@ class AccountService:
             resp = await account_api.account(
                 by="index",
                 value=str(settings.lighter_account_index),
-                active_only=True,
+                active_only=False,
             )
         except Exception as e:
             self._note_rest_error(e, "account fetch failed")
@@ -558,6 +573,7 @@ class AccountService:
         if orders_loaded:
             self._orders_hydrated = True
         self._paint_margin(summary)
+        summary.assets = public_assets(self._assets, self._live_asset_meta(), self._spot_entries)
         return summary
 
     async def fetch_account_trades(

@@ -24,6 +24,7 @@ import {
   setMinuteCandles,
   upsertMinuteCandle,
   type MarketQuote,
+  type Trade,
 } from "@/lib/liveData";
 
 export type { OrderBookLevel, Trade } from "@/lib/liveData";
@@ -214,7 +215,7 @@ export function useMarketWs(symbol: string) {
           }
           case "trades":
             if (!isActiveMarket(msg)) break;
-            prependTrades((msg.trades as []) ?? []);
+            prependTrades((msg.trades as Trade[]) ?? []);
             break;
           case "liquidations":
             prependLiquidations((msg.items as import("@/lib/api").LiquidationEvent[]) ?? []);
@@ -259,6 +260,9 @@ export function useMarketWs(symbol: string) {
               unrealized_pnl: String(msg.unrealized_pnl ?? "0"),
               positions: (msg.positions as import("@/lib/api").Position[]) ?? [],
               open_orders: (msg.open_orders as import("@/lib/api").OpenOrder[]) ?? [],
+              ...(msg.assets != null
+                ? { assets: msg.assets as import("@/lib/api").Asset[] }
+                : {}),
             });
             break;
           case "account_trades": {

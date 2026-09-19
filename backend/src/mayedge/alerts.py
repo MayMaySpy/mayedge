@@ -40,7 +40,6 @@ class ExploitThresholds:
     price_pct_5m: SevPair = field(default_factory=lambda: SevPair(3.0, 8.0))
     vol_usd_1m: SevPair = field(default_factory=lambda: SevPair(750_000.0, 2_500_000.0))
     vol_usd_5m: SevPair = field(default_factory=lambda: SevPair(2_000_000.0, 8_000_000.0))
-    spread_bps: SevPair = field(default_factory=lambda: SevPair(50.0, 150.0))
     premium_pct: SevPair = field(default_factory=lambda: SevPair(0.5, 1.2))
     disloc_bps: SevPair = field(default_factory=lambda: SevPair(50.0, 120.0))
     funding_hourly_pct: SevPair = field(default_factory=lambda: SevPair(0.20, 0.60))
@@ -49,7 +48,7 @@ class ExploitThresholds:
     liq_window_s: float = 120.0
 
 
-_LEVEL_KINDS = frozenset({"spread", "premium", "dislocation", "funding"})
+_LEVEL_KINDS = frozenset({"premium", "dislocation", "funding"})
 
 
 def _pair(raw: Any, default: SevPair) -> SevPair:
@@ -76,7 +75,6 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> ExploitThresholds:
     oi = d.get("oi") or {}
     price = d.get("price") or {}
     vol = d.get("volume") or {}
-    spread = d.get("spread") or {}
     prem = d.get("premium") or {}
     disloc = d.get("dislocation") or {}
     funding = d.get("funding") or {}
@@ -96,7 +94,6 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> ExploitThresholds:
         price_pct_5m=_pair(price.get("pct_5m"), base.price_pct_5m),
         vol_usd_1m=_pair(vol.get("usd_1m"), base.vol_usd_1m),
         vol_usd_5m=_pair(vol.get("usd_5m"), base.vol_usd_5m),
-        spread_bps=_pair(spread.get("bps"), base.spread_bps),
         premium_pct=_pair(prem.get("pct"), base.premium_pct),
         disloc_bps=_pair(disloc.get("bps"), base.disloc_bps),
         funding_hourly_pct=_pair(funding.get("hourly_pct"), base.funding_hourly_pct),
@@ -381,7 +378,9 @@ class ExploitDetector:
                 window = deque(item for item in window if item[3] != key)
                 window.append((ts, usd, side, key))
             cutoff = now - window_s
-            window = deque(sorted((item for item in window if item[0] >= cutoff), key=lambda r: r[0]))
+            window = deque(
+                sorted((item for item in window if item[0] >= cutoff), key=lambda r: r[0])
+            )
             self._liq_window[mi] = window
             if not window:
                 continue
@@ -515,25 +514,6 @@ class ExploitDetector:
             return out
 
         spread = _spread_bps(snap.bid, snap.ask, snap.mid or snap.last)
-        if spread is not None:
-            sev = _severity_from_thresholds(spread, self._thr.spread_bps)
-            if sev >= 2 and self._cooldown_ok(mi, "spread"):
-                out.append(
-                    ExploitEvent(
-                        id=str(uuid.uuid4()),
-                        ts=int(snap.ts * 1000),
-                        symbol=sym,
-                        market_index=mi,
-                        kind="spread",
-                        severity=sev,
-                        direction="wide",
-                        value=spread,
-                        baseline=None,
-                        unit="bps",
-                        note=f"Spread {spread:.0f} bps",
-                    )
-                )
-                self._mark_cooldown(mi, "spread")
 
         premium = snap.premium
         if premium == 0 and snap.index > 0 and snap.mark > 0:

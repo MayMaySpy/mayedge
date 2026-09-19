@@ -18,6 +18,7 @@ import {
   type LiqHeatSort,
   type LiquidationHeatInput,
 } from "@/lib/liquidationHeat";
+import { alignRowToTop } from "@/lib/scanScroll";
 import { cn, formatUsdCompact } from "@/lib/utils";
 
 const HOURS_KEY = "mayedge-scan-liq-hours";
@@ -185,6 +186,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
 }: LiquidationHeatTableProps) {
   const [sort, setSort] = useState<PersistedSort>(loadSort);
   const [raw, setRaw] = useState<LiquidationHeatInput[]>([]);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const selected = symbol.toUpperCase();
 
@@ -233,9 +235,16 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
   );
   const maxTotal = fold.totalUsd;
 
+  const selectedOnBoard = rows.some((r) => r.symbol.toUpperCase() === selected);
+
   useEffect(() => {
-    rowRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
-  }, [selected, rows]);
+    const container = scrollerRef.current;
+    const row = rowRefs.current.get(selected);
+    if (!container || !row) return;
+    const head = container.querySelector("thead");
+    const stickyPx = head ? head.getBoundingClientRect().height : 32;
+    alignRowToTop(container, row, stickyPx);
+  }, [selected, selectedOnBoard]);
 
   const setSortMode = (key: LiqHeatSort) => {
     const next: PersistedSort =
@@ -273,7 +282,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
           ))}
         </ToggleGroup>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
             <TableRow className="h-8 hover:bg-transparent">

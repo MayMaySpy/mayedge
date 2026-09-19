@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from mayedge.config import settings
 from mayedge.lighter.gateway import gateway
-from mayedge.lighter.models import OpenOrder, Position, imf_to_leverage, to_float
+from mayedge.lighter.models import Asset, OpenOrder, Position, imf_to_leverage, to_float
+from mayedge.numbers import fmt_decimal, parse_decimal
 
 
 def g(obj: Any, name: str, default: Any = None) -> Any:
@@ -304,9 +306,7 @@ def incoming_orders_by_market(raw: Any) -> dict[int, list[Any]]:
         items = raw
     elif isinstance(raw, dict):
         nested = raw.get("orders")
-        if nested is not None and not any(
-            k in raw for k in ("order_index", "client_order_index")
-        ):
+        if nested is not None and not any(k in raw for k in ("order_index", "client_order_index")):
             return incoming_orders_by_market(nested)
         if any(k in raw for k in ("order_index", "client_order_index", "price")):
             items = [raw]
@@ -382,6 +382,147 @@ def asset_rows(assets: Any) -> list[dict[str, Any]]:
             continue
         row["symbol"] = sym
         out.append(row)
+    return out
+
+
+_QUOTE = frozenset({"USDC", "USDG"})
+_DUST_USD = 0.01
+
+
+def _num_str(value: Any) -> str:
+    if value is None or value == "":
+        return "0"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Decimal):
+        return fmt_decimal(value) or "0"
+    return fmt_decimal(Decimal(str(value))) or "0"
+
+
+def _qty(row: dict[str, Any], key: str) -> Decimal:
+    raw = row.get(key)
+    if raw in (None, ""):
+        return Decimal("0")
+    try:
+        return abs(parse_decimal(raw))
+    except ValueError:
+        return Decimal("0")
+
+
+def asset_holding_qty(row: dict[str, Any]) -> float:
+    """Spot balance, perp collateral, or locked size — any of them is a holding."""
+    return float(
+        max(_qty(row, "balance"), _qty(row, "margin_balance"), _qty(row, "locked_balance"))
+    )
+
+
+def _avg_entry(row: dict[str, Any], entries: dict[Any, Any] | None) -> Decimal | None:
+    if not entries:
+        return None
+    aid = row.get("asset_id")
+    keys: list[Any] = []
+    if aid not in (None, ""):
+        try:
+            keys.append(int(aid))
+        except (TypeError, ValueError):
+            pass
+        keys.append(str(aid))
+        keys.append(aid)
+    for key in keys:
+        raw = entries.get(key)
+        if isinstance(raw, dict):
+            raw = raw.get("avg_entry_price")
+        if raw in (None, ""):
+            continue
+        try:
+            price = parse_decimal(raw)
+        except ValueError:
+            continue
+        if price > 0:
+            return price
+    return None
+
+
+def public_assets(
+    assets: Any,
+    details: dict[str, dict[str, float]] | None = None,
+    entries: dict[Any, Any] | None = None,
+) -> list[Asset]:
+    """Project venue holdings + assetDetails into public Asset rows.
+
+    Spot ``balance`` and perp ``margin_balance`` are disjoint buckets.
+    Balance is total owned; Asset available is total minus spot locks.
+    Asset uPnL is (index − avg entry) × total; quote has none.
+    """
+    meta = details or {}
+    out: list[Asset] = []
+    for row in asset_rows(assets):
+        spot = _qty(row, "balance")
+        margin_qty = _qty(row, "margin_balance")
+        locked = _qty(row, "locked_balance")
+        total = spot + margin_qty
+        if total == 0 and locked == 0:
+            continue
+        sym = str(row["symbol"]).upper()
+        detail = meta.get(sym) or {}
+        index = to_float(detail.get("index_price"))
+        ltv = to_float(detail.get("loan_to_value"))
+        if sym in _QUOTE:
+            if index <= 0:
+                index = 1.0
+            if ltv <= 0:
+                ltv = 1.0
+        usd_val = float(total) * index if index > 0 else 0.0
+        if index > 0 and usd_val < _DUST_USD:
+            continue
+        venue_available = row.get("available_balance")
+        if venue_available not in (None, ""):
+            available = str(venue_available)
+        else:
+            available = _num_str(max(Decimal("0"), total - locked))
+        margin = row.get("margin_balance")
+        pnl = ""
+        if sym not in _QUOTE and index > 0:
+            entry = _avg_entry(row, entries)
+            if entry is not None:
+                pnl = _num_str((Decimal(str(index)) - entry) * total)
+        out.append(
+            Asset(
+                symbol=sym,
+                balance=_num_str(total),
+                margin_balance=_num_str(margin) if margin not in (None, "") else "0",
+                available=available,
+                index_price=_num_str(index),
+                ltv=_num_str(ltv),
+                usd=_num_str(usd_val) if index > 0 else "0",
+                unrealized_pnl=pnl,
+            )
+        )
+    return out
+
+
+def merge_spot_entries(prev: dict[int, str] | None, incoming: Any) -> dict[int, str]:
+    """asset_id → avg_entry_price from Lighter ``avg_entry_prices`` snapshots."""
+    out = dict(prev or {})
+    if isinstance(incoming, dict) and "avg_entry_prices" in incoming:
+        incoming = incoming.get("avg_entry_prices")
+    if isinstance(incoming, dict):
+        items = incoming.values()
+    elif isinstance(incoming, list):
+        items = incoming
+    else:
+        return out
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        aid = item.get("asset_id")
+        price = item.get("avg_entry_price")
+        if aid in (None, "") or price in (None, ""):
+            continue
+        try:
+            out[int(aid)] = str(price)
+        except (TypeError, ValueError):
+            continue
     return out
 
 

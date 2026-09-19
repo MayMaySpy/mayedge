@@ -119,7 +119,7 @@ CREATE TABLE liquidations (
 _LIQ_MAX_ROWS = 50_000
 _LIQ_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 _last_liq_prune_at = 0.0
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _meta_int(
@@ -195,6 +195,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _ensure_algo_mm_columns(conn)
     if version < 3:
         _ensure_liquidations(conn)
+    if version < 4:
+        conn.execute(
+            """
+            UPDATE liquidations SET side = CASE
+              WHEN side = 'buy' THEN 'sell'
+              WHEN side = 'sell' THEN 'buy'
+              ELSE side END
+            """
+        )
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 

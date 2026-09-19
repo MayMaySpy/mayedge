@@ -2,6 +2,7 @@ import { memo } from "react";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { logExplorerUrl } from "@/lib/explorer";
 import { formatPrice, formatSize } from "@/lib/utils";
 import { useLiveTrades } from "@/lib/liveData";
 
@@ -24,10 +25,11 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader title="Trades" onClose={onClose} />
-      <div className="grid h-6 shrink-0 grid-cols-3 px-2 font-mono text-[11px] leading-6 text-muted-foreground">
+      <div className="grid h-6 shrink-0 grid-cols-[1fr_1fr_auto_3.25rem] px-2 font-mono text-[11px] leading-6 text-muted-foreground">
         <span>Price</span>
         <span>Size</span>
         <span className="text-right">Time</span>
+        <span />
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {rows.length === 0 ? (
@@ -38,18 +40,34 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
             </EmptyHeader>
           </Empty>
         ) : (
-          rows.map((t, i) => (
-            <div
-              key={`${t.timestamp}-${t.price}-${t.size}-${i}`}
-              className="grid grid-cols-3 px-2 py-0.5 font-mono text-[12px]"
-            >
-              <span className={t.side === "buy" ? "text-bid" : "text-ask"}>
-                {formatPrice(t.price)}
-              </span>
-              <span className="text-muted-foreground">{formatSize(t.size)}</span>
-              <span className="text-right text-muted-foreground">{formatClock(t.timestamp)}</span>
-            </div>
-          ))
+          rows.map((t, i) => {
+            const logUrl = logExplorerUrl(t.tx_hash);
+            return (
+              <div
+                key={`${t.tx_hash || t.timestamp}-${t.price}-${t.size}-${i}`}
+                className="grid grid-cols-[1fr_1fr_auto_3.25rem] items-baseline px-2 py-0.5 font-mono text-[12px]"
+              >
+                <span className={t.side === "buy" ? "text-bid" : "text-ask"}>
+                  {formatPrice(t.price)}
+                </span>
+                <span className="text-muted-foreground">{formatSize(t.size)}</span>
+                <span className="text-right text-muted-foreground">{formatClock(t.timestamp)}</span>
+                {logUrl ? (
+                  <a
+                    href={logUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open Log"
+                    className="text-right font-sans text-[11px] text-muted-foreground hover:text-text"
+                  >
+                    explore
+                  </a>
+                ) : (
+                  <span />
+                )}
+              </div>
+            );
+          })
         )}
       </ScrollArea>
     </div>

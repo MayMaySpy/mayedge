@@ -15,6 +15,7 @@ import {
   type RsSort,
   type RsSortDir,
 } from "@/lib/relativeStrength";
+import { alignRowToTop } from "@/lib/scanScroll";
 import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-rs-sort";
@@ -84,6 +85,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
   onSymbolChange,
 }: RelativeStrengthTableProps) {
   const [sort, setSort] = useState<PersistedSort>(loadSort);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const selected = symbol.toUpperCase();
 
@@ -91,10 +93,14 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
     () => rankRelativeStrength(markets, { sort: sort.key, dir: sort.dir }),
     [markets, sort]
   );
+  const selectedOnBoard = board.rows.some((r) => r.symbol.toUpperCase() === selected);
 
   useEffect(() => {
-    rowRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
-  }, [selected, board.rows]);
+    const container = scrollerRef.current;
+    const row = rowRefs.current.get(selected);
+    if (!container || !row) return;
+    alignRowToTop(container, row, 32);
+  }, [selected, selectedOnBoard]);
 
   const setSortMode = (key: RsSort) => {
     const next: PersistedSort =
@@ -104,7 +110,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-panel">
           <TableRow className="h-8 hover:bg-transparent">

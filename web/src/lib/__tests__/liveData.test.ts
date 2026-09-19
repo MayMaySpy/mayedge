@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { Market } from "@/lib/api";
+import type { Account, Asset, Market } from "@/lib/api";
 import {
   applyBookDelta,
   applyBookSnapshot,
@@ -8,6 +8,7 @@ import {
   clearMarketQuotes,
   clearMinuteCandles,
   clearTrades,
+  getAccount,
   getCandles1s,
   getMarketQuotes,
   getMinuteCandles,
@@ -16,6 +17,7 @@ import {
   overlayQuote,
   prependTrades,
   rollLiveCandles,
+  setAccount,
   setMinuteCandles,
   subscribeQuoteDelta,
   upsertMinuteCandle,
@@ -252,6 +254,60 @@ describe("applyMarketQuotes", () => {
       [{ market_index: 1, mark_price: 100 }],
       [{ market_index: 2, mark_price: 50 }],
     ]);
+  });
+});
+
+describe("applyBookDelta", () => {
+  it("returns false and clears sync on seq gap", () => {
+    clearBook();
+    applyBookSnapshot({ bids: [{ price: "100", size: "1" }], asks: [{ price: "101", size: "1" }] }, 10);
+    expect(isBookSynced()).toBe(true);
+
+    const ok = applyBookDelta(
+      { bids: [{ price: "100", size: "2" }], asks: [] },
+      { seq: 11, prevSeq: 9 }
+    );
+    expect(ok).toBe(false);
+    expect(isBookSynced()).toBe(false);
+  });
+});
+
+function accountStub(partial?: Partial<Account>): Account {
+  return {
+    collateral: "1000",
+    available: "1000",
+    unrealized_pnl: "0",
+    positions: [],
+    open_orders: [],
+    ...partial,
+  };
+}
+
+const usdc: Asset = {
+  symbol: "USDC",
+  balance: "1362.84",
+  margin_balance: "16.74",
+  available: "16.74",
+  index_price: "1",
+  ltv: "1",
+  usd: "1362.84",
+  unrealized_pnl: "",
+};
+
+describe("setAccount assets", () => {
+  afterEach(() => {
+    setAccount(null);
+  });
+
+  it("stores assets from a full account payload", () => {
+    setAccount(accountStub({ assets: [usdc] }));
+    expect(getAccount()?.assets).toEqual([usdc]);
+  });
+
+  it("keeps previous assets when a partial message omits the field", () => {
+    setAccount(accountStub({ assets: [usdc] }));
+    setAccount(accountStub());
+    expect(getAccount()?.assets).toEqual([usdc]);
   });
 });
 

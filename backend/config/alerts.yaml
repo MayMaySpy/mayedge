@@ -3,7 +3,7 @@
 # Restart the backend after edits.
 
 cooldown_s: 90
-# Level signals (spread, premium, funding, dislocation) persist — longer mute.
+# Level signals (premium, funding, dislocation) persist — longer mute.
 level_cooldown_s: 300
 min_severity: 2
 max_events_per_flush: 20
@@ -21,8 +21,6 @@ price:
 volume:
   usd_1m: [750000, 2500000]
   usd_5m: [2000000, 8000000]
-spread:
-  bps: [50, 150]
 premium:
   pct: [0.5, 1.2]
 dislocation:
