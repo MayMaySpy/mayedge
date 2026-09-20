@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { notifyErr, notifyOk } from "@/lib/notify";
+import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
@@ -28,7 +28,9 @@ import { useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   nextPosSort,
   positionNotional,
+  positionsForClose,
   sortPositionRows,
+  type CloseFilter,
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
@@ -86,6 +88,20 @@ function livePnl(p: Position, mark: number): number {
   return n(p.unrealized_pnl);
 }
 
+function placeCloseOrder(p: Position, markets: Market[], selected: Market | null) {
+  const size = Math.abs(n(p.size));
+  if (size <= 0) return Promise.resolve();
+  const m = markets.find((x) => x.market_index === p.market_index) ?? selected;
+  const decimals = m?.size_decimals ?? 4;
+  return api.placeMarketOrder({
+    market_index: p.market_index,
+    side: isLongPosition(p) ? "sell" : "buy",
+    size: trimQty(size, decimals) || String(size),
+    slippage: 0.01,
+    reduce_only: true,
+  });
+}
+
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
@@ -126,6 +142,42 @@ function SortHead({
         {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
       </button>
     </TableHead>
+  );
+}
+
+function CloseFilterButton({
+  label,
+  count,
+  noun,
+  className,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  noun: string;
+  className?: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn("h-6 px-1.5 text-[10px]", className)}
+          disabled={disabled}
+          onClick={onClick}
+        >
+          {label}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        Close {count} {noun}. Does not stop algos or cancel orders.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -236,23 +288,8 @@ export function PositionsPanel({
   };
 
   const closePosition = (p: Position) => {
-    const size = Math.abs(n(p.size));
-    if (size <= 0) return;
-    const m = markets.find((x) => x.market_index === p.market_index) ?? market;
-    const decimals = m?.size_decimals ?? 4;
-    const closeSide = isLongPosition(p) ? "sell" : "buy";
-    void run(
-      `close-${p.market_index}`,
-      () =>
-        api.placeMarketOrder({
-          market_index: p.market_index,
-          side: closeSide,
-          size: trimQty(size, decimals) || String(size),
-          slippage: 0.01,
-          reduce_only: true,
-        }),
-      `${p.symbol} closed`
-    );
+    if (Math.abs(n(p.size)) <= 0) return;
+    void run(`close-${p.market_index}`, () => placeCloseOrder(p, markets, market), `${p.symbol} closed`);
   };
 
   const openPositions = useMemo(
@@ -312,6 +349,44 @@ export function PositionsPanel({
   const usedMargin = openPositions.reduce((sum, p) => sum + n(p.allocated_margin), 0);
   const totalPnl = liveRows.reduce((sum, r) => sum + r.pnl, 0);
   const accountRoe = usedMargin > 0 ? (totalPnl / usedMargin) * 100 : null;
+  const winners = positionsForClose(liveRows, "winners");
+  const losers = positionsForClose(liveRows, "losers");
+
+  const closeMany = async (filter: CloseFilter) => {
+    if (!tradingEnabled) {
+      notifyErr("Trading not configured");
+      return;
+    }
+    if (!feed.ready) {
+      notifyErr(feed.reason ?? "Feed not ready");
+      return;
+    }
+    const targets = positionsForClose(liveRows, filter);
+    if (!targets.length) return;
+    setBusy(`close-${filter}`);
+    let ok = 0;
+    const errors: string[] = [];
+    try {
+      for (const { p } of targets) {
+        try {
+          await placeCloseOrder(p, markets, market);
+          ok += 1;
+        } catch (e) {
+          errors.push(`${p.symbol}: ${e instanceof Error ? e.message : "failed"}`);
+        }
+      }
+      const fail = errors.length;
+      if (fail === 0) {
+        notifyOk(`Closed ${ok}`);
+      } else if (ok === 0) {
+        notifyErr(errors.join("; "));
+      } else {
+        notifyWarn(`Closed ${ok}; ${fail} failed`, errors.join("; "));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -343,6 +418,31 @@ export function PositionsPanel({
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="flex items-center gap-1">
+              <CloseFilterButton
+                label="W"
+                count={winners.length}
+                noun="winners"
+                className="text-bid hover:text-bid"
+                disabled={!tradingEnabled || !feed.ready || busy != null || winners.length === 0}
+                onClick={() => void closeMany("winners")}
+              />
+              <CloseFilterButton
+                label="L"
+                count={losers.length}
+                noun="losers"
+                className="text-ask hover:text-ask"
+                disabled={!tradingEnabled || !feed.ready || busy != null || losers.length === 0}
+                onClick={() => void closeMany("losers")}
+              />
+              <CloseFilterButton
+                label="All"
+                count={liveRows.length}
+                noun="positions"
+                disabled={!tradingEnabled || !feed.ready || busy != null || liveRows.length === 0}
+                onClick={() => void closeMany("all")}
+              />
+            </div>
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
@@ -416,7 +516,6 @@ export function PositionsPanel({
                     const fund = n(p.funding_paid);
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
-                    const rowBusy = busy === `close-${p.market_index}`;
                     return (
                       <TableRow
                         key={p.market_index}
@@ -490,7 +589,7 @@ export function PositionsPanel({
                                 type="button"
                                 variant="danger"
                                 size="icon"
-                                disabled={!tradingEnabled || !!rowBusy}
+                                disabled={!tradingEnabled || busy != null}
                                 onClick={() => closePosition(p)}
                                 className="size-7"
                               >

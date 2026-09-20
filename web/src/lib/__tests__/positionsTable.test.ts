@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   nextPosSort,
   positionNotional,
+  positionsForClose,
   sortPositionRows,
   type SortablePosition,
 } from "@/lib/positionsTable";
@@ -56,6 +57,35 @@ describe("sortPositionRows", () => {
     expect(
       sortPositionRows(mixed, { key: "roe", dir: "desc" }, null).map((r) => r.marketIndex)
     ).toEqual([1, 3, 2]);
+  });
+});
+
+describe("positionsForClose", () => {
+  const mixed = [
+    row(1, { pnl: 12 }),
+    row(2, { pnl: -4 }),
+    row(3, { pnl: 0 }),
+    row(4, { pnl: 0.5 }),
+    row(5, { pnl: -0.01 }),
+  ];
+
+  it("keeps only positive uPnL for winners", () => {
+    expect(positionsForClose(mixed, "winners").map((r) => r.marketIndex)).toEqual([1, 4]);
+  });
+
+  it("keeps only negative uPnL for losers", () => {
+    expect(positionsForClose(mixed, "losers").map((r) => r.marketIndex)).toEqual([2, 5]);
+  });
+
+  it("leaves flats in all, not in W or L", () => {
+    expect(positionsForClose(mixed, "all").map((r) => r.marketIndex)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("returns empty when nothing matches", () => {
+    const flats = [row(1, { pnl: 0 }), row(2, { pnl: 0 })];
+    expect(positionsForClose(flats, "winners")).toEqual([]);
+    expect(positionsForClose(flats, "losers")).toEqual([]);
+    expect(positionsForClose([], "all")).toEqual([]);
   });
 });
 

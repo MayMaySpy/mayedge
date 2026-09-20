@@ -36,6 +36,18 @@ function sortValue(row: SortablePosition, key: PosSortKey): number | null {
   }
 }
 
+export type CloseFilter = "all" | "winners" | "losers";
+
+/** Winners/losers use live uPnL; flats (0) only go through "all". */
+export function positionsForClose<T extends { pnl: number }>(
+  rows: T[],
+  filter: CloseFilter
+): T[] {
+  if (filter === "winners") return rows.filter((r) => r.pnl > 0);
+  if (filter === "losers") return rows.filter((r) => r.pnl < 0);
+  return rows;
+}
+
 /** Active market stays first; remaining rows follow the selected numeric sort. */
 export function sortPositionRows<T extends SortablePosition>(
   rows: T[],
