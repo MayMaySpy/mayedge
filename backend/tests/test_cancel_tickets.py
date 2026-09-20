@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -128,3 +129,32 @@ class CancelTicketsTests(IsolatedAsyncioTestCase):
         self.assertEqual(out["error"], "venue down")
         called = [c.kwargs["order_index"] for c in svc._signer.cancel_order.await_args_list]
         self.assertEqual(called, [1, 2])
+
+
+class CancelAllOrdersTests(IsolatedAsyncioTestCase):
+    def _signer(self) -> MagicMock:
+        signer = MagicMock()
+        signer.NIL_MARKET_INDEX = 255
+        signer.CANCEL_ALL_TIF_IMMEDIATE = 0
+        signer.cancel_all_orders = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0xall"), None)
+        )
+        return signer
+
+    async def test_pair_immediate_cancel_sends_nil_time(self) -> None:
+        """Immediate cancel-all: CancelAllTime must be nil (timestamp_ms=0)."""
+        svc = OrderService()
+        svc._signer = self._signer()
+        await svc.cancel_all_orders(1)
+        kw = svc._signer.cancel_all_orders.await_args.kwargs
+        self.assertEqual(kw["timestamp_ms"], 0)
+        self.assertEqual(kw["time_in_force"], 0)
+        self.assertEqual(kw["cancel_all_market_index"], 1)
+
+    async def test_all_markets_uses_nil_market_index(self) -> None:
+        svc = OrderService()
+        svc._signer = self._signer()
+        await svc.cancel_all_orders(None)
+        kw = svc._signer.cancel_all_orders.await_args.kwargs
+        self.assertEqual(kw["timestamp_ms"], 0)
+        self.assertEqual(kw["cancel_all_market_index"], 255)

@@ -424,7 +424,7 @@ class OrderService:
         idx = self.signer.NIL_MARKET_INDEX if market_index is None else market_index
         _tx, resp, err = await self.signer.cancel_all_orders(
             time_in_force=self.signer.CANCEL_ALL_TIF_IMMEDIATE,
-            timestamp_ms=int(time.time() * 1000),
+            timestamp_ms=0,
             cancel_all_market_index=idx,
         )
         tx_hash = self._require_tx(resp, err, action="Cancel all")
