@@ -275,7 +275,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
             <ToggleGroupItem
               key={h}
               value={String(h)}
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               {h}h
             </ToggleGroupItem>
@@ -292,7 +292,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                   <TableHead
                     key={col.label || `bar-${i}`}
                     className={cn(
-                      "font-mono text-[10px] tracking-wide uppercase",
+                      "font-mono text-xs tracking-wide uppercase",
                       col.align === "end" ? "text-right" : "text-left"
                     )}
                   >
@@ -321,7 +321,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                 <TableRow className="h-9 bg-panel hover:bg-panel tabular-nums [&>td]:bg-panel">
                   <TableCell>
                     <div className="flex min-w-0 items-baseline gap-2">
-                      <span className="font-sans text-[13px] text-text">All</span>
+                      <span className="font-sans text-lg text-text">All</span>
                       <span className="text-muted-foreground">{fold.marketCount}</span>
                     </div>
                   </TableCell>
@@ -343,7 +343,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
                         <TokenMark symbol={topRow.symbol} />
-                        <span className="font-sans text-[13px] text-text">{topRow.symbol}</span>
+                        <span className="font-sans text-lg text-text">{topRow.symbol}</span>
                         <span className="text-muted-foreground">{formatWindowShare(fold.top.share)}</span>
                       </div>
                     </TableCell>
@@ -385,7 +385,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
                         <TokenMark symbol={row.symbol} />
-                        <span className="font-sans text-[13px] text-text">{row.symbol}</span>
+                        <span className="font-sans text-lg text-text">{row.symbol}</span>
                       </div>
                     </TableCell>
                     <LiqMetricCells

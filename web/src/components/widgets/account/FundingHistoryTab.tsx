@@ -133,7 +133,7 @@ export function FundingHistoryTab({
         </div>
       ) : !rows.length ? (
         <Empty className="rounded-none border-0 p-4">
-          <EmptyDescription className="text-[11px] text-muted-foreground">
+          <EmptyDescription>
             {!tradingEnabled
               ? "Connect API key to view funding history"
               : scope === "pair" && market
@@ -143,7 +143,7 @@ export function FundingHistoryTab({
         </Empty>
       ) : (
         <>
-          <Table className="font-mono text-[11px]">
+          <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Time</TableHead>

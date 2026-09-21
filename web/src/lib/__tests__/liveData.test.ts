@@ -9,6 +9,7 @@ import {
   clearMinuteCandles,
   clearTrades,
   getAccount,
+  getBook,
   getCandles1s,
   getMarketQuotes,
   getMinuteCandles,
@@ -269,6 +270,21 @@ describe("applyBookDelta", () => {
     );
     expect(ok).toBe(false);
     expect(isBookSynced()).toBe(false);
+  });
+});
+
+describe("book depth", () => {
+  afterEach(() => {
+    clearBook();
+  });
+
+  it("keeps far levels for notional walks", () => {
+    const bids = Array.from({ length: 80 }, (_, i) => ({
+      price: String(100 - i),
+      size: "1",
+    }));
+    applyBookSnapshot({ bids, asks: [{ price: "101", size: "1" }] });
+    expect(getBook().bids).toHaveLength(80);
   });
 });
 

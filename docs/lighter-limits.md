@@ -49,6 +49,10 @@ Error: `AppErrInvalidOrderBaseOrQuoteAmount` (21706).
 |------|-----|--------|
 | Limit | 0 | Desk algo children |
 | Market | 1 | Kill flatten, ticket market |
+| Stop Loss | 2 | Position-row protect; market parent |
+| Stop Loss Limit | 3 | Position-row protect |
+| Take Profit | 4 | Position-row protect; market parent |
+| Take Profit Limit | 5 | Position-row protect |
 | TWAP | 6 | Venue-native TWAP (ticket, not desk book) |
 
 ## Time in force

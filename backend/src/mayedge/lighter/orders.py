@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 import lighter
+from lighter.signer_client import CreateOrderTxReq
 
 from mayedge.config import settings
 from mayedge.lighter.account import account_service
@@ -22,7 +23,7 @@ from mayedge.lighter.models import (
     maker_min_base,
     parse_to_int,
 )
-from mayedge.numbers import check_notional, fmt_decimal
+from mayedge.numbers import check_notional, fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +72,9 @@ class OrderService:
             raise ValueError(f"Unknown market index {market_index}")
         return meta
 
-    def _scale_size(self, size: str, decimals: int) -> int:
+    def _scale_size(self, size: str, decimals: int, *, allow_zero: bool = False) -> int:
         amount = parse_to_int(size, decimals)
-        if amount <= 0:
+        if amount < 0 or (amount == 0 and not allow_zero):
             raise ValueError("Size too small")
         return amount
 
@@ -142,6 +143,51 @@ class OrderService:
         if worst <= 0:
             raise ValueError("Invalid market price")
         return self._scale_price(str(worst), meta.price_decimals)
+
+    def _trigger_exec_price(
+        self,
+        meta,
+        *,
+        is_ask: bool,
+        kind: str,
+        trigger: str,
+        price: str | None,
+        slippage: float,
+    ) -> int:
+        if kind == "limit":
+            if not (price or "").strip():
+                raise ValueError("Enter a limit price")
+            return self._scale_price(price or "", meta.price_decimals)
+        if kind != "market":
+            raise ValueError("Stop kind must be market or limit")
+        try:
+            trig = parse_decimal(trigger)
+        except Exception:
+            raise ValueError("Enter a trigger") from None
+        if trig <= 0:
+            raise ValueError("Enter a trigger")
+        slip = Decimal(str(max(0.0, min(float(slippage), 0.05))))
+        worst = trig * (Decimal(1) - slip) if is_ask else trig * (Decimal(1) + slip)
+        if worst <= 0:
+            raise ValueError("Invalid stop price")
+        return self._scale_price(fmt_decimal(worst) or "0", meta.price_decimals)
+
+    def _check_trigger_side(self, meta, *, is_ask: bool, role: str, trigger: str) -> None:
+        mark = float(meta.mark_price or meta.last_trade_price or 0)
+        try:
+            trig = float(parse_decimal(trigger))
+        except Exception:
+            raise ValueError("Enter a trigger") from None
+        if mark <= 0 or trig <= 0:
+            return
+        if role == "sl":
+            ok = trig < mark if is_ask else trig > mark
+            if not ok:
+                raise ValueError("Stop trigger is on the wrong side of mark")
+            return
+        ok = trig > mark if is_ask else trig < mark
+        if not ok:
+            raise ValueError("Take-profit trigger is on the wrong side of mark")
 
     @staticmethod
     def _is_invalid_nonce(err: Any) -> bool:
@@ -346,6 +392,141 @@ class OrderService:
         )
         tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {"tx_hash": tx_hash, "client_order_index": coi}
+
+    def _conditional_leg(
+        self,
+        meta,
+        *,
+        market_index: int,
+        is_ask: bool,
+        base_amount: int,
+        role: str,
+        leg: dict[str, Any],
+        slippage: float,
+    ) -> tuple[CreateOrderTxReq, int]:
+        kind = str(leg.get("kind") or "")
+        trigger = str(leg.get("trigger") or "")
+        price = leg.get("price")
+        price_s = str(price) if price not in (None, "") else None
+        self._check_trigger_side(meta, is_ask=is_ask, role=role, trigger=trigger)
+        trigger_int = self._scale_price(trigger, meta.price_decimals)
+        price_int = self._trigger_exec_price(
+            meta,
+            is_ask=is_ask,
+            kind=kind,
+            trigger=trigger,
+            price=price_s,
+            slippage=slippage,
+        )
+        if base_amount > 0:
+            self._check_notional(meta, base_amount, price_int)
+        market_parent = kind == "market"
+        if role == "sl":
+            order_type = (
+                self.signer.ORDER_TYPE_STOP_LOSS
+                if market_parent
+                else self.signer.ORDER_TYPE_STOP_LOSS_LIMIT
+            )
+        else:
+            order_type = (
+                self.signer.ORDER_TYPE_TAKE_PROFIT
+                if market_parent
+                else self.signer.ORDER_TYPE_TAKE_PROFIT_LIMIT
+            )
+        tif = (
+            self.signer.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL
+            if market_parent
+            else self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME
+        )
+        coi = self._next_client_order_index()
+        req = CreateOrderTxReq(
+            MarketIndex=market_index,
+            ClientOrderIndex=coi,
+            BaseAmount=base_amount,
+            Price=price_int,
+            IsAsk=1 if is_ask else 0,
+            Type=order_type,
+            TimeInForce=tif,
+            ReduceOnly=1,
+            TriggerPrice=trigger_int,
+            OrderExpiry=self.signer.DEFAULT_28_DAY_ORDER_EXPIRY,
+        )
+        return req, coi
+
+    async def _send_sl_tp_leg(self, role: str, kind: str, req: CreateOrderTxReq, meta):
+        kwargs = {
+            "market_index": req.MarketIndex,
+            "client_order_index": req.ClientOrderIndex,
+            "base_amount": req.BaseAmount,
+            "trigger_price": req.TriggerPrice,
+            "price": req.Price,
+            "is_ask": bool(req.IsAsk),
+            "reduce_only": True,
+        }
+        if role == "sl" and kind == "market":
+            send = self.signer.create_sl_order
+        elif role == "sl":
+            send = self.signer.create_sl_limit_order
+        elif kind == "market":
+            send = self.signer.create_tp_order
+        else:
+            send = self.signer.create_tp_limit_order
+        _tx, resp, err = await self._retry_nonce(lambda: send(**kwargs))
+        return self._created_tx_hash(resp, err, meta, action="Order")
+
+    async def create_sl_tp(
+        self,
+        market_index: int,
+        side: str,
+        size: str,
+        sl: dict[str, Any] | None = None,
+        tp: dict[str, Any] | None = None,
+        slippage: float = 0.01,
+    ) -> dict[str, Any]:
+        if sl is None and tp is None:
+            raise ValueError("Set a stop or take profit")
+        meta = self._market_meta(market_index)
+        is_ask = self._is_ask(side)
+        base_amount = self._scale_size(size, meta.size_decimals, allow_zero=True)
+        built: list[tuple[str, str, CreateOrderTxReq, int]] = []
+        if sl is not None:
+            req, coi = self._conditional_leg(
+                meta,
+                market_index=market_index,
+                is_ask=is_ask,
+                base_amount=base_amount,
+                role="sl",
+                leg=sl,
+                slippage=slippage,
+            )
+            built.append(("sl", str(sl.get("kind") or ""), req, coi))
+        if tp is not None:
+            req, coi = self._conditional_leg(
+                meta,
+                market_index=market_index,
+                is_ask=is_ask,
+                base_amount=base_amount,
+                role="tp",
+                leg=tp,
+                slippage=slippage,
+            )
+            built.append(("tp", str(tp.get("kind") or ""), req, coi))
+        if len(built) == 1:
+            role, kind, req, coi = built[0]
+            tx_hash = await self._send_sl_tp_leg(role, kind, req, meta)
+            return {"tx_hash": tx_hash, "client_order_index": coi}
+        orders = [row[2] for row in built]
+        _tx, resp, err = await self._retry_nonce(
+            lambda: self.signer.create_grouped_orders(
+                grouping_type=self.signer.GROUPING_TYPE_ONE_CANCELS_THE_OTHER,
+                orders=orders,
+            )
+        )
+        tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
+        return {
+            "tx_hash": tx_hash,
+            "client_order_index": built[0][3],
+        }
 
     async def modify_order(
         self,

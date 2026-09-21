@@ -24,7 +24,7 @@ function FieldLegend({
       data-slot="field-legend"
       data-variant={variant}
       className={cn(
-        "mb-1 font-medium data-[variant=label]:text-xs data-[variant=legend]:text-sm",
+        "mb-1 font-medium data-[variant=label]:text-base data-[variant=legend]:text-lg",
         className
       )}
       {...props}
@@ -89,7 +89,7 @@ function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="field-label"
-      className={cn("text-xs font-medium text-foreground", className)}
+      className={cn("text-base font-medium text-foreground", className)}
       {...props}
     />
   );
@@ -99,7 +99,7 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   return (
     <p
       data-slot="field-description"
-      className={cn("text-[11px] leading-normal text-muted-foreground", className)}
+      className={cn("text-sm leading-normal text-muted-foreground", className)}
       {...props}
     />
   );
@@ -114,7 +114,7 @@ function FieldSeparator({
     <div
       data-slot="field-separator"
       data-content={!!children}
-      className={cn("relative -my-1 h-5 text-xs", className)}
+      className={cn("relative -my-1 h-5 text-base", className)}
       {...props}
     >
       <Separator className="absolute inset-0 top-1/2" />
@@ -155,7 +155,7 @@ function FieldError({
     <div
       role="alert"
       data-slot="field-error"
-      className={cn("text-[11px] text-destructive", className)}
+      className={cn("text-sm text-destructive", className)}
       {...props}
     >
       {content}

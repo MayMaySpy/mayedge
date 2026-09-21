@@ -50,7 +50,19 @@ export function formatPct(value: number | null | undefined, digits?: number): st
   if (value == null || Number.isNaN(value)) return "—";
   const d = digits ?? (Math.abs(value) < 0.01 ? 3 : 2);
   const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(d)}%`;
+  return `${sign}${value.toLocaleString(undefined, {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  })}%`;
+}
+
+/** Unsigned percent for parentheticals: `+2,90 (1,5%)`. */
+export function formatPctAbs(value: number, digits = 1): string {
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.abs(value).toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}%`;
 }
 
 export function formatApr(value: number | null | undefined): string {

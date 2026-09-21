@@ -81,11 +81,11 @@ export function LeverageModal({
                 inputMode="numeric"
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value.replace(/[^\d]/g, ""))}
-                className="font-mono text-sm tabular-nums"
+                className="font-mono text-base tabular-nums"
                 aria-label="Leverage"
               />
               <InputGroupAddon align="inline-end">
-                <InputGroupText className="font-mono text-sm">x</InputGroupText>
+                <InputGroupText className="font-mono text-base">x</InputGroupText>
               </InputGroupAddon>
             </InputGroup>
             <Button type="submit" size="sm" disabled={loading || !tradingEnabled || !snappedDraft}>
@@ -93,7 +93,7 @@ export function LeverageModal({
             </Button>
           </form>
           {draftDirty && snappedDraft != null ? (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Snaps to <span className="font-mono tabular-nums text-text">{snappedDraft}x</span>
             </p>
           ) : null}

@@ -8,6 +8,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import httpx
 import lighter
 import websockets
 
@@ -24,7 +25,6 @@ from mayedge.lighter.parse import (
     asset_holding_qty,
     asset_rows,
     desk_account_trade,
-    desk_position_funding,
     incoming_orders_by_market,
     iter_trade_rows,
     merge_account_assets,
@@ -32,6 +32,7 @@ from mayedge.lighter.parse import (
     merge_spot_entries,
     parse_order,
     parse_position,
+    parse_position_fundings_page,
     public_assets,
 )
 
@@ -620,21 +621,51 @@ class AccountService:
         if not account_index or not self._auth_token_fn:
             raise ValueError("Account not configured")
         self._take_rest()
+        params: dict[str, Any] = {
+            "account_index": account_index,
+            "limit": min(max(limit, 1), 100),
+        }
+        if cursor:
+            params["cursor"] = cursor
+        if market_id is not None:
+            params["market_ids"] = str(int(market_id))
         try:
             auth = await self._auth_token_fn()
-            account_api = lighter.AccountApi(gateway.client)
-            resp = await account_api.position_funding(
-                account_index=account_index,
-                limit=min(max(limit, 1), 100),
-                authorization=auth,
-                market_id=market_id,
-                cursor=cursor,
-            )
+            async with httpx.AsyncClient(base_url=settings.base_url, timeout=20.0) as client:
+                resp = await client.get(
+                    "/api/v1/positionFunding",
+                    params=params,
+                    headers={"authorization": auth, "Accept": "application/json"},
+                )
+                if resp.status_code == 400 and "market_ids" in params:
+                    fallback = {k: v for k, v in params.items() if k != "market_ids"}
+                    fallback["market_id"] = int(market_id) if market_id is not None else 0
+                    resp = await client.get(
+                        "/api/v1/positionFunding",
+                        params=fallback,
+                        headers={"authorization": auth, "Accept": "application/json"},
+                    )
         except Exception as e:
             self._note_rest_error(e, "account funding fetch failed")
             raise
-        fundings = [desk_position_funding(row) for row in (resp.position_fundings or [])]
-        return {"fundings": fundings, "next_cursor": resp.next_cursor}
+        text = resp.text
+        mapped = venue_client_error(f"{resp.status_code} {text}")
+        if mapped:
+            raise VenueBlocked(*mapped)
+        try:
+            payload = resp.json()
+        except Exception as e:
+            raise ValueError("Funding history unavailable") from e
+        if resp.status_code != 200:
+            msg = ""
+            if isinstance(payload, dict):
+                msg = str(payload.get("message") or "")
+            raise ValueError(msg or text[:180] or f"funding {resp.status_code}")
+        if isinstance(payload, dict):
+            code = payload.get("code")
+            if code not in (None, 0, 200):
+                raise ValueError(str(payload.get("message") or code))
+        return parse_position_fundings_page(payload)
 
 
 account_service = AccountService()

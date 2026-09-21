@@ -191,7 +191,7 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
           onKeyDown={(e) => {
             if (e.key === "Enter") e.preventDefault();
           }}
-          className="h-8 w-16 shrink-0 cursor-text px-1 text-center font-mono text-xs tabular-nums"
+          className="h-8 w-16 shrink-0 cursor-text px-1 text-center font-mono text-base tabular-nums"
         />
         <Button
           type="button"
@@ -205,7 +205,7 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
         </Button>
       </div>
       {axisArmed ? (
-        <div className="mt-1 text-center font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+        <div className="mt-1 text-center font-mono text-xs uppercase tracking-wide text-muted-foreground">
           axis
         </div>
       ) : null}

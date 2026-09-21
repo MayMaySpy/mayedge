@@ -1,0 +1,35 @@
+---
+description: Desk type scale — tokens, not pixel sizes
+globs: web/**/*.{tsx,ts,css}
+alwaysApply: false
+---
+
+# Desk type
+
+Source of truth: the `@theme` block in `web/src/index.css`. Do not use `text-[Npx]`.
+
+| Token | Size | Use |
+|---|---|---|
+| `text-xs` | 10 | micro: badges, kbd, uppercase labels, tiny counts |
+| `text-sm` | 11 | dense: field labels, table heads, chart chrome, hints |
+| `text-base` | 12 | body: cells, buttons, inputs, copy, tabs |
+| `text-lg` | 13 | emphasis: market names, quiet header stats, dialog titles |
+| `text-xl` | 16 | loud Mark in the header only |
+
+**Families:** `font-sans` for chrome and market names. `font-mono` for prices, sizes, tables, kbd (it also enables tabular nums). Do not introduce a third face. `--font-heading` is unused; leave it.
+
+**Primitives own type.** Put the size on the shadcn component. Do not override `EmptyDescription`, `DialogTitle`, `TableCell`, `Input`, etc. with extra `text-*` in the caller.
+
+**Canvas / charts:** `theme.fontMono` and `theme.chartFontSize` from `web/src/lib/theme.ts`. Do not hardcode `"IBM Plex Mono"`.
+
+**New shadcn files** ship Tailwind’s 14px `text-sm`. Remap them to this table on add.
+
+```tsx
+// BAD
+<span className="text-[11px] font-mono">{price}</span>
+<EmptyDescription className="text-sm text-muted-foreground">
+
+// GOOD
+<span className="font-mono text-sm">{price}</span>
+<EmptyDescription>
+```

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
+import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
@@ -29,12 +30,14 @@ import {
   nextPosSort,
   positionNotional,
   positionsForClose,
+  protectOrderLabel,
   sortPositionRows,
+  stopTakeKind,
   type CloseFilter,
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
-import { cn, formatPct, formatPrice, formatSigned, formatSize, formatUsdCompact } from "@/lib/utils";
+import { cn, formatPctAbs, formatPrice, formatSigned, formatSize, formatUsdCompact } from "@/lib/utils";
 
 interface PositionsPanelProps {
   market: Market | null;
@@ -167,11 +170,11 @@ function CloseFilterButton({
           type="button"
           variant="outline"
           size="sm"
-          className={cn("h-6 px-1.5 text-[10px]", className)}
+          className={cn("h-6 px-1.5 text-xs", className)}
           disabled={disabled}
           onClick={onClick}
         >
-          {label}
+          {label}({count})
         </Button>
       </TooltipTrigger>
       <TooltipContent>
@@ -396,24 +399,24 @@ export function PositionsPanel({
         className="flex min-h-0 flex-1 flex-col"
       >
         <div className="panel-drag flex h-8 shrink-0 items-center border-b border-rule pr-1">
-          <TabsList className="min-w-0 border-b-0">
+          <TabsList className="min-w-0 px-1">
             <TabsTrigger value="positions">
               Positions
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openPositions.length})</span>
+              <span className="ml-1 font-mono text-xs text-muted-foreground">({openPositions.length})</span>
             </TabsTrigger>
             <TabsTrigger value="assets">
               Assets
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+              <span className="ml-1 font-mono text-xs text-muted-foreground">
                 ({account?.assets?.length ?? 0})
               </span>
             </TabsTrigger>
             <TabsTrigger value="orders">
               Orders
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">({openOrderCount})</span>
+              <span className="ml-1 font-mono text-xs text-muted-foreground">({openOrderCount})</span>
             </TabsTrigger>
             <TabsTrigger value="algos">
               Algos
-              <span className="ml-1 font-mono text-[11px] text-muted-foreground">({workingAlgos.length})</span>
+              <span className="ml-1 font-mono text-xs text-muted-foreground">({workingAlgos.length})</span>
             </TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
@@ -446,15 +449,13 @@ export function PositionsPanel({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
-                  <span className="text-[11px] text-muted-foreground">uPnL</span>
-                  <span className={cn("font-mono text-[11px] tabular-nums", pnlClass(totalPnl))}>
+                  <span className="text-sm text-muted-foreground">uPnL</span>
+                  <span className={cn("font-mono text-sm tabular-nums", pnlClass(totalPnl))}>
                     {formatSigned(totalPnl)}
+                    {accountRoe != null && (
+                      <span className="ml-1 text-xs">({formatPctAbs(accountRoe)})</span>
+                    )}
                   </span>
-                  {accountRoe != null && (
-                    <span className={cn("font-mono text-[10px] tabular-nums", pnlClass(totalPnl))}>
-                      {formatPct(accountRoe, 1)}
-                    </span>
-                  )}
                 </span>
               </TooltipTrigger>
               <TooltipContent>Unrealized PnL across open positions</TooltipContent>
@@ -475,7 +476,7 @@ export function PositionsPanel({
                 </EmptyHeader>
               </Empty>
             ) : (
-              <Table className="font-mono text-[12px]">
+              <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="pl-2.5">Market</TableHead>
@@ -499,14 +500,8 @@ export function PositionsPanel({
                       sort={posSort}
                       onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
                     />
-                    <SortHead
-                      label="uPnL%"
-                      column="roe"
-                      sort={posSort}
-                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
-                      title="Sort by unrealized PnL %"
-                    />
                     <TableHead className="text-right">Funding</TableHead>
+                    <TableHead className="text-right">TP/SL</TableHead>
                     <TableHead className="text-right" />
                   </TableRow>
                 </TableHeader>
@@ -516,6 +511,7 @@ export function PositionsPanel({
                     const fund = n(p.funding_paid);
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
+                    const m = markets.find((x) => x.market_index === p.market_index) ?? market;
                     return (
                       <TableRow
                         key={p.market_index}
@@ -562,22 +558,47 @@ export function PositionsPanel({
                           {cushion != null && (
                             <span
                               className={cn(
-                                "ml-1 text-[10px]",
+                                "ml-1 text-xs",
                                 cushion < 8 ? "text-ask" : "text-muted-foreground"
                               )}
                             >
-                              ({cushion.toFixed(1)}%)
+                              ({formatPctAbs(cushion)})
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className={cn("text-right text-[13px] font-medium", pnlClass(pnl))}>
+                        <TableCell className={cn("text-right text-lg font-medium", pnlClass(pnl))}>
                           {formatSigned(pnl)}
-                        </TableCell>
-                        <TableCell className={cn("text-right", roe != null ? pnlClass(roe) : "text-muted-foreground")}>
-                          {roe != null ? formatPct(roe, 1) : "—"}
+                          {roe != null && (
+                            <span className="ml-1 text-xs font-normal">({formatPctAbs(roe)})</span>
+                          )}
                         </TableCell>
                         <TableCell className={cn("text-right", pnlClass(fund))}>
                           {formatSigned(p.funding_paid)}
+                        </TableCell>
+                        <TableCell
+                          className="text-right"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <PositionProtectPopover
+                            position={p}
+                            mark={mark}
+                            sizeDecimals={m?.size_decimals ?? 4}
+                            priceDecimals={m?.price_decimals ?? 4}
+                            tradingEnabled={tradingEnabled && feed.ready}
+                            busy={busy != null}
+                            orders={allOrders}
+                            onPlace={async (body) => {
+                              const ok = await run(
+                                `protect-${p.market_index}`,
+                                () => api.placeStopTake(body),
+                                `${p.symbol} stop / take profit placed`
+                              );
+                              if (!ok) throw new Error("not placed");
+                            }}
+                            onCancel={async (orderIndex) => {
+                              await cancelOrder(p.market_index, orderIndex);
+                            }}
+                          />
                         </TableCell>
                         <TableCell
                           className="pl-2 text-right"
@@ -676,14 +697,14 @@ export function PositionsPanel({
             </div>
             {!visibleOrders.length ? (
               <Empty className="rounded-none border-0 p-4">
-                <EmptyDescription className="text-[11px] text-muted-foreground">
+                <EmptyDescription>
                   {orderScope === "pair" && market
                     ? `No open ${market.symbol} orders`
                     : "No open orders"}
                 </EmptyDescription>
               </Empty>
             ) : (
-              <Table className="font-mono text-[11px]">
+              <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Market</TableHead>
@@ -698,6 +719,7 @@ export function PositionsPanel({
                     const algoKind = algoOrderKind(o.client_order_index, {
                       reduceOnly: o.reduce_only,
                     });
+                    const sltp = !algoKind ? stopTakeKind(o.order_type) : null;
                     return (
                     <TableRow key={o.order_index}>
                       <TableCell>
@@ -711,7 +733,7 @@ export function PositionsPanel({
                                   size="sm"
                                   onClick={() => onSymbolChange(o.symbol)}
                                   className={cn(
-                                    "h-auto px-0 font-mono text-[11px] hover:underline",
+                                    "h-auto px-0 text-base hover:underline",
                                     market?.market_index === o.market_index && "underline"
                                   )}
                                 >
@@ -724,7 +746,11 @@ export function PositionsPanel({
                             o.symbol
                           )}
                           {algoKind ? (
-                            <span className="text-[10px] text-muted-foreground">{algoKind}</span>
+                            <span className="text-xs text-muted-foreground">{algoKind}</span>
+                          ) : sltp ? (
+                            <span className="text-xs text-muted-foreground">
+                              {protectOrderLabel(o.order_type, o.trigger_price)}
+                            </span>
                           ) : null}
                         </span>
                       </TableCell>
@@ -735,7 +761,7 @@ export function PositionsPanel({
                       <TableCell className="text-right">{formatSize(o.remaining)}</TableCell>
                       <TableCell className="text-right">
                         {algoKind ? (
-                          <span className="text-[10px] text-muted-foreground">algo</span>
+                          <span className="text-xs text-muted-foreground">algo</span>
                         ) : (
                           <Button
                             variant="ghost"

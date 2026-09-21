@@ -25,7 +25,7 @@ function TokenMarkInner({
     return (
       <span
         className={cn(
-          "inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-elevated font-sans text-[9px] font-medium text-muted-foreground",
+          "inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-elevated font-sans text-xs font-medium text-muted-foreground",
           className
         )}
         aria-hidden
@@ -40,6 +40,7 @@ function TokenMarkInner({
       src={tokenIconUrl(symbol)}
       alt=""
       className={cn("size-5 shrink-0 rounded-full object-cover", className)}
+      referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
     />
   );

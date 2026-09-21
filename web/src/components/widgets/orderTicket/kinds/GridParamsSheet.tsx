@@ -136,7 +136,7 @@ export function GridParamsSheet({
         }))}
       />
       <FieldGroup className="gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">B/E after merge</span>
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">B/E after merge</span>
         <TicketChips
           ariaLabel="Break-even delay"
           value={bePreset}
@@ -144,7 +144,7 @@ export function GridParamsSheet({
           items={BE_DELAYS.map((d) => ({ value: d.value, label: d.label }))}
         />
       </FieldGroup>
-      <p className="text-[10px] leading-snug text-muted-foreground">
+      <p className="text-xs leading-snug text-muted-foreground">
         Cap is max inventory per side. Clip chases the open side; profit orders close
         the other (max 3 live, then merge). Grid is the re-entry cell — not chase spacing.
         {profitNum > 0 && cycleMaker > 0 && profitNum + 1e-9 < cycleMaker

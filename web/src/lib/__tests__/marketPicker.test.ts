@@ -66,6 +66,7 @@ describe("formatFundingPct", () => {
 
 describe("tokenIconUrl", () => {
   it("uses Lighter asset slug", () => {
-    expect(tokenIconUrl("BTC")).toBe("https://assets.lighter.xyz/fe/token/btc.png");
+    expect(tokenIconUrl("BTC")).toBe("/api/token-icon/btc");
+    expect(tokenIconUrl("1000PEPE")).toBe("/api/token-icon/1000pepe");
   });
 });

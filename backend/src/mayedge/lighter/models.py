@@ -221,6 +221,7 @@ class OpenOrder:
     order_type: str
     reduce_only: bool
     filled: str = "0"
+    trigger_price: str = ""
 
 
 @dataclass
@@ -293,6 +294,7 @@ class AccountSummary:
                     "filled": o.filled,
                     "order_type": o.order_type,
                     "reduce_only": o.reduce_only,
+                    "trigger_price": o.trigger_price,
                 }
                 for o in self.open_orders
             ],

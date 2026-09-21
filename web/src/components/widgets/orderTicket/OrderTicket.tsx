@@ -488,7 +488,7 @@ export function OrderTicket({
           ) : sharedBlocked && !tradingEnabled ? (
             <Alert>{sharedBlocked}</Alert>
           ) : sharedBlocked ? (
-            <p className="text-center text-xs text-muted-foreground">{sharedBlocked}</p>
+            <p className="text-center text-base text-muted-foreground">{sharedBlocked}</p>
           ) : null}
           {singleAction ? (
             <Button

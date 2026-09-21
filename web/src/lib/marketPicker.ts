@@ -62,7 +62,10 @@ export function formatFundingPct(rate: number | null | undefined): string {
   return `${sign}${rate.toFixed(4)}%`;
 }
 
+export function tokenIconSlug(symbol: string): string {
+  return symbol.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export function tokenIconUrl(symbol: string): string {
-  const slug = symbol.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return `https://assets.lighter.xyz/fe/token/${slug}.png`;
+  return `/api/token-icon/${tokenIconSlug(symbol)}`;
 }

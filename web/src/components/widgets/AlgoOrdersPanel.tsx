@@ -39,7 +39,7 @@ function AlgoList({
   if (rows.length === 0) {
     return (
       <Empty className="rounded-none border-0 p-4">
-        <EmptyDescription className="text-[11px] text-muted-foreground">{empty}</EmptyDescription>
+        <EmptyDescription>{empty}</EmptyDescription>
       </Empty>
     );
   }

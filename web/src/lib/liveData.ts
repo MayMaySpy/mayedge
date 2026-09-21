@@ -32,7 +32,7 @@ const MAX_TRADES = 200;
 const MAX_1S = 3600;
 /** 1m live series — uncapped upserts were growing the chart until the tab OOMed. */
 const MAX_MINUTE = 2000;
-const BOOK_DEPTH = 40;
+const BOOK_DEPTH = 250;
 
 let book: Book = { bids: [], asks: [] };
 let bookSeq = 0;

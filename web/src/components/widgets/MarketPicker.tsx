@@ -169,8 +169,8 @@ export const MarketPicker = memo(function MarketPicker({
         >
           <span className="flex items-center gap-2 text-left">
             <TokenMark symbol={symbol} className="size-4" />
-            <span className="font-mono text-sm font-medium tracking-tight">{symbol}</span>
-            <span className={cn("font-mono text-[13px]", changeClass(change))}>
+            <span className="font-sans text-lg font-medium tracking-tight">{symbol}</span>
+            <span className={cn("font-mono text-lg", changeClass(change))}>
               {formatPct(change)}
             </span>
           </span>
@@ -218,7 +218,7 @@ export const MarketPicker = memo(function MarketPicker({
 
           {recentMarkets.length > 0 && (
             <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-rule px-3 py-2">
-              <span className="mr-0.5 shrink-0 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
+              <span className="mr-0.5 shrink-0 font-mono text-xs tracking-wide text-muted-foreground uppercase">
                 Recents
               </span>
               {recentMarkets.map((m) => (
@@ -229,7 +229,7 @@ export const MarketPicker = memo(function MarketPicker({
                   <button
                     type="button"
                     onClick={() => pick(m.symbol)}
-                    className="inline-flex h-full items-center gap-1.5 pr-1 pl-1.5 text-[12px] text-text"
+                    className="inline-flex h-full items-center gap-1.5 pr-1 pl-1.5 text-base text-text"
                   >
                     <TokenMark symbol={m.symbol} className="size-3.5" />
                     {m.symbol}
@@ -264,20 +264,20 @@ export const MarketPicker = memo(function MarketPicker({
               <ToggleGroupItem value="all">All</ToggleGroupItem>
               <ToggleGroupItem value="favorites">Favorites</ToggleGroupItem>
             </ToggleGroup>
-            <span className="pr-1 font-mono text-[11px] text-muted-foreground tabular-nums">
+            <span className="pr-1 font-mono text-sm text-muted-foreground tabular-nums">
               {rows.length} market{rows.length === 1 ? "" : "s"}
             </span>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full border-collapse text-xs">
+            <table className="w-full border-collapse text-base">
               <thead className="sticky top-0 z-10 bg-panel">
                 <tr className="h-8 border-b border-rule">
                   {COLS.map((col) => (
                     <th
                       key={col.key}
                       className={cn(
-                        "px-2 font-mono text-[10px] font-normal tracking-wide text-muted-foreground uppercase",
+                        "px-2 font-mono text-xs font-normal tracking-wide text-muted-foreground uppercase",
                         col.width,
                         col.align === "end" ? "text-right" : "text-left"
                       )}
@@ -301,7 +301,7 @@ export const MarketPicker = memo(function MarketPicker({
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+                    <td colSpan={6} className="px-3 py-8 text-center text-base text-muted-foreground">
                       {tab === "favorites" && !query
                         ? "Star a market to pin it here"
                         : "No markets match"}
@@ -346,34 +346,34 @@ export const MarketPicker = memo(function MarketPicker({
                               <Star className={cn("size-3.5", fav && "fill-warn")} />
                             </button>
                             <TokenMark symbol={m.symbol} />
-                            <span className="font-sans text-[13px] text-text">{m.symbol}</span>
+                            <span className="font-sans text-lg text-text">{m.symbol}</span>
                             {m.max_leverage ? (
-                              <span className="text-[12px] text-muted-foreground tabular-nums">
+                              <span className="text-base text-muted-foreground tabular-nums">
                                 {m.max_leverage}x
                               </span>
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-2 text-right font-mono text-[12px] text-text">
+                        <td className="px-2 text-right font-mono text-base text-text">
                           {last > 0 ? formatPrice(last, m.price_decimals ?? 4) : "—"}
                         </td>
                         <td
                           className={cn(
-                            "px-2 text-right font-mono text-[12px]",
+                            "px-2 text-right font-mono text-base",
                             changeClass(m.change_24h)
                           )}
                         >
                           {formatPct(m.change_24h)}
                         </td>
-                        <td className="px-2 text-right font-mono text-[12px] text-muted-foreground">
+                        <td className="px-2 text-right font-mono text-base text-muted-foreground">
                           {formatUsdCompact(m.volume_24h) || "—"}
                         </td>
-                        <td className="px-2 text-right font-mono text-[12px] text-muted-foreground">
+                        <td className="px-2 text-right font-mono text-base text-muted-foreground">
                           {formatUsdCompact(m.open_interest) || "—"}
                         </td>
                         <td
                           className={cn(
-                            "px-2 text-right font-mono text-[12px]",
+                            "px-2 text-right font-mono text-base",
                             fundingClass(m.funding_rate)
                           )}
                         >
@@ -387,7 +387,7 @@ export const MarketPicker = memo(function MarketPicker({
             </table>
           </div>
 
-          <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-3 text-[11px] text-muted-foreground">
+          <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-3 text-sm text-muted-foreground">
             <KbdGroup>
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd>

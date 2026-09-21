@@ -120,7 +120,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
               <TableHead
                 key={col.label}
                 className={cn(
-                  "font-mono text-[10px] tracking-wide uppercase",
+                  "font-mono text-xs tracking-wide uppercase",
                   col.align === "end" ? "text-right" : "text-left"
                 )}
               >
@@ -173,7 +173,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
                       <TokenMark symbol={row.symbol} />
                       <span
                         className={cn(
-                          "font-sans text-[13px]",
+                          "font-sans text-lg",
                           row.isNumeraire ? "text-muted-foreground" : "text-text"
                         )}
                       >

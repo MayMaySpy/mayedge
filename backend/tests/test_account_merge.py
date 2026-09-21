@@ -8,6 +8,7 @@ from mayedge.lighter.parse import (
     desk_account_trade,
     merge_positions,
     parse_order,
+    parse_position_fundings_page,
     realized_close_pnl,
 )
 from mayedge.numbers import parse_decimal
@@ -191,6 +192,28 @@ class ParseOrderTests(TestCase):
         self.assertEqual(parsed.remaining, "1.5")
         self.assertEqual(parsed.filled, "1.0")
 
+    def test_pending_stop_keeps_zero_size_and_trigger(self) -> None:
+        parsed = parse_order(
+            {
+                "order_index": 9,
+                "client_order_index": 2,
+                "market_index": 3,
+                "status": "pending",
+                "initial_base_amount": "0",
+                "remaining_base_amount": "0",
+                "price": "89.1",
+                "trigger_price": "90",
+                "type": "stop-loss",
+                "is_ask": True,
+                "reduce_only": True,
+            }
+        )
+        assert parsed is not None
+        self.assertEqual(parsed.trigger_price, "90")
+        self.assertEqual(parsed.order_type, "stop-loss")
+        self.assertEqual(parsed.remaining, "0")
+        self.assertTrue(parsed.reduce_only)
+
 
 class DeskAccountTradeTests(TestCase):
     def test_rest_pnl_field(self) -> None:
@@ -360,3 +383,35 @@ class DeskAccountPositionsTests(TestCase):
         by_mi = self._desk_positions()
         self.assertEqual(set(by_mi), {1})
         self.assertEqual(by_mi[1]["size"], "0.5")
+
+
+class DeskPositionFundingTests(TestCase):
+    def test_coerces_numeric_fields_and_side(self) -> None:
+        page = parse_position_fundings_page(
+            {
+                "code": 200,
+                "position_fundings": [
+                    {
+                        "timestamp": "1789900000",
+                        "market_id": 0,
+                        "funding_id": 9,
+                        "change": -1.25,
+                        "rate": "0.0001",
+                        "position_size": "0.3",
+                        "position_side": "SHORT",
+                    }
+                ],
+                "next_cursor": 12,
+            }
+        )
+        self.assertEqual(page["next_cursor"], "12")
+        self.assertEqual(len(page["fundings"]), 1)
+        self.assertEqual(page["fundings"][0]["side"], "short")
+        self.assertEqual(page["fundings"][0]["change"], "-1.25")
+        self.assertEqual(page["fundings"][0]["timestamp"], 1789900000)
+
+    def test_empty_payload(self) -> None:
+        self.assertEqual(
+            parse_position_fundings_page(None),
+            {"fundings": [], "next_cursor": None},
+        )

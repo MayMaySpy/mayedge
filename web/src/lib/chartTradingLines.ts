@@ -37,13 +37,11 @@ export interface OverlayAction {
   action: OverlayActionName;
 }
 
-const FONT = '11px "IBM Plex Mono", ui-monospace, monospace';
+const FONT = `${theme.chartFontSize}px ${theme.fontMono}`;
 const PILL_H = 20;
 const PAD_X = 7;
 const BTN = 18;
 const LEFT = 8;
-/** Position pills sit near mid-pane so they don't stack on order/algo labels. */
-const POSITION_X_FRAC = 0.48;
 const PILL_BG = "rgba(14, 17, 22, 0.92)";
 const REV_YELLOW = theme.warn;
 const LINE_HIT = 6;
@@ -84,12 +82,14 @@ function measure(text: string, font: string): number {
   return measureCtx.measureText(text).width;
 }
 
-function formatUsd(n: number): string {
+function formatSignedPnl(n: number): string {
   const body = Math.abs(n).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return n < 0 ? `-$${body}` : `$${body}`;
+  if (n > 0) return `+$${body}`;
+  if (n < 0) return `-$${body}`;
+  return `$${body}`;
 }
 
 function roundRect(
@@ -106,19 +106,26 @@ function roundRect(
 }
 
 function drawReverseIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
-  ctx.fillStyle = REV_YELLOW;
+  ctx.strokeStyle = REV_YELLOW;
+  ctx.lineWidth = 1.35;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const xUp = cx - 3.1;
+  const xDn = cx + 3.1;
   ctx.beginPath();
-  ctx.moveTo(cx - 3, cy - 6);
-  ctx.lineTo(cx, cy - 1);
-  ctx.lineTo(cx - 6, cy - 1);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(xUp, cy + 5);
+  ctx.lineTo(xUp, cy - 5);
+  ctx.moveTo(xUp - 2.6, cy - 2.2);
+  ctx.lineTo(xUp, cy - 5);
+  ctx.lineTo(xUp + 2.6, cy - 2.2);
+  ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(cx + 3, cy + 6);
-  ctx.lineTo(cx + 6, cy + 1);
-  ctx.lineTo(cx, cy + 1);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(xDn, cy - 5);
+  ctx.lineTo(xDn, cy + 5);
+  ctx.moveTo(xDn - 2.6, cy + 2.2);
+  ctx.lineTo(xDn, cy + 5);
+  ctx.lineTo(xDn + 2.6, cy + 2.2);
+  ctx.stroke();
 }
 
 function drawCloseIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
@@ -212,12 +219,10 @@ class PaneRenderer implements IPrimitivePaneRenderer {
         if (utils) {
           utils.setLineStyle(
             ctx,
-            g.line.kind === "band" ? LineStyle.Dotted : LineStyle.LargeDashed
+            g.line.kind === "band" ? LineStyle.Dotted : LineStyle.Dashed
           );
         } else {
-          ctx.setLineDash(
-            g.line.kind === "band" ? [2 * hr, 4 * hr] : [6 * hr, 6 * hr]
-          );
+          ctx.setLineDash(g.line.kind === "band" ? [2 * hr, 4 * hr] : [4 * hr, 4 * hr]);
         }
         ctx.beginPath();
         ctx.moveTo(0, y + (ctx.lineWidth % 2 ? 0.5 : 0));
@@ -331,23 +336,19 @@ function pillWidth(line: ChartOverlay, pnlText: string | null, showActions: bool
 }
 
 function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
+  const pos = line.kind === "position";
   const pillY = y - PILL_H / 2;
   const interactive = Boolean(line.interactive);
-  const showActions = line.kind === "position" && interactive;
+  const showActions = pos && interactive;
   const showCancel = (line.kind === "order" || line.kind === "algo") && interactive;
   const pnlText =
-    line.kind === "position" && line.pnl != null && Number.isFinite(line.pnl)
-      ? formatUsd(line.pnl)
-      : null;
+    pos && line.pnl != null && Number.isFinite(line.pnl) ? formatSignedPnl(line.pnl) : null;
   const pnlColor =
     (line.pnl ?? 0) > 0 ? theme.bid : (line.pnl ?? 0) < 0 ? theme.ask : theme.muted;
 
   const width = pillWidth(line, pnlText, showActions, showCancel);
-  // Orders/algos stay left; position sits near mid-pane to avoid overlap.
   const pillX =
-    line.kind === "position" && paneW > 0
-      ? Math.max(LEFT, Math.round(paneW * POSITION_X_FRAC - width / 2))
-      : LEFT;
+    pos && paneW > 0 ? Math.max(LEFT, Math.round((paneW - width) / 2)) : LEFT;
 
   const hits: HitBox[] = [];
   if (line.kind !== "band") {

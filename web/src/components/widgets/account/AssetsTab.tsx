@@ -105,7 +105,7 @@ export function AssetsTab({
           </EmptyHeader>
         </Empty>
       ) : (
-        <Table className="font-mono text-[12px]">
+        <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="pl-2.5">Asset</TableHead>
@@ -144,7 +144,7 @@ export function AssetsTab({
                   <TableCell className="pl-2.5">
                     <div className="flex min-w-0 items-center gap-2">
                       <TokenMark symbol={a.symbol} className="size-4" />
-                      <span className="font-sans text-[13px] text-text">{a.symbol}</span>
+                      <span className="font-sans text-lg text-text">{a.symbol}</span>
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatSize(a.balance)}</TableCell>

@@ -10,7 +10,7 @@ from mayedge.lighter.models import OrderBookLevel, OrderBookSnapshot
 
 logger = logging.getLogger(__name__)
 
-BOOK_DEPTH = 40
+BOOK_DEPTH = 250
 BOOK_BROADCAST_MS = 0.08
 BOOK_RESYNC_S = 30.0
 

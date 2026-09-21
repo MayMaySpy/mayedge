@@ -199,7 +199,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                     <TableCell className="text-right text-muted-foreground">
                       {formatSize(l.size)}
                       {l.fill_count != null && l.fill_count > 1 ? (
-                        <span className="ml-1 text-[10px]">×{l.fill_count}</span>
+                        <span className="ml-1 text-xs">×{l.fill_count}</span>
                       ) : null}
                     </TableCell>
                     <TableCell className="text-right">{formatPrice(l.price)}</TableCell>

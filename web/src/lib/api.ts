@@ -114,6 +114,7 @@ export interface OpenOrder {
   remaining: string;
   order_type: string;
   reduce_only: boolean;
+  trigger_price?: string;
 }
 
 export interface Account {
@@ -341,6 +342,8 @@ export const api = {
     request("/orders/limit", { method: "POST", body: JSON.stringify(body) }),
   placeTwapOrder: (body: Record<string, unknown>) =>
     request("/orders/twap", { method: "POST", body: JSON.stringify(body) }),
+  placeStopTake: (body: Record<string, unknown>) =>
+    request("/orders/sl-tp", { method: "POST", body: JSON.stringify(body) }),
   cancelOrder: (market_index: number, order_index: string | number) =>
     request("/orders/cancel", {
       method: "POST",

@@ -241,13 +241,13 @@ function OhlcReadout({
   showVolume?: boolean;
 }) {
   if (!bar) {
-    return <span className="font-mono text-[11px] text-muted-foreground">—</span>;
+    return <span className="font-mono text-sm text-muted-foreground">—</span>;
   }
   const up = bar.close >= bar.open;
   const tone = up ? "text-bid" : "text-ask";
   const chg = bar.open !== 0 ? ((bar.close - bar.open) / bar.open) * 100 : null;
   return (
-    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden font-mono text-[11px] tabular-nums">
+    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden font-mono text-sm tabular-nums">
       <OhlcField k="O" v={bar.open} decimals={decimals} className={tone} />
       <OhlcField k="H" v={bar.high} decimals={decimals} className={tone} />
       <OhlcField k="L" v={bar.low} decimals={decimals} className={tone} />
@@ -284,17 +284,17 @@ function OhlcField({
 
 function LiqsReadout({ hours }: { hours: LiquidationSummaryHours }) {
   return (
-    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{hours}h liqs</span>
+    <span className="font-mono text-sm text-muted-foreground tabular-nums">{hours}h liqs</span>
   );
 }
 
 function NumeraireReadout({ change }: { change: number | null }) {
   if (change == null) {
-    return <span className="font-mono text-[11px] text-muted-foreground">BTC 24h —</span>;
+    return <span className="font-mono text-sm text-muted-foreground">BTC 24h —</span>;
   }
   const tone = change > 0 ? "text-bid" : change < 0 ? "text-ask" : "text-muted-foreground";
   return (
-    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden font-mono text-[11px] tabular-nums">
+    <span className="flex min-w-0 items-baseline gap-2 overflow-hidden font-mono text-sm tabular-nums">
       <span className="text-muted-foreground">vs BTC</span>
       <span className={cn("shrink-0", tone)}>{formatPct(change)}</span>
     </span>
@@ -465,8 +465,8 @@ export const ChartWidget = memo(function ChartWidget({
       layout: {
         background: { color: theme.panel },
         textColor: theme.muted,
-        fontFamily: "IBM Plex Mono, monospace",
-        fontSize: 11,
+        fontFamily: theme.fontMono,
+        fontSize: theme.chartFontSize,
       },
       grid: {
         vertLines: { color: theme.rule },
@@ -909,21 +909,21 @@ export const ChartWidget = memo(function ChartWidget({
             <ToggleGroupItem
               value="price"
               title="Price chart"
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               Chart
             </ToggleGroupItem>
             <ToggleGroupItem
               value="scan"
               title="Scan: Rel vs BTC and liquidations"
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               Scan
             </ToggleGroupItem>
             <ToggleGroupItem
               value="watch"
               title={popped ? "Watch is in its own window" : "Watch: live percent paths"}
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               Watch
             </ToggleGroupItem>
@@ -945,14 +945,14 @@ export const ChartWidget = memo(function ChartWidget({
               <ToggleGroupItem
                 value="rel"
                 title="Relative strength vs BTC"
-                className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
               >
                 Rel
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="liqs"
                 title="Liquidations in window"
-                className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
               >
                 Liqs
               </ToggleGroupItem>
@@ -976,7 +976,7 @@ export const ChartWidget = memo(function ChartWidget({
                   key={w}
                   value={w}
                   title="Path window"
-                  className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                  className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
                 >
                   {w}
                 </ToggleGroupItem>
@@ -1001,7 +1001,7 @@ export const ChartWidget = memo(function ChartWidget({
                 size="sm"
                 pressed={volOn}
                 title={volOn ? "Hide volume" : "Show volume"}
-                className="h-6 px-1.5 font-mono text-[11px]"
+                className="h-6 px-1.5 font-mono text-sm"
                 onPressedChange={() => toggleVol()}
               >
                 Vol
@@ -1011,7 +1011,7 @@ export const ChartWidget = memo(function ChartWidget({
                 size="sm"
                 pressed={bboOn}
                 title="Top of book"
-                className="h-6 px-1.5 font-mono text-[11px]"
+                className="h-6 px-1.5 font-mono text-sm"
                 onPressedChange={() => toggleBbo()}
               >
                 B/A
@@ -1021,7 +1021,7 @@ export const ChartWidget = memo(function ChartWidget({
                 size="sm"
                 pressed={axisArmed}
                 title="Rest a Ticket on the price axis at Quick size. Below live price buys, above sells."
-                className="h-6 px-1.5 font-mono text-[11px]"
+                className="h-6 px-1.5 font-mono text-sm"
                 onPressedChange={(next) => setAxisArmed(next)}
               >
                 Axis
@@ -1041,7 +1041,7 @@ export const ChartWidget = memo(function ChartWidget({
                   <ToggleGroupItem
                     key={t}
                     value={t}
-                    className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+                    className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
                   >
                     {t}
                   </ToggleGroupItem>

@@ -33,6 +33,21 @@ class TwapOrderRequest(BaseModel):
     reduce_only: bool = False
 
 
+class ConditionalLeg(BaseModel):
+    kind: Literal["market", "limit"]
+    trigger: str
+    price: str | None = None
+
+
+class StopTakeRequest(BaseModel):
+    market_index: int
+    side: TradeSide
+    size: str
+    sl: ConditionalLeg | None = None
+    tp: ConditionalLeg | None = None
+    slippage: float = Field(default=0.01, gt=0, le=0.05)
+
+
 class CancelOrderRequest(BaseModel):
     market_index: int
     order_index: int | str

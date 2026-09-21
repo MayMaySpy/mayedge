@@ -44,7 +44,7 @@ export function PanelHeader({
       )}
     >
       {typeof title === "string" ? (
-        <span className="text-xs font-medium text-foreground">{title}</span>
+        <span className="text-base font-medium text-foreground">{title}</span>
       ) : (
         title
       )}

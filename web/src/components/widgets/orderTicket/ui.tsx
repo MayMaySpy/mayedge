@@ -62,7 +62,7 @@ export function TicketField({
         </FieldLabel>
         <InputGroup>
           <InputGroupAddon align="inline-start">
-            <InputGroupText className="text-xs font-normal">{label}</InputGroupText>
+            <InputGroupText className="font-normal">{label}</InputGroupText>
           </InputGroupAddon>
           <InputGroupInput
             id={id}

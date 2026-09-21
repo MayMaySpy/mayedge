@@ -25,7 +25,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader title="Trades" onClose={onClose} />
-      <div className="grid h-6 shrink-0 grid-cols-[1fr_1fr_auto_3.25rem] px-2 font-mono text-[11px] leading-6 text-muted-foreground">
+      <div className="grid h-6 shrink-0 grid-cols-[1fr_1fr_auto_3.25rem] px-2 font-mono text-sm leading-6 text-muted-foreground">
         <span>Price</span>
         <span>Size</span>
         <span className="text-right">Time</span>
@@ -45,7 +45,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
             return (
               <div
                 key={`${t.tx_hash || t.timestamp}-${t.price}-${t.size}-${i}`}
-                className="grid grid-cols-[1fr_1fr_auto_3.25rem] items-baseline px-2 py-0.5 font-mono text-[12px]"
+                className="grid grid-cols-[1fr_1fr_auto_3.25rem] items-baseline px-2 py-0.5 font-mono text-base"
               >
                 <span className={t.side === "buy" ? "text-bid" : "text-ask"}>
                   {formatPrice(t.price)}
@@ -58,7 +58,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Open Log"
-                    className="text-right font-sans text-[11px] text-muted-foreground hover:text-text"
+                    className="text-right font-sans text-sm text-muted-foreground hover:text-text"
                   >
                     explore
                   </a>

@@ -176,10 +176,10 @@ export const AlertsPanel = memo(function AlertsPanel({
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-panel">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="h-7 text-[10px]">Time</TableHead>
-                <TableHead className="h-7 text-[10px]">Pair</TableHead>
-                <TableHead className="h-7 text-[10px]">Kind</TableHead>
-                <TableHead className="h-7 text-right text-[10px]">Mag</TableHead>
+                <TableHead className="h-7">Time</TableHead>
+                <TableHead className="h-7">Pair</TableHead>
+                <TableHead className="h-7">Kind</TableHead>
+                <TableHead className="h-7 text-right">Mag</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -187,13 +187,13 @@ export const AlertsPanel = memo(function AlertsPanel({
                 <TableRow
                   key={ev.id}
                   className={cn(
-                    "cursor-pointer text-xs",
+                    "cursor-pointer text-base",
                     onOpenPair && "hover:bg-accent/40"
                   )}
                   onClick={() => onOpenPair?.(ev.symbol)}
                   title={ev.note}
                 >
-                  <TableCell className="py-1 font-mono text-[10px] text-muted-foreground">
+                  <TableCell className="py-1 font-mono text-xs text-muted-foreground">
                     {formatTime(ev.ts)}
                   </TableCell>
                   <TableCell className="py-1 font-semibold">{pairLabel(ev.symbol)}</TableCell>

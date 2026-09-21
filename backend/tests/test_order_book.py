@@ -37,6 +37,11 @@ class TestOrderBookMerge(unittest.TestCase):
         bids = OrderBookFeed.merge_side(existing, [L("11", "1")], bids=True, depth=3)
         self.assertEqual([b.price for b in bids], ["11", "10", "9"])
 
+    def test_default_depth_keeps_far_levels(self) -> None:
+        levels = [L(str(1000 - i), "1") for i in range(180)]
+        bids = OrderBookFeed.sorted_side(levels, bids=True)
+        self.assertEqual(len(bids), 180)
+
     def test_delta_payload_seq_chains(self) -> None:
         feed = OrderBookFeed(lambda _msg: None)
         payload = feed.delta_payload(1, {"100": "1"}, {"101": "2"}, 123)

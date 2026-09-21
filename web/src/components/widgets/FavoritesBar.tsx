@@ -154,7 +154,7 @@ export const FavoritesBar = memo(function FavoritesBar({
             >
               <div
                 className={cn(
-              "flex items-center gap-1 overflow-visible rounded-lg px-1.5 py-0.5 text-sm transition-colors hover:bg-accent",
+              "flex items-center gap-1 overflow-visible rounded-lg px-1.5 py-0.5 text-lg transition-colors hover:bg-accent",
                   on && "bg-elevated"
                 )}
               >
@@ -164,9 +164,9 @@ export const FavoritesBar = memo(function FavoritesBar({
                   className="flex cursor-pointer items-center gap-1"
                 >
                   <TokenMark symbol={m.symbol} className="size-4" />
-                  <span className="text-text">{m.symbol}</span>
-                  <span className="tabular-nums text-muted-foreground">{favPriceLabel(m)}</span>
-                  <span className={cn("tabular-nums", toneClass[tone])}>{formatPct(change)}</span>
+                  <span className="font-sans text-text">{m.symbol}</span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{favPriceLabel(m)}</span>
+                  <span className={cn("font-mono tabular-nums", toneClass[tone])}>{formatPct(change)}</span>
                 </button>
                 <button
                   type="button"

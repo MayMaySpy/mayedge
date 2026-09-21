@@ -77,7 +77,7 @@ export function WatchPopout() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-8 shrink-0 items-center border-b border-border px-2">
-        <span className="font-mono text-[11px] font-medium">Watch</span>
+        <span className="text-base font-medium">Watch</span>
         <div className="flex-1" />
         <ToggleGroup
           type="single"
@@ -95,7 +95,7 @@ export function WatchPopout() {
               key={w}
               value={w}
               title="Path window"
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               {w}
             </ToggleGroupItem>

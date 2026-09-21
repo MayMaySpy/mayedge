@@ -159,7 +159,7 @@ function ChartPanel({
           kind: "position",
           price: entry,
           color: long ? theme.bid : theme.ask,
-          label: `${long ? "LONG" : "SHORT"} ${formatSize(Math.abs(size))} ${symbol}`,
+          label: `${long ? "LONG" : "SHORT"} ${formatSize(Math.abs(size))} ${pos.symbol}`,
           pnl: livePnl,
           marketIndex: pos.market_index,
           size: Math.abs(size),
@@ -545,7 +545,7 @@ export function Dashboard() {
         <div className="flex shrink-0 items-center gap-2 border-b border-rule bg-panel px-3 py-1">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {hiddenPanels.length === 0 ? (
-              <span className="text-[11px] text-muted-foreground">All panels on the desk</span>
+              <span className="text-sm text-muted-foreground">All panels on the desk</span>
             ) : (
               hiddenPanels.map((id) => (
                 <Button
@@ -613,7 +613,7 @@ export function Dashboard() {
             {visible.book !== false && (
               <div key="book" className="h-full">
                 <WidgetShell>
-                  <OrderBookWidget onClose={panelClose("book")} />
+                  <OrderBookWidget market={market} onClose={panelClose("book")} />
                 </WidgetShell>
               </div>
             )}

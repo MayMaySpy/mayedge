@@ -84,6 +84,14 @@ _Avoid_: parent (unqualified), manual order, limit (for the working order itself
 The single size the floating Buy/Sell buttons and an armed price-axis rest both use.
 _Avoid_: preset, clip size, ticket size (that's the Order panel)
 
+**Stop**:
+A reduce-only Ticket that closes all or part of a Position when mark hits the trigger. Market or Limit. Not a Clip.
+_Avoid_: SL (in prose), stoploss, protective stop
+
+**Take Profit**:
+A reduce-only Ticket that closes all or part of a Position when mark hits the trigger on the profitable side. Market or Limit. Not a Clip. Not Grid’s reduce-only Clips.
+_Avoid_: TP (in prose), target (unqualified)
+
 **Clip**:
 A child working order owned by an algo job. Identified by client_order_index. Not a Ticket.
 _Avoid_: child (unqualified), slice (that's TWAP), rung (that's Ladder)

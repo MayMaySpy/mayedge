@@ -13,7 +13,7 @@ import type { TopOfBook } from "@/lib/liveData";
 import { theme } from "@/lib/theme";
 import { formatSize } from "@/lib/utils";
 
-const FONT = '11px "IBM Plex Mono", ui-monospace, monospace';
+const FONT = `${theme.chartFontSize}px ${theme.fontMono}`;
 const LINE_ALPHA = 0.7;
 const MIN_LABEL_GAP = 12;
 const SIZE_H = 16;

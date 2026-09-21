@@ -39,9 +39,9 @@ export function FillNotice({
       <span className={cn("w-0.5 shrink-0 self-stretch rounded-full", rail[tone])} />
       {symbol ? <TokenMark symbol={symbol} className="mt-0.5 size-4" /> : null}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="text-xs font-medium text-text">{title}</p>
+        <p className="text-base font-medium text-text">{title}</p>
         {description ? (
-          <p className="font-mono text-[11px] leading-snug wrap-break-word text-muted-foreground">{description}</p>
+          <p className="font-mono text-sm leading-snug wrap-break-word text-muted-foreground">{description}</p>
         ) : null}
       </div>
     </div>

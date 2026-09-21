@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   nextPosSort,
+  pnlAtTrigger,
+  pnlFromRoe,
   positionNotional,
   positionsForClose,
+  protectCloseSize,
+  protectOrderLabel,
+  protectTriggersFromOrders,
+  protectTriggersLabel,
+  roeFromPnl,
   sortPositionRows,
+  stopTakeKind,
+  triggerFromPnl,
+  triggerOnCorrectSide,
+  workingProtectOrders,
   type SortablePosition,
 } from "@/lib/positionsTable";
 
@@ -86,6 +97,102 @@ describe("positionsForClose", () => {
     expect(positionsForClose(flats, "winners")).toEqual([]);
     expect(positionsForClose(flats, "losers")).toEqual([]);
     expect(positionsForClose([], "all")).toEqual([]);
+  });
+});
+
+describe("protectCloseSize", () => {
+  it("uses 0 for full so the venue can track the position", () => {
+    expect(protectCloseSize(2.5, "full", 9)).toBe(0);
+  });
+
+  it("caps a partial at the live size", () => {
+    expect(protectCloseSize(2, "partial", 0.5)).toBe(0.5);
+    expect(protectCloseSize(2, "partial", 4)).toBe(2);
+    expect(protectCloseSize(2, "partial", 0)).toBe(0);
+  });
+});
+
+describe("triggerOnCorrectSide", () => {
+  it("wants a long stop below mark and take-profit above", () => {
+    expect(triggerOnCorrectSide("sl", true, 95, 100)).toBe(true);
+    expect(triggerOnCorrectSide("sl", true, 105, 100)).toBe(false);
+    expect(triggerOnCorrectSide("tp", true, 105, 100)).toBe(true);
+    expect(triggerOnCorrectSide("tp", true, 95, 100)).toBe(false);
+  });
+
+  it("inverts for a short close", () => {
+    expect(triggerOnCorrectSide("sl", false, 105, 100)).toBe(true);
+    expect(triggerOnCorrectSide("tp", false, 95, 100)).toBe(true);
+    expect(triggerOnCorrectSide("sl", false, 95, 100)).toBe(false);
+  });
+});
+
+describe("stopTakeKind", () => {
+  it("maps venue type strings", () => {
+    expect(stopTakeKind("stop-loss")).toBe("sl");
+    expect(stopTakeKind("STOP_LOSS_LIMIT")).toBe("sl");
+    expect(stopTakeKind("take-profit")).toBe("tp");
+    expect(stopTakeKind("4")).toBe("tp");
+    expect(stopTakeKind("limit")).toBeNull();
+  });
+});
+
+describe("workingProtectOrders", () => {
+  const orders = [
+    { market_index: 1, order_type: "stop-loss", trigger_price: "90" },
+    { market_index: 1, order_type: "limit", trigger_price: "" },
+    { market_index: 2, order_type: "take-profit", trigger_price: "120" },
+  ];
+
+  it("keeps SL/TP on the selected market", () => {
+    expect(workingProtectOrders(orders, 1).map((o) => o.order_type)).toEqual(["stop-loss"]);
+  });
+});
+
+describe("protectOrderLabel", () => {
+  it("prefixes SL/TP with the trigger", () => {
+    expect(protectOrderLabel("stop-loss", "90")).toBe("SL 90");
+    expect(protectOrderLabel("take-profit", "")).toBe("TP");
+  });
+});
+
+describe("protectTriggersLabel", () => {
+  it("shows Lighter-style blanks", () => {
+    expect(protectTriggersLabel()).toBe("__ / __");
+    expect(protectTriggersLabel("4.9", undefined)).toBe("4.9 / __");
+    expect(protectTriggersLabel("4.9", "4.5")).toBe("4.9 / 4.5");
+  });
+});
+
+describe("protectTriggersFromOrders", () => {
+  it("picks the last TP and SL triggers", () => {
+    expect(
+      protectTriggersFromOrders([
+        { order_type: "take-profit", trigger_price: "110" },
+        { order_type: "stop-loss", trigger_price: "90" },
+        { order_type: "limit", trigger_price: "1" },
+      ])
+    ).toEqual({ tp: "110", sl: "90" });
+  });
+});
+
+describe("pnlAtTrigger / triggerFromPnl", () => {
+  it("is (trigger - entry) * signed size", () => {
+    expect(pnlAtTrigger(100, 2, 110)).toBe(20);
+    expect(pnlAtTrigger(100, -2, 90)).toBe(20);
+    expect(pnlAtTrigger(100, 2, 90)).toBe(-20);
+    expect(triggerFromPnl(100, 2, 20)).toBe(110);
+    expect(triggerFromPnl(100, -2, 20)).toBe(90);
+    expect(triggerFromPnl(100, 2, -20)).toBe(90);
+  });
+});
+
+describe("roeFromPnl / pnlFromRoe", () => {
+  it("prefers allocated margin, else notional", () => {
+    expect(roeFromPnl(20, 50, 200)).toBe(40);
+    expect(roeFromPnl(20, 0, 200)).toBe(10);
+    expect(pnlFromRoe(40, 50, 200)).toBe(20);
+    expect(pnlFromRoe(10, 0, 200)).toBe(20);
   });
 });
 

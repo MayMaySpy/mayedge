@@ -98,7 +98,7 @@ function WatchChipButton({
   return (
     <div
       className={cn(
-        "flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 font-mono text-[11px]",
+        "flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 font-mono text-sm",
         selected ? "border-foreground/40 bg-elevated/20" : "border-border"
       )}
     >
@@ -154,7 +154,7 @@ const WatchAddPicker = memo(function WatchAddPicker({
           type="button"
           variant="outline"
           size="sm"
-          className="h-6 shrink-0 px-1.5 font-mono text-[11px]"
+          className="h-6 shrink-0 px-1.5 font-mono text-sm"
           title="Add Markets to Watch"
         >
           <Plus className="size-3" />
@@ -166,11 +166,11 @@ const WatchAddPicker = memo(function WatchAddPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search markets"
-          className="h-7 text-[12px]"
+          className="h-7 text-base"
         />
         <button
           type="button"
-          className="flex items-center justify-between px-1 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+          className="flex items-center justify-between px-1 font-mono text-xs text-muted-foreground hover:text-foreground"
           title="Sort by volume"
           onClick={() => setDir((d) => (d === "desc" ? "asc" : "desc"))}
         >
@@ -179,7 +179,7 @@ const WatchAddPicker = memo(function WatchAddPicker({
         </button>
         <div className="max-h-56 overflow-auto">
           {rows.length === 0 ? (
-            <p className="px-1 py-4 text-center text-[12px] text-muted-foreground">
+            <p className="px-1 py-4 text-center text-base text-muted-foreground">
               No markets match
             </p>
           ) : (
@@ -187,7 +187,7 @@ const WatchAddPicker = memo(function WatchAddPicker({
               <button
                 key={m.market_index}
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left font-mono text-[12px] hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left font-mono text-base hover:bg-accent"
                 onClick={() => {
                   onAdd(m.symbol);
                   setQuery("");
@@ -196,7 +196,7 @@ const WatchAddPicker = memo(function WatchAddPicker({
               >
                 <TokenMark symbol={m.symbol} className="size-4" />
                 <span className="min-w-0 flex-1 truncate">{m.symbol}</span>
-                <span className="text-[11px] text-muted-foreground tabular-nums">
+                <span className="text-sm text-muted-foreground tabular-nums">
                   {formatUsdCompact(m.volume_24h) || "—"}
                 </span>
               </button>
@@ -227,7 +227,7 @@ function WatchSetMenu({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 max-w-40 shrink-0 gap-1 px-1.5 font-mono text-[11px] font-medium text-foreground"
+          className="h-6 max-w-40 shrink-0 gap-1 px-1.5 font-mono text-sm font-medium text-foreground"
           title="Watch Set"
         >
           <span className="truncate">{current?.name ?? "Set"}</span>
@@ -325,8 +325,8 @@ const WatchPane = memo(function WatchPane({
       layout: {
         background: { color: theme.panel },
         textColor: theme.muted,
-        fontFamily: "IBM Plex Mono, monospace",
-        fontSize: 11,
+        fontFamily: theme.fontMono,
+        fontSize: theme.chartFontSize,
       },
       grid: {
         vertLines: { color: theme.rule },
@@ -450,7 +450,7 @@ const WatchPane = memo(function WatchPane({
             if (e.key === "Enter") commitRename();
             if (e.key === "Escape") setRenaming(false);
           }}
-          className="h-6 w-28 text-[11px]"
+          className="h-6 w-28 text-sm"
         />
       ) : (
         <WatchSetMenu
@@ -490,7 +490,7 @@ const WatchPane = memo(function WatchPane({
               type="button"
               variant="outline"
               size="sm"
-              className="h-6 font-mono text-[11px]"
+              className="h-6 font-mono text-sm"
               disabled={sets.length >= WATCH_SET_MAX}
               onClick={() => {
                 const id = createWatchSet();
@@ -590,7 +590,7 @@ export const WatchBoard = memo(function WatchBoard({
               key={n}
               value={n}
               title={n === "1" ? "One pane" : n === "2" ? "Two panes" : "Four panes"}
-              className="h-5 rounded-sm px-1.5 font-mono text-[10px] data-[state=on]:bg-rule"
+              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
               {n}
             </ToggleGroupItem>
@@ -602,7 +602,7 @@ export const WatchBoard = memo(function WatchBoard({
           size="sm"
           pressed={desk.labels}
           title="Show Markets on the right"
-          className="h-6 px-1.5 font-mono text-[11px]"
+          className="h-6 px-1.5 font-mono text-sm"
           onPressedChange={(on) => setWatchLabels(on)}
         >
           Names

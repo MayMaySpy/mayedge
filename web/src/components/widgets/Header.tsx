@@ -69,18 +69,18 @@ function HeaderStat({
 }) {
   const body = (
     <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-xs uppercase tracking-[0.06em] text-muted-foreground">{label}</span>
       <span
         className={cn(
           "font-mono tabular-nums text-foreground",
-          loud ? "text-base font-medium leading-none" : "text-[13px]",
+          loud ? "text-xl font-medium leading-none" : "text-lg",
           valueClass
         )}
       >
         {value}
       </span>
       {hint ? (
-        <span className={cn("font-mono text-[11px] tabular-nums text-muted-foreground", hintClass)}>
+        <span className={cn("font-mono text-sm tabular-nums text-muted-foreground", hintClass)}>
           {hint}
         </span>
       ) : null}
@@ -246,7 +246,7 @@ export function Header({
 
   return (
     <div className="shrink-0">
-      <header className="grid h-11 grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-border bg-card px-3">
+      <header className="grid h-11 grid-cols-[auto_1fr_auto] items-center gap-4 border-b-[0.5px] border-border bg-background px-3">
         <div className="min-w-0 justify-self-start">
           <MarketPicker markets={markets} symbol={symbol} onSymbolChange={onSymbolChange} />
         </div>
@@ -341,7 +341,7 @@ export function Header({
               Stop all algos and cancel every open order. Optionally flatten every open
               position with market reduce-only orders.
               {openPositions.length > 0 && (
-                <span className="mt-2 block font-mono text-[12px] text-foreground">
+                <span className="mt-2 block font-mono text-base text-foreground">
                   Flatten: {openPositions.length} position
                   {openPositions.length === 1 ? "" : "s"}
                   {flattenNotional > 0

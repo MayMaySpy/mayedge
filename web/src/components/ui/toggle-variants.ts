@@ -5,16 +5,16 @@ export const toggleVariants = cva(
   {
     variants: {
       variant: {
-        default: "rounded-lg text-xs hover:bg-accent hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground",
+        default: "rounded-lg text-base hover:bg-accent hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground",
         outline:
-          "rounded-lg border border-input bg-transparent text-xs text-muted-foreground hover:bg-accent hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground",
+          "rounded-lg border border-input bg-transparent text-base text-muted-foreground hover:bg-accent hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground",
         ghost:
-          "rounded-md bg-transparent text-xs font-normal text-muted-foreground hover:bg-accent hover:text-foreground data-[state=on]:bg-transparent data-[state=on]:font-medium data-[state=on]:text-foreground",
-        seg: "rounded-none bg-transparent font-mono text-[11px] text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent data-[state=on]:font-medium data-[state=on]:text-foreground",
+          "rounded-md bg-transparent text-base font-normal text-muted-foreground hover:bg-accent hover:text-foreground data-[state=on]:bg-transparent data-[state=on]:font-medium data-[state=on]:text-foreground",
+        seg: "rounded-none bg-transparent font-mono text-sm text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent data-[state=on]:font-medium data-[state=on]:text-foreground",
       },
       size: {
         default: "h-8 min-w-8 px-2.5",
-        sm: "h-7 min-w-7 px-2 text-[11px]",
+        sm: "h-7 min-w-7 px-2 text-sm",
         lg: "h-9 min-w-9 px-2.5",
       },
     },

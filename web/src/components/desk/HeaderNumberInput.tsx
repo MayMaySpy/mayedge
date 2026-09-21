@@ -45,7 +45,7 @@ export function HeaderNumberInput({
           onChange(clamp(n, min, max));
         }}
         className={cn(
-          "h-full border-0 bg-transparent px-1.5 font-mono text-[11px] tabular-nums",
+          "h-full border-0 bg-transparent px-1.5 font-mono text-sm tabular-nums",
           "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
           widthClass
         )}

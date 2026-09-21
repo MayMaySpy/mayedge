@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from mayedge import db as store
 from mayedge import desk, feed_health
@@ -21,9 +22,11 @@ from mayedge.api.schemas import (
     LeverageRequest,
     LimitOrderRequest,
     MarketOrderRequest,
+    StopTakeRequest,
     TwapOrderRequest,
 )
 from mayedge.api.spa import mount_spa
+from mayedge.api.token_icon import token_icon_response
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.config import settings
 from mayedge.kill import KillResult, kill
@@ -105,6 +108,20 @@ def create_app() -> FastAPI:
             raise HTTPException(502, "Venue error — try again") from e
         order_service.kick_refresh()
         return result
+
+    async def _account_history(fn):
+        try:
+            return await fn()
+        except VenueBlocked as e:
+            raise HTTPException(e.status, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:
+            mapped = venue_client_error(e)
+            if mapped:
+                raise HTTPException(mapped[0], mapped[1]) from e
+            logger.exception("account history failed")
+            raise HTTPException(502, "Venue error — try again") from e
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -197,14 +214,13 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         if not settings.lighter_account_index:
             raise HTTPException(400, "Account not configured")
-        try:
-            return await order_service.get_account_trades(
+        return await _account_history(
+            lambda: order_service.get_account_trades(
                 market_id=market_index,
                 cursor=cursor,
                 limit=limit,
             )
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+        )
 
     @app.get("/api/account/funding")
     async def get_account_funding(
@@ -214,14 +230,17 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         if not settings.lighter_account_index:
             raise HTTPException(400, "Account not configured")
-        try:
-            return await order_service.get_account_funding(
+        return await _account_history(
+            lambda: order_service.get_account_funding(
                 market_id=market_index,
                 cursor=cursor,
                 limit=limit,
             )
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+        )
+
+    @app.get("/api/token-icon/{slug}")
+    async def token_icon(slug: str) -> Response:
+        return await token_icon_response(slug)
 
     @app.post("/api/orders/market")
     async def place_market_order(req: MarketOrderRequest) -> dict[str, Any]:
@@ -257,6 +276,20 @@ def create_app() -> FastAPI:
                 req.duration_seconds,
                 req.max_slippage,
                 req.reduce_only,
+            ),
+        )
+
+    @app.post("/api/orders/sl-tp")
+    async def place_sl_tp(req: StopTakeRequest) -> dict[str, Any]:
+        _require_trading()
+        return await _trade(
+            lambda: order_service.create_sl_tp(
+                req.market_index,
+                req.side,
+                req.size,
+                sl=req.sl.model_dump() if req.sl else None,
+                tp=req.tp.model_dump() if req.tp else None,
+                slippage=req.slippage,
             ),
         )
 

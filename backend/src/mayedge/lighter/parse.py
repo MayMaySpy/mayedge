@@ -15,6 +15,13 @@ def g(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+def _is_stop_take_type(order_type: str) -> bool:
+    t = order_type.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if t in {"2", "3", "4", "5"}:
+        return True
+    return "stoploss" in t or "takeprofit" in t
+
+
 def parse_position(raw: Any) -> Position | None:
     size = str(g(raw, "position", g(raw, "size", "0")) or "0")
     try:
@@ -76,7 +83,10 @@ def parse_order(raw: Any) -> OpenOrder | None:
             filled = "0"
     if status not in open_status:
         return None
-    if to_float(remaining) <= 0:
+    order_type = str(g(raw, "type", g(raw, "order_type", "limit")) or "limit")
+    trigger_price = str(g(raw, "trigger_price", g(raw, "triggerPrice", "")) or "")
+    pending_parent = to_float(trigger_price) > 0 or _is_stop_take_type(order_type)
+    if to_float(remaining) <= 0 and not pending_parent:
         return None
     mi = int(g(raw, "market_index", g(raw, "market_id", 0)) or 0)
     meta = gateway.get_market_by_index(mi)
@@ -95,8 +105,9 @@ def parse_order(raw: Any) -> OpenOrder | None:
         size=initial,
         remaining=remaining,
         filled=filled,
-        order_type=str(g(raw, "type", g(raw, "order_type", "limit")) or "limit"),
+        order_type=order_type,
         reduce_only=bool(g(raw, "reduce_only", False)),
+        trigger_price=trigger_price,
     )
 
 
@@ -234,21 +245,49 @@ def public_trade(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(str(value)))
+        except (TypeError, ValueError):
+            return default
+
+
 def desk_position_funding(raw: Any) -> dict[str, Any]:
-    mi = int(g(raw, "market_id", g(raw, "market_index", 0)) or 0)
+    mi = _as_int(g(raw, "market_id", g(raw, "market_index", 0)))
     meta = gateway.get_market_by_index(mi)
     symbol = str(g(raw, "symbol", "") or (meta.symbol if meta else str(mi)))
+    side_raw = str(g(raw, "position_side", g(raw, "side", "long")) or "long").lower()
     return {
-        "funding_id": int(g(raw, "funding_id", 0) or 0),
+        "funding_id": _as_int(g(raw, "funding_id", 0)),
         "market_index": mi,
         "symbol": symbol,
-        "side": str(g(raw, "position_side", "long") or "long"),
+        "side": "short" if side_raw.startswith("short") else "long",
         "position_size": str(g(raw, "position_size", "0") or "0"),
         "rate": str(g(raw, "rate", "0") or "0"),
         "change": str(g(raw, "change", "0") or "0"),
         "discount": str(g(raw, "discount", "0") or "0"),
-        "timestamp": int(g(raw, "timestamp", 0) or 0),
+        "timestamp": _as_int(g(raw, "timestamp", 0)),
     }
+
+
+def parse_position_fundings_page(payload: Any) -> dict[str, Any]:
+    """Desk shape for GET /api/v1/positionFunding, skipping the SDK models."""
+    if not isinstance(payload, dict):
+        return {"fundings": [], "next_cursor": None}
+    fundings: list[dict[str, Any]] = []
+    for row in payload.get("position_fundings") or []:
+        try:
+            fundings.append(desk_position_funding(row))
+        except (TypeError, ValueError):
+            continue
+    cursor = payload.get("next_cursor")
+    next_cursor = None if cursor in (None, "") else str(cursor)
+    return {"fundings": fundings, "next_cursor": next_cursor}
 
 
 def position_items(raw: Any) -> list[tuple[int, Any]]:

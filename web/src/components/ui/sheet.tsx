@@ -47,7 +47,7 @@ function SheetContent({
       <DialogPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-3 bg-card text-sm text-card-foreground shadow-lg outline-none data-open:animate-in data-closed:animate-out",
+          "fixed z-50 flex flex-col gap-3 bg-card text-base text-card-foreground shadow-lg outline-none data-open:animate-in data-closed:animate-out",
           side === "right" &&
             "inset-y-0 right-0 h-full w-80 border-l border-border data-open:slide-in-from-right data-closed:slide-out-to-right",
           side === "left" &&
@@ -90,7 +90,7 @@ function SheetTitle({ className, ...props }: React.ComponentProps<typeof DialogP
   return (
     <DialogPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-sm font-medium text-foreground", className)}
+      className={cn("text-lg font-medium text-foreground", className)}
       {...props}
     />
   );
@@ -103,7 +103,7 @@ function SheetDescription({
   return (
     <DialogPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-[12px] text-muted-foreground", className)}
+      className={cn("text-base text-muted-foreground", className)}
       {...props}
     />
   );
