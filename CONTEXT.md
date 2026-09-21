@@ -179,12 +179,24 @@ A forced close of shorts. Stored as `side: buy`.
 _Avoid_: long squeeze, bid print (unqualified)
 
 **Liquidation window**:
-A 1h, 4h, or 24h lookback over persisted liquidation fills.
+A 1h, 4h, 24h, 7-day, or 30-day lookback. Each liquidation in that span is still a fill.
 _Avoid_: ring, tape, cluster (the 2-minute alert window)
+
+**Liquidation day**:
+A Market's long USD, short USD, total, and largest liquidation for one UTC day older than 30 days. Kept for the life of the desk. Fills of one taker order stay on the day that liquidation started.
+_Avoid_: candle, bucket, archive
 
 **Window total**:
 USD of Long and Short liquidations in a Liquidation window, summed across Markets.
 _Avoid_: book total, all pairs, aggregate liqs
+
+**Window share**:
+A Market's liquidations in the window as a fraction of Window total.
+_Avoid_: Liquidation intensity, vs OI
+
+**Largest liquidation**:
+The single biggest liquidation on a Market inside a Liquidation window, in USD. Fills from one taker order are one liquidation.
+_Avoid_: largest fill, max print
 
 **Liquidation intensity**:
 A Market's liquidations in the window as a fraction of its open interest. Unknown if open interest is missing or 0.

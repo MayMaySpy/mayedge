@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 from mayedge.config import settings
@@ -99,6 +100,18 @@ CREATE TABLE IF NOT EXISTS liquidations (
     ts INTEGER NOT NULL,
     group_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS liquidation_days (
+    day_index INTEGER NOT NULL,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    long_usd REAL NOT NULL,
+    short_usd REAL NOT NULL,
+    total_usd REAL NOT NULL,
+    fill_count INTEGER NOT NULL,
+    largest_usd REAL NOT NULL,
+    PRIMARY KEY (day_index, market_index)
+);
 """
 
 _LIQ_TABLE = """
@@ -116,10 +129,22 @@ CREATE TABLE liquidations (
 )
 """
 
-_LIQ_MAX_ROWS = 50_000
-_LIQ_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
-_last_liq_prune_at = 0.0
-SCHEMA_VERSION = 4
+_LIQ_DAYS_TABLE = """
+CREATE TABLE IF NOT EXISTS liquidation_days (
+    day_index INTEGER NOT NULL,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    long_usd REAL NOT NULL,
+    short_usd REAL NOT NULL,
+    total_usd REAL NOT NULL,
+    fill_count INTEGER NOT NULL,
+    largest_usd REAL NOT NULL,
+    PRIMARY KEY (day_index, market_index)
+)
+"""
+
+_last_liq_fold_at = time.time()
+SCHEMA_VERSION = 5
 
 
 def _meta_int(
@@ -204,6 +229,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
               ELSE side END
             """
         )
+    if version < 5:
+        conn.execute(_LIQ_DAYS_TABLE)
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 
@@ -288,6 +315,8 @@ from mayedge.persist_algo import (  # noqa: E402
     upsert_run,
 )
 from mayedge.persist_liq import (  # noqa: E402
+    fold_liquidations,
+    fold_liquidations_if_due,
     insert_liquidations,
     list_liquidations,
     summarize_liquidations,
@@ -295,6 +324,8 @@ from mayedge.persist_liq import (  # noqa: E402
 
 __all__ = [
     "close_db",
+    "fold_liquidations",
+    "fold_liquidations_if_due",
     "init_db",
     "insert_liquidations",
     "list_liquidations",

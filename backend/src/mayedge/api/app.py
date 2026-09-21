@@ -155,6 +155,7 @@ def create_app() -> FastAPI:
             since = liquidation_summary_since_ms(hours)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+        store.fold_liquidations_if_due()
         return {
             "hours": hours,
             "since": since,

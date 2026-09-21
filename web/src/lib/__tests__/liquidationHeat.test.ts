@@ -36,6 +36,8 @@ describe("rankLiquidationHeat", () => {
         shortUsd: 1000,
         totalUsd: 7000,
         fillCount: 3,
+        largestUsd: 0,
+        windowShare: 1,
         netUsd: -5000,
         openInterest: null,
         shareOfOi: null,
@@ -101,6 +103,7 @@ describe("foldLiquidationWindow", () => {
       totalUsd: 10000,
       longUsd: 8000,
       shortUsd: 2000,
+      largestUsd: 0,
       marketCount: 2,
       top: { symbol: "ETH", totalUsd: 8000, share: 0.8 },
     });
@@ -111,6 +114,7 @@ describe("foldLiquidationWindow", () => {
       totalUsd: 0,
       longUsd: 0,
       shortUsd: 0,
+      largestUsd: 0,
       marketCount: 0,
       top: null,
     });
@@ -167,5 +171,57 @@ describe("Liquidation intensity", () => {
     );
     expect(rows.map((x) => x.symbol)).toEqual(["ETH", "SOL"]);
     expect(rows.find((x) => x.symbol === "SOL")?.shareOfOi).toBeNull();
+  });
+});
+
+describe("Largest liquidation and Window share", () => {
+  it("keeps the largest print and each Market's fraction of Window total", () => {
+    const rows = rankLiquidationHeat([
+      r({
+        symbol: "ETH",
+        market_index: 1,
+        long_usd: 8000,
+        total_usd: 8000,
+        fill_count: 3,
+        largest_usd: 5000,
+      }),
+      r({
+        symbol: "BTC",
+        market_index: 2,
+        short_usd: 2000,
+        total_usd: 2000,
+        fill_count: 1,
+        largest_usd: 2000,
+      }),
+    ]);
+    expect(rows.find((x) => x.symbol === "ETH")?.largestUsd).toBe(5000);
+    expect(rows.find((x) => x.symbol === "ETH")?.windowShare).toBe(0.8);
+    expect(rows.find((x) => x.symbol === "BTC")?.windowShare).toBe(0.2);
+    expect(foldLiquidationWindow(rows).largestUsd).toBe(5000);
+  });
+
+  it("sorts so the biggest single liquidation leads when descending", () => {
+    const rows = rankLiquidationHeat(
+      [
+        r({
+          symbol: "ETH",
+          market_index: 1,
+          long_usd: 8000,
+          total_usd: 8000,
+          fill_count: 4,
+          largest_usd: 1000,
+        }),
+        r({
+          symbol: "BTC",
+          market_index: 2,
+          short_usd: 2000,
+          total_usd: 2000,
+          fill_count: 1,
+          largest_usd: 2000,
+        }),
+      ],
+      { sort: "largest", dir: "desc" }
+    );
+    expect(rows.map((x) => x.symbol)).toEqual(["BTC", "ETH"]);
   });
 });

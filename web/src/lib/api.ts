@@ -264,7 +264,7 @@ export interface LiquidationEvent {
   timestamp: number;
 }
 
-export type LiquidationSummaryHours = 1 | 4 | 24;
+export type LiquidationSummaryHours = 1 | 4 | 24 | 168 | 720;
 
 export interface LiquidationSummaryRow {
   symbol: string;
@@ -273,6 +273,7 @@ export interface LiquidationSummaryRow {
   short_usd: number;
   total_usd: number;
   fill_count: number;
+  largest_usd: number;
 }
 
 export interface LiquidationSummary {

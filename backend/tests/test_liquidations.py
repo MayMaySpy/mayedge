@@ -201,6 +201,8 @@ class LiquidationSummaryTests(unittest.TestCase):
         self.assertEqual(by_sym["BTC"]["long_usd"], 0.0)
         self.assertEqual(by_sym["BTC"]["short_usd"], 5000.0)
         self.assertEqual(by_sym["BTC"]["total_usd"], 5000.0)
+        self.assertEqual(by_sym["ETH"]["largest_usd"], 4000.0)
+        self.assertEqual(by_sym["BTC"]["largest_usd"], 5000.0)
 
     def test_excludes_fills_before_the_window(self) -> None:
         now = 1_700_000_000_000
@@ -214,12 +216,31 @@ class LiquidationSummaryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["total_usd"], 1000.0)
         self.assertEqual(rows[0]["fill_count"], 1)
+        self.assertEqual(rows[0]["largest_usd"], 1000.0)
+
+    def test_largest_sums_fills_of_one_taker_order(self) -> None:
+        now = 1_700_000_000_000
+        gid = "1:liquidation:555"
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, group_id=gid, usd_amount="2000", ts=now),
+                _row(trade_id=2, group_id=gid, usd_amount="4000", ts=now),
+                _row(trade_id=3, usd_amount="1500", ts=now),
+            ]
+        )
+        rows = store.summarize_liquidations(since_ms=now - 60_000)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["total_usd"], 7500.0)
+        self.assertEqual(rows[0]["fill_count"], 3)
+        self.assertEqual(rows[0]["largest_usd"], 6000.0)
 
     def test_summary_window_is_hours_back_from_now(self) -> None:
         from mayedge.persist_liq import liquidation_summary_since_ms
 
         self.assertEqual(liquidation_summary_since_ms(24, now_ms=1_700_000_000_000), 1_699_913_600_000)
         self.assertEqual(liquidation_summary_since_ms(1, now_ms=1_700_000_000_000), 1_699_996_400_000)
+        self.assertEqual(liquidation_summary_since_ms(168, now_ms=1_700_000_000_000), 1_699_395_200_000)
+        self.assertEqual(liquidation_summary_since_ms(720, now_ms=1_700_000_000_000), 1_697_408_000_000)
         with self.assertRaises(ValueError):
             liquidation_summary_since_ms(2, now_ms=1_700_000_000_000)
 
@@ -246,7 +267,7 @@ class LiquidationSummaryTests(unittest.TestCase):
             version = store._meta_int(conn, "schema_version")
         self.assertEqual(sides[1], "sell")
         self.assertEqual(sides[2], "buy")
-        self.assertEqual(version, 4)
+        self.assertEqual(version, 5)
 
         with store._lock:
             conn = store._connect()
@@ -260,4 +281,102 @@ class LiquidationSummaryTests(unittest.TestCase):
             }
         self.assertEqual(sides_again[1], "sell")
         self.assertEqual(sides_again[2], "buy")
+
+
+class LiquidationFoldTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = TemporaryDirectory()
+        path = str(Path(self._td.name) / "mayedge.db")
+        self._patch = patch.object(settings, "db_path", path)
+        self._patch.start()
+        store.close_db()
+        store.init_db()
+
+    def tearDown(self) -> None:
+        store.close_db()
+        self._patch.stop()
+        self._td.cleanup()
+
+    def test_folds_a_finished_day_older_than_30_days(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        day_start = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS - 1) * LIQ_DAY_MS
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, side="sell", usd_amount="4000", ts=day_start + 5_000),
+                _row(trade_id=2, side="buy", usd_amount="1000", ts=day_start + 6_000),
+                _row(trade_id=3, side="sell", usd_amount="2500", ts=now - LIQ_DAY_MS),
+            ]
+        )
+        self.assertEqual(store.fold_liquidations(now_ms=now), 2)
+        self.assertEqual([r["trade_id"] for r in store.list_liquidations(limit=10)], ["3"])
+        eth = _by_symbol(store.summarize_liquidations(since_ms=day_start))["ETH"]
+        self.assertEqual(eth["long_usd"], 6500.0)
+        self.assertEqual(eth["short_usd"], 1000.0)
+        self.assertEqual(eth["total_usd"], 7500.0)
+        self.assertEqual(eth["fill_count"], 3)
+        self.assertEqual(eth["largest_usd"], 4000.0)
+
+    def test_thirty_day_window_skips_folded_days(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        day_start = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS - 1) * LIQ_DAY_MS
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, usd_amount="9000", ts=day_start + 5_000),
+                _row(trade_id=2, usd_amount="2500", ts=now - LIQ_DAY_MS),
+            ]
+        )
+        store.fold_liquidations(now_ms=now)
+        rows = store.summarize_liquidations(since_ms=now - LIQ_DETAIL_MS)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["total_usd"], 2500.0)
+        self.assertEqual(rows[0]["fill_count"], 1)
+
+    def test_midnight_cross_stays_on_the_start_day(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        day_start = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS - 1) * LIQ_DAY_MS
+        start = day_start + LIQ_DAY_MS - 1_000
+        gid = "1:liquidation:555"
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, group_id=gid, usd_amount="2000", ts=start),
+                _row(trade_id=2, group_id=gid, usd_amount="4000", ts=start + 2_000),
+            ]
+        )
+        self.assertEqual(store.fold_liquidations(now_ms=now), 2)
+        self.assertEqual(store.list_liquidations(limit=10), [])
+        eth = _by_symbol(store.summarize_liquidations(since_ms=day_start))["ETH"]
+        self.assertEqual(eth["total_usd"], 6000.0)
+        self.assertEqual(eth["largest_usd"], 6000.0)
+        self.assertEqual(eth["fill_count"], 2)
+
+    def test_boundary_day_stays_as_fills(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        boundary = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS) * LIQ_DAY_MS + 1_000
+        store.insert_liquidations([_row(trade_id=1, ts=boundary)])
+        self.assertEqual(store.fold_liquidations(now_ms=now), 0)
+        self.assertEqual(len(store.list_liquidations(limit=10)), 1)
+
+    def test_second_fold_does_not_double_the_day(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        day_start = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS - 1) * LIQ_DAY_MS
+        store.insert_liquidations([_row(trade_id=1, usd_amount="4000", ts=day_start + 5_000)])
+        store.fold_liquidations(now_ms=now)
+        self.assertEqual(store.fold_liquidations(now_ms=now), 0)
+        eth = _by_symbol(store.summarize_liquidations(since_ms=day_start))["ETH"]
+        self.assertEqual(eth["total_usd"], 4000.0)
+        self.assertEqual(eth["fill_count"], 1)
+
+
+def _by_symbol(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(r["symbol"]): r for r in rows}
 

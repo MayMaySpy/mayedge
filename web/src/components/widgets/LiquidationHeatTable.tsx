@@ -23,7 +23,13 @@ import { cn, formatUsdCompact } from "@/lib/utils";
 
 const HOURS_KEY = "mayedge-scan-liq-hours";
 const SORT_KEY = "mayedge-scan-liq-sort";
-const HOURS = [1, 4, 24] as const;
+const HOURS = [
+  { value: 1, label: "1h" },
+  { value: 4, label: "4h" },
+  { value: 24, label: "24h" },
+  { value: 168, label: "7d" },
+  { value: 720, label: "30d" },
+] as const;
 
 type PersistedSort = { key: LiqHeatSort; dir: LiqHeatDir };
 
@@ -32,6 +38,8 @@ const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end" }[]
   { key: "long", label: "Long", align: "end" },
   { key: "short", label: "Short", align: "end" },
   { key: "total", label: "Total", align: "end" },
+  { key: null, label: "Share", align: "end" },
+  { key: "largest", label: "Largest", align: "end" },
   { key: "share", label: "vs OI", align: "end" },
   { key: "net", label: "Net", align: "end" },
   { key: null, label: "", align: "start" },
@@ -40,7 +48,7 @@ const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end" }[]
 function loadHours(fallback: LiquidationSummaryHours): LiquidationSummaryHours {
   try {
     const n = parseInt(localStorage.getItem(HOURS_KEY) ?? "", 10);
-    if (n === 1 || n === 4 || n === 24) return n;
+    if (HOURS.some((h) => h.value === n)) return n as LiquidationSummaryHours;
   } catch {
     /* ignore */
   }
@@ -65,7 +73,8 @@ function loadSort(): PersistedSort {
         parsed?.key === "long" ||
         parsed?.key === "short" ||
         parsed?.key === "net" ||
-        parsed?.key === "share") &&
+        parsed?.key === "share" ||
+        parsed?.key === "largest") &&
       (parsed?.dir === "asc" || parsed?.dir === "desc")
     ) {
       return parsed;
@@ -144,6 +153,8 @@ function LiqMetricCells({
   longUsd,
   shortUsd,
   totalUsd,
+  windowShare,
+  largestUsd,
   shareOfOi,
   netUsd,
   maxTotal,
@@ -151,6 +162,8 @@ function LiqMetricCells({
   longUsd: number;
   shortUsd: number;
   totalUsd: number;
+  windowShare: number | null;
+  largestUsd: number;
   shareOfOi: number | null;
   netUsd: number;
   maxTotal: number;
@@ -160,6 +173,8 @@ function LiqMetricCells({
       <TableCell className="text-right text-ask">{formatUsd(longUsd)}</TableCell>
       <TableCell className="text-right text-bid">{formatUsd(shortUsd)}</TableCell>
       <TableCell className="text-right">{formatUsd(totalUsd)}</TableCell>
+      <TableCell className="text-right text-muted-foreground">{formatSharePct(windowShare)}</TableCell>
+      <TableCell className="text-right">{formatUsd(largestUsd)}</TableCell>
       <TableCell className="text-right text-muted-foreground">{formatSharePct(shareOfOi)}</TableCell>
       <TableCell className={cn("text-right", netClass(netUsd))}>{formatNet(netUsd)}</TableCell>
       <TableCell>
@@ -268,16 +283,16 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
           value={String(hours)}
           onValueChange={(v) => {
             const n = parseInt(v, 10);
-            if (n === 1 || n === 4 || n === 24) selectHours(n);
+            if (HOURS.some((h) => h.value === n)) selectHours(n as LiquidationSummaryHours);
           }}
         >
           {HOURS.map((h) => (
             <ToggleGroupItem
-              key={h}
-              value={String(h)}
+              key={h.value}
+              value={String(h.value)}
               className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
             >
-              {h}h
+              {h.label}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
@@ -329,6 +344,8 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                     longUsd={fold.longUsd}
                     shortUsd={fold.shortUsd}
                     totalUsd={fold.totalUsd}
+                    windowShare={1}
+                    largestUsd={fold.largestUsd}
                     shareOfOi={null}
                     netUsd={fold.shortUsd - fold.longUsd}
                     maxTotal={maxTotal}
@@ -351,6 +368,8 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                       longUsd={topRow.longUsd}
                       shortUsd={topRow.shortUsd}
                       totalUsd={topRow.totalUsd}
+                      windowShare={topRow.windowShare}
+                      largestUsd={topRow.largestUsd}
                       shareOfOi={topRow.shareOfOi}
                       netUsd={topRow.netUsd}
                       maxTotal={maxTotal}
@@ -363,7 +382,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                   No liquidations in this window
                 </TableCell>
               </TableRow>
@@ -392,6 +411,8 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                       longUsd={row.longUsd}
                       shortUsd={row.shortUsd}
                       totalUsd={row.totalUsd}
+                      windowShare={row.windowShare}
+                      largestUsd={row.largestUsd}
                       shareOfOi={row.shareOfOi}
                       netUsd={row.netUsd}
                       maxTotal={maxTotal}

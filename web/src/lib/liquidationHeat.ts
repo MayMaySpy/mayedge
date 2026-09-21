@@ -1,4 +1,4 @@
-export type LiqHeatSort = "total" | "long" | "short" | "net" | "share";
+export type LiqHeatSort = "total" | "long" | "short" | "net" | "share" | "largest";
 export type LiqHeatDir = "asc" | "desc";
 
 export type LiquidationHeatInput = {
@@ -8,6 +8,7 @@ export type LiquidationHeatInput = {
   short_usd: number;
   total_usd: number;
   fill_count: number;
+  largest_usd?: number;
 };
 
 export type LiquidationHeatRow = {
@@ -17,6 +18,8 @@ export type LiquidationHeatRow = {
   shortUsd: number;
   totalUsd: number;
   fillCount: number;
+  largestUsd: number;
+  windowShare: number | null;
   netUsd: number;
   openInterest: number | null;
   shareOfOi: number | null;
@@ -26,6 +29,7 @@ export type LiquidationWindowFold = {
   totalUsd: number;
   longUsd: number;
   shortUsd: number;
+  largestUsd: number;
   marketCount: number;
   top: { symbol: string; totalUsd: number; share: number } | null;
 };
@@ -36,11 +40,13 @@ export function foldLiquidationWindow(
   let totalUsd = 0;
   let longUsd = 0;
   let shortUsd = 0;
+  let largestUsd = 0;
   let top: LiquidationHeatRow | null = null;
   for (const row of rows) {
     totalUsd += row.totalUsd;
     longUsd += row.longUsd;
     shortUsd += row.shortUsd;
+    if (row.largestUsd > largestUsd) largestUsd = row.largestUsd;
     if (
       top == null ||
       row.totalUsd > top.totalUsd ||
@@ -53,6 +59,7 @@ export function foldLiquidationWindow(
     totalUsd,
     longUsd,
     shortUsd,
+    largestUsd,
     marketCount: rows.length,
     top:
       top && totalUsd > 0
@@ -83,6 +90,8 @@ function sortValue(row: LiquidationHeatRow, sort: LiqHeatSort): number | null {
       return row.netUsd;
     case "share":
       return row.shareOfOi;
+    case "largest":
+      return row.largestUsd;
   }
 }
 
@@ -116,6 +125,7 @@ export function rankLiquidationHeat(
     .filter((r) => r.total_usd > 0)
     .map((r) => {
       const openInterest = lookupOi(r.symbol, options?.openInterest);
+      const largest = r.largest_usd;
       return {
         symbol: r.symbol,
         marketIndex: r.market_index,
@@ -123,11 +133,17 @@ export function rankLiquidationHeat(
         shortUsd: r.short_usd,
         totalUsd: r.total_usd,
         fillCount: r.fill_count,
+        largestUsd: largest != null && Number.isFinite(largest) ? largest : 0,
+        windowShare: null as number | null,
         netUsd: r.short_usd - r.long_usd,
         openInterest,
         shareOfOi: openInterest != null ? r.total_usd / openInterest : null,
       };
     });
+  const windowTotal = mapped.reduce((sum, row) => sum + row.totalUsd, 0);
+  if (windowTotal > 0) {
+    for (const row of mapped) row.windowShare = row.totalUsd / windowTotal;
+  }
   mapped.sort((a, b) => compareRows(a, b, sort, dir));
   return mapped;
 }

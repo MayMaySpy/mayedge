@@ -282,9 +282,17 @@ function OhlcField({
   );
 }
 
+function liqWindowLabel(hours: LiquidationSummaryHours): string {
+  if (hours === 168) return "7d";
+  if (hours === 720) return "30d";
+  return `${hours}h`;
+}
+
 function LiqsReadout({ hours }: { hours: LiquidationSummaryHours }) {
   return (
-    <span className="font-mono text-sm text-muted-foreground tabular-nums">{hours}h liqs</span>
+    <span className="font-mono text-sm text-muted-foreground tabular-nums">
+      {liqWindowLabel(hours)} liqs
+    </span>
   );
 }
 
