@@ -8,6 +8,7 @@ import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
 import { useQuickSize } from "@/lib/quickSizes";
 import { parseQuickSize } from "@/lib/quickTrade";
 import { useAxisTicket } from "@/lib/axisTicket";
+import { useQuickPanel } from "@/lib/quickPanel";
 import { cn } from "@/lib/utils";
 
 const POS_KEY = "mayedge-quick-panel-pos";
@@ -56,6 +57,7 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
   const account = useLiveAccount();
   const bbo = useLiveBbo();
   const { qty, setQty } = useQuickSize();
+  const { open } = useQuickPanel();
   const { armed: axisArmed } = useAxisTicket();
   const [pos, setPos] = useState<Pos>(loadPos);
   const [loading, setLoading] = useState(false);
@@ -154,6 +156,8 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
 
   const live = parseFloat(qty) > 0;
   const disabled = loading || !tradingEnabled || !market || !live || !feed.ready;
+
+  if (!open) return null;
 
   return (
     <div

@@ -59,6 +59,31 @@ class AmendTicketTests(IsolatedAsyncioTestCase):
         self.assertEqual(call["price"], 10125)
         self.assertEqual(call["base_amount"], 4)
 
+    async def test_chart_drag_of_a_market_stop_moves_the_trigger(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        svc._signer.modify_order = AsyncMock(return_value=(None, "0xmod", None))
+        live = _ticket()
+        live.side = "sell"
+        live.order_type = "stop-loss"
+        live.reduce_only = True
+        live.trigger_price = "90"
+        live.price = "89.10"
+
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order",
+                return_value=live,
+            ),
+        ):
+            await svc.amend_ticket(1, 42, "85")
+
+        call = svc._signer.modify_order.await_args.kwargs
+        self.assertEqual(call["trigger_price"], 8500)
+        self.assertEqual(call["price"], 8415)
+        self.assertEqual(call["base_amount"], 0)
+
     async def test_rejects_a_clip(self) -> None:
         svc = OrderService()
         svc._signer = MagicMock()

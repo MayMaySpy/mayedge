@@ -23,6 +23,7 @@ from mayedge.api.schemas import (
     LimitOrderRequest,
     MarketOrderRequest,
     StopTakeRequest,
+    ToneTimeframesRequest,
     TwapOrderRequest,
 )
 from mayedge.api.spa import mount_spa
@@ -137,6 +138,17 @@ def create_app() -> FastAPI:
         cap = max(1, min(int(limit), 1000))
         return gateway.recent_alerts()[:cap]
 
+    @app.get("/api/alerts/timeframes")
+    async def get_alert_timeframes() -> dict[str, Any]:
+        return gateway.tone_timeframes_view()
+
+    @app.put("/api/alerts/timeframes")
+    async def put_alert_timeframes(body: ToneTimeframesRequest) -> dict[str, Any]:
+        try:
+            return gateway.set_tone_timeframes(body.timeframes)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
     @app.get("/api/liquidations")
     async def get_liquidations(
         limit: int = 200,
@@ -172,6 +184,21 @@ def create_app() -> FastAPI:
         if not meta:
             raise HTTPException(404, "Market not found")
         return meta.as_public_dict()
+
+    @app.get("/api/oi/{symbol}")
+    async def get_open_interest(
+        symbol: str, resolution: str = "1m", count: int = 500
+    ) -> list[dict[str, Any]]:
+        meta = gateway.get_market(symbol)
+        if not meta:
+            raise HTTPException(404, "Market not found")
+        if not meta.is_perp:
+            return []
+        n = min(max(int(count), 1), 3600)
+        try:
+            return store.list_open_interest(meta.market_index, resolution=resolution, count=n)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.get("/api/candles/{symbol}")
     async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
@@ -305,9 +332,7 @@ def create_app() -> FastAPI:
     async def amend_order(req: AmendOrderRequest) -> dict[str, Any]:
         _require_trading()
         return await _trade(
-            lambda: order_service.amend_ticket(
-                req.market_index, req.order_index_int(), req.price
-            ),
+            lambda: order_service.amend_ticket(req.market_index, req.order_index_int(), req.price),
         )
 
     @app.post("/api/orders/cancel-side")

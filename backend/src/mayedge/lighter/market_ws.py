@@ -14,6 +14,7 @@ from mayedge.config import settings
 from mayedge.lighter.channels import message_market_index, parse_channel_market, split_ws_type
 from mayedge.lighter.liquidations import LiquidationFeed, taker_side
 from mayedge.lighter.models import Trade
+from mayedge.tone_timeframes import candle_channel_resolution
 
 if TYPE_CHECKING:
     from mayedge.lighter.gateway import LighterGateway
@@ -314,7 +315,7 @@ def _ws_candle(raw: Any) -> dict[str, float | int] | None:
 
 async def handle_candle(gw: LighterGateway, msg: dict[str, Any]) -> None:
     market_index = parse_channel_market(msg.get("channel"), "candle")
-    if market_index is None or market_index != gw._current_market_index:
+    if market_index is None:
         return
 
     candles_raw = msg.get("candles") or []
@@ -330,6 +331,11 @@ async def handle_candle(gw: LighterGateway, msg: dict[str, Any]) -> None:
     if not parsed:
         return
     parsed = parsed[-_MAX_MINUTE_CANDLES:]
+    resolution = candle_channel_resolution(msg.get("channel"))
+    if resolution is not None:
+        gw.on_tone_candles(market_index, resolution, parsed)
+    if market_index != gw._current_market_index or resolution not in (None, "1m"):
+        return
     action, _ = split_ws_type(msg.get("type"))
     # subscribed/* replaces; update/* merges. Typeless frames keep the old
     # length heuristic (1–2 bars = forming/rollover upsert).

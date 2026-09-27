@@ -201,13 +201,13 @@ export const OrderBookWidget = memo(function OrderBookWidget({
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       <PanelHeader title="Book" onClose={onClose} className="relative">
         <div className="pointer-events-none absolute inset-x-10 inset-y-0 flex items-center justify-center">
-          <div className="pointer-events-auto flex min-w-0 items-center gap-1">
+          <div className="pointer-events-auto grid grid-cols-[8ch_auto_8ch] items-center gap-x-2">
             <button
               type="button"
               title={walkHint(buyWalk, decimals)}
               aria-label={`Buy ${usdK}k impact`}
               className={cn(
-                "shrink-0 font-mono text-xs tabular-nums leading-none",
+                "text-right font-mono text-sm tabular-nums leading-none",
                 buyPct == null ? "text-muted-foreground" : "text-bid"
               )}
               onMouseEnter={() => setPreview("ask")}
@@ -217,7 +217,7 @@ export const OrderBookWidget = memo(function OrderBookWidget({
             >
               {buyPct == null ? "—" : formatPct(buyPct)}
             </button>
-            <div className="flex items-center gap-px">
+            <div className="flex items-baseline justify-center">
               <label htmlFor="book-walk-k" className="sr-only">
                 Impact notional in thousands of USD
               </label>
@@ -234,16 +234,17 @@ export const OrderBookWidget = memo(function OrderBookWidget({
                   setUsd(next);
                   persistWalkUsd(next);
                 }}
-                className="h-5 w-10 cursor-text border-0 bg-transparent p-0 text-right font-mono text-sm tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                style={{ width: `${Math.max(String(usdK).length, 1)}ch` }}
+                className="h-5 cursor-text border-0 bg-transparent p-0 text-center font-mono text-sm tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
-              <span className="text-xs text-muted-foreground">k</span>
+              <span className="font-mono text-sm text-muted-foreground">k</span>
             </div>
             <button
               type="button"
               title={walkHint(sellWalk, decimals)}
               aria-label={`Sell ${usdK}k impact`}
               className={cn(
-                "shrink-0 font-mono text-xs tabular-nums leading-none",
+                "text-left font-mono text-sm tabular-nums leading-none",
                 sellPct == null ? "text-muted-foreground" : "text-ask"
               )}
               onMouseEnter={() => setPreview("bid")}

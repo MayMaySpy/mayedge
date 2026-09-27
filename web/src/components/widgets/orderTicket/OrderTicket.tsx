@@ -28,17 +28,26 @@ import { LimitParams } from "./kinds/LimitParams";
 import { MarketParams } from "./kinds/MarketParams";
 import { LeverageModal } from "./LeverageModal";
 import {
+  convertSizeOnUnitToggle,
   leveragePresets,
+  loadSizeUnit,
   loadSlipPct,
   makerMinSize,
   maxOrderSize,
   minSizeHint,
+  persistSizeUnit,
   persistSlipPct,
+  sizeFieldOtherUnitHint,
+  sizePctValue,
   snapLeverage,
+  snapReduceOnlySize,
   suggestedLeverage,
   ticketBlockReason,
+  ticketSizeFromInput,
+  ticketWorkingPrice,
   trimQty,
   type OrderKind,
+  type SizeUnit,
 } from "./math";
 import { SizeField } from "./SizeField";
 
@@ -69,6 +78,7 @@ export function OrderTicket({
   const feed = useTradingReady({ connected });
   const [kind, setKind] = useState<OrderKind>("algo");
   const [size, setSize] = useState("");
+  const [sizeUnit, setSizeUnit] = useState<SizeUnit>(loadSizeUnit);
   const [price, setPrice] = useState("");
   const [slippagePct, setSlippagePct] = useState(loadSlipPct);
   const [reduceOnly, setReduceOnly] = useState(false);
@@ -186,10 +196,16 @@ export function OrderTicket({
   const slipFrac = Math.max(0, (parseFloat(slippagePct) || 0) / 100);
   const worstBuy = spot != null ? spot * (1 + slipFrac) : null;
   const worstSell = spot != null ? spot * (1 - slipFrac) : null;
-  const sizeNum = parseDecimal(size) ?? 0;
   const decimals = market.size_decimals ?? 4;
   const priceDecimals = market.price_decimals ?? 4;
   const priceNum = parseDecimal(price) ?? 0;
+  const workingPrice = ticketWorkingPrice({ kind, priceNum, spot });
+  const canUseUsd = workingPrice != null && workingPrice > 0;
+  const sizeNum = ticketSizeFromInput(size, sizeUnit, workingPrice, decimals);
+  const absPos = Math.abs(signedPos);
+  const orderSizeNum = reduceOnly
+    ? snapReduceOnlySize(sizeNum, absPos, decimals)
+    : sizeNum;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
   const pxForSide = (s: "buy" | "sell") => {
     if (kind === "limit" && priceNum > 0) return priceNum;
@@ -218,11 +234,27 @@ export function OrderTicket({
   const worst = spot;
   const isMaker = kind === "limit" && tif !== "ioc";
   const minSz = makerMinSize(market.min_base_amount ?? 0, market.min_quote_amount ?? 0, limitPx);
-  const sizeMin = minSizeHint(minSz, decimals, sizeNum);
+  const sizeMin = minSizeHint(minSz, decimals, orderSizeNum);
+  const otherUnitHint = sizeFieldOtherUnitHint({
+    raw: size,
+    unit: sizeUnit,
+    symbol: market.symbol,
+    price: workingPrice,
+    decimals,
+    sizeNum: orderSizeNum,
+  });
 
   const setSizePct = (pct: number) => {
     if (maxSize <= 0) return;
-    setSize(trimQty((maxSize * pct) / 100, decimals));
+    setSize(sizePctValue(pct, maxSize, sizeUnit, workingPrice, decimals));
+  };
+
+  const toggleSizeUnit = () => {
+    const next: SizeUnit = sizeUnit === "base" ? "usd" : "base";
+    if (next === "usd" && !canUseUsd) return;
+    setSize(convertSizeOnUnitToggle(size, sizeUnit, next, workingPrice, decimals));
+    setSizeUnit(next);
+    persistSizeUnit(next);
   };
 
   const onSlipChange = (raw: string) => {
@@ -231,7 +263,7 @@ export function OrderTicket({
   };
 
   const algoBlockCtx = {
-    sizeNum,
+    sizeNum: orderSizeNum,
     decimals,
     minSz,
     symbol: market.symbol,
@@ -247,7 +279,10 @@ export function OrderTicket({
     tradingEnabled,
     feedReady: feed.ready,
     feedReason: feed.reason,
-    sizeNum,
+    sizeNum: orderSizeNum,
+    sizeRaw: size,
+    sizeUnit,
+    workingPrice,
     symbol: market.symbol,
     decimals,
     kind,
@@ -275,7 +310,7 @@ export function OrderTicket({
         ? buyBlocked
         : sellBlocked;
     if (blocked || loading) return;
-    const qSize = trimQty(sizeNum, decimals) || (canonicalDecimal(size) ?? size);
+    const qSize = trimQty(orderSizeNum, decimals) || (canonicalDecimal(size) ?? size);
     const qPrice =
       priceNum > 0 ? trimQty(priceNum, priceDecimals) || canonicalDecimal(price) || price : price;
     if (kind === "market") {
@@ -316,7 +351,7 @@ export function OrderTicket({
           market,
           side: orderSide,
           qSize,
-          sizeNum,
+          sizeNum: orderSizeNum,
           decimals,
           reduceOnly,
           spot,
@@ -432,7 +467,7 @@ export function OrderTicket({
               <SizeField
                 symbol={market.symbol}
                 size={size}
-                sizeNum={sizeNum}
+                sizeNum={orderSizeNum}
                 maxSize={maxSize}
                 maxTitle={
                   singleAction
@@ -442,11 +477,16 @@ export function OrderTicket({
                     : "Available at this leverage. Opposite side includes close + flip."
                 }
                 decimals={decimals}
+                sizeUnit={sizeUnit}
+                workingPrice={workingPrice}
+                otherUnitHint={otherUnitHint}
+                canUseUsd={canUseUsd}
                 label={singleAction ? "Cap" : "Size"}
                 minHint={sizeMin?.text}
                 minHintWarn={sizeMin?.warn}
                 onSizeChange={setSize}
                 onSizePct={setSizePct}
+                onUnitToggle={toggleSizeUnit}
               />
 
               <TabsContent value="market" className="mt-0">
@@ -471,7 +511,7 @@ export function OrderTicket({
                   algo={algo}
                   market={market}
                   bookMid={mid}
-                  sizeNum={sizeNum}
+                  sizeNum={orderSizeNum}
                   pluginState={pluginState}
                   onPluginStateChange={(state) =>
                     setPluginStates((prev) => ({ ...prev, [algo]: state }))

@@ -15,7 +15,12 @@ import websockets
 from mayedge import feed_health
 from mayedge.config import settings
 from mayedge.lighter.channels import split_ws_type
-from mayedge.lighter.equity import portfolio_margin_usd, trade_available_usd
+from mayedge.lighter.equity import (
+    format_cross_liquidation_price,
+    liquidation_threshold_usd,
+    portfolio_margin_usd,
+    trade_available_usd,
+)
 from mayedge.lighter.errors import RATE_MSG, VenueBlocked, venue_client_error
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
@@ -162,6 +167,7 @@ class AccountService:
             out[sym] = {
                 "index_price": index,
                 "loan_to_value": to_float(meta.get("loan_to_value")),
+                "liquidation_threshold": to_float(meta.get("liquidation_threshold")),
             }
         return out
 
@@ -174,6 +180,47 @@ class AccountService:
         s.portfolio_margin = str(tav)
         s.trade_available = str(trade_available_usd(to_float(s.available), tav, cross))
 
+    def _paint_liquidation_prices(self) -> None:
+        """Cross Liquidation price includes non-quote Margin balance at its Liquidation threshold.
+
+        The venue position field is USDC portfolio only. Isolated Positions keep that
+        field: their collateral is Allocated margin.
+        """
+        s = self._summary
+        extra = liquidation_threshold_usd(self._assets, self._live_asset_meta())
+        if extra <= 0:
+            return
+        cross = [p for p in s.positions if p.margin_mode != "isolated"]
+        if not cross:
+            return
+        measured: list[tuple[Any, float, float, float]] = []
+        mmr = 0.0
+        for pos in cross:
+            mark = to_float(pos.mark_price)
+            size = to_float(pos.size)
+            meta = gateway.get_market_by_index(pos.market_index)
+            mmf = int(getattr(meta, "maintenance_margin_fraction", 0) or 0) if meta else 0
+            fraction = mmf / 10_000
+            if mark <= 0 or size == 0 or fraction <= 0:
+                return
+            mmr += abs(size) * mark * fraction
+            measured.append((pos, mark, size, fraction))
+        base = to_float(s.cross_portfolio_value)
+        if base <= 0:
+            base = to_float(s.portfolio_value)
+        talt = base + extra
+        for pos, mark, size, fraction in measured:
+            price = format_cross_liquidation_price(
+                mark=mark,
+                size=size,
+                maintenance_fraction=fraction,
+                talt=talt,
+                mmr=mmr,
+            )
+            if price is None:
+                continue
+            pos.liquidation_price = price
+
     def _emit_account(self) -> None:
         for pos in self._summary.positions:
             meta = gateway.get_market_by_index(pos.market_index)
@@ -182,6 +229,7 @@ class AccountService:
                 mark = meta.mark_price or meta.last_trade_price
             if mark and mark > 0:
                 pos.mark_price = str(mark)
+        self._paint_liquidation_prices()
         self._summary.open_orders = self._flatten_orders()
         self._summary.unrealized_pnl = str(
             sum(to_float(pos.unrealized_pnl) for pos in self._summary.positions)
@@ -500,6 +548,7 @@ class AccountService:
             meta[sym] = {
                 "index_price": to_float(getattr(asset, "index_price", 0)),
                 "loan_to_value": to_float(getattr(asset, "loan_to_value", 0)),
+                "liquidation_threshold": to_float(getattr(asset, "liquidation_threshold", 0)),
             }
         if meta:
             self._asset_meta = meta

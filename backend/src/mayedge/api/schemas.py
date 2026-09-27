@@ -86,3 +86,7 @@ class KillRequest(BaseModel):
 
 class AlgoStopRequest(BaseModel):
     algo_id: str | None = None
+
+
+class ToneTimeframesRequest(BaseModel):
+    timeframes: list[str]

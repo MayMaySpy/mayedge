@@ -77,6 +77,20 @@ export function stopTakeKind(orderType: string): "sl" | "tp" | null {
   return null;
 }
 
+/** Chart and order row price. A Stop or Take Profit is its trigger, not the IOC cap. */
+export function chartOrderPrice(order: {
+  order_type: string;
+  price: string;
+  trigger_price?: string;
+}): number | null {
+  if (stopTakeKind(order.order_type)) {
+    const trigger = parseFloat(order.trigger_price ?? "");
+    if (trigger > 0) return trigger;
+  }
+  const px = parseFloat(order.price);
+  return px > 0 ? px : null;
+}
+
 export function workingProtectOrders<
   T extends { market_index: number; order_type: string; trigger_price?: string },
 >(orders: T[], marketIndex: number): T[] {

@@ -1,11 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { notifyDesk } from "@/lib/notify";
+import { notifyDesk, notifyErr } from "@/lib/notify";
 import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { HeaderNumberInput } from "@/components/desk/HeaderNumberInput";
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -15,7 +16,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AlertEvent, AlertKind } from "@/lib/api";
+import { api, type AlertEvent, type AlertKind } from "@/lib/api";
+import {
+  DEFAULT_TONE_TIMEFRAMES,
+  TONE_TIMEFRAME_CAP,
+  TONE_TIMEFRAME_CHOICES,
+  toggleToneTimeframe,
+} from "@/lib/toneTimeframes";
 import { useLiveAlerts } from "@/lib/liveData";
 import { pairLabel } from "@/lib/venuePair";
 import { cn } from "@/lib/utils";
@@ -35,6 +42,7 @@ const KIND_LABEL: Record<AlertKind, string> = {
   dislocation: "Disloc",
   funding: "Funding",
   liq_cluster: "Liqs",
+  tone: "Tone",
 };
 
 function loadMinSev(): number {
@@ -73,6 +81,12 @@ function formatValue(ev: AlertEvent): string {
       return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
     case "bps":
       return `${v.toFixed(0)} bps`;
+    case "px": {
+      const abs = Math.abs(v);
+      if (abs >= 1000) return v.toFixed(1);
+      if (abs >= 1) return v.toFixed(2);
+      return v.toFixed(4);
+    }
     default:
       return String(v);
   }
@@ -95,6 +109,9 @@ export const AlertsPanel = memo(function AlertsPanel({
 }: AlertsPanelProps) {
   const all = useLiveAlerts();
   const [minSev, setMinSev] = useState(loadMinSev);
+  const [toneTfs, setToneTfs] = useState<readonly string[]>(DEFAULT_TONE_TIMEFRAMES);
+  const [toneCap, setToneCap] = useState(TONE_TIMEFRAME_CAP);
+  const [toneChoices, setToneChoices] = useState<readonly string[]>(TONE_TIMEFRAME_CHOICES);
   const seenToastRef = useRef<Set<string>>(new Set());
   const mountedAtRef = useRef(0);
 
@@ -106,6 +123,22 @@ export const AlertsPanel = memo(function AlertsPanel({
         .slice(0, MAX_ROWS),
     [all, minSev]
   );
+
+  useEffect(() => {
+    let cancel = false;
+    api
+      .toneTimeframes()
+      .then((row) => {
+        if (cancel) return;
+        setToneTfs(row.timeframes);
+        setToneCap(row.cap);
+        if (row.choices.length) setToneChoices(row.choices);
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!mountedAtRef.current) mountedAtRef.current = Date.now();
@@ -131,6 +164,19 @@ export const AlertsPanel = memo(function AlertsPanel({
     }
   }, [all, onOpenPair]);
 
+  const setTone = (label: string) => {
+    const next = toggleToneTimeframe(toneTfs, label);
+    if (next === toneTfs) return;
+    setToneTfs(next);
+    api
+      .setToneTimeframes([...next])
+      .then((row) => setToneTfs(row.timeframes))
+      .catch((err: unknown) => {
+        setToneTfs(toneTfs);
+        notifyErr(err instanceof Error ? err.message : "Could not save timeframes");
+      });
+  };
+
   const setMin = (raw: string) => {
     const n = parseInt(raw, 10);
     const next = Number.isFinite(n) && n >= 1 && n <= 3 ? n : DEFAULT_MIN_SEV;
@@ -149,18 +195,41 @@ export const AlertsPanel = memo(function AlertsPanel({
         onClose={onClose}
         trailing={
           <FilterPopover>
-            <Field>
-              <FieldLabel htmlFor="alerts-min-sev">Min severity</FieldLabel>
-              <HeaderNumberInput
-                id="alerts-min-sev"
-                min={1}
-                max={3}
-                step={1}
-                value={minSev}
-                widthClass="w-10 text-center"
-                onChange={(n) => setMin(String(n))}
-              />
-            </Field>
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="alerts-min-sev">Min severity</FieldLabel>
+                <HeaderNumberInput
+                  id="alerts-min-sev"
+                  min={1}
+                  max={3}
+                  step={1}
+                  value={minSev}
+                  widthClass="w-10 text-center"
+                  onChange={(n) => setMin(String(n))}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Timeframes</FieldLabel>
+                <div className="grid grid-cols-4 gap-1">
+                  {toneChoices.map((label) => {
+                    const on = toneTfs.includes(label);
+                    return (
+                      <Button
+                        key={label}
+                        type="button"
+                        size="sm"
+                        variant={on ? "default" : "outline"}
+                        aria-pressed={on}
+                        disabled={!on && toneTfs.length >= toneCap}
+                        onClick={() => setTone(label)}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </Field>
+            </FieldGroup>
           </FilterPopover>
         }
       />
@@ -202,7 +271,7 @@ export const AlertsPanel = memo(function AlertsPanel({
                       variant={ev.severity >= 3 ? "ask" : ev.severity >= 2 ? "warn" : "muted"}
                       className={cn("h-5 rounded border px-1 font-normal", severityClass(ev.severity))}
                     >
-                      {KIND_LABEL[ev.kind] ?? ev.kind}
+                      {ev.kind === "tone" ? ev.note : (KIND_LABEL[ev.kind] ?? ev.kind)}
                     </Badge>
                   </TableCell>
                   <TableCell className="py-1 text-right font-mono tabular-nums">

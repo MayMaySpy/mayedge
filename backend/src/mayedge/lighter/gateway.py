@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import lighter
@@ -12,7 +12,7 @@ from lighter.configuration import Configuration
 
 from mayedge import db as store
 from mayedge import feed_health
-from mayedge.alerts import ExploitDetector
+from mayedge.alerts import ExploitDetector, ExploitEvent
 from mayedge.config import settings
 from mayedge.lighter.liquidations import LiquidationFeed
 from mayedge.lighter.market_ws import run_ws_loop, ws_send
@@ -25,10 +25,24 @@ from mayedge.lighter.models import (
     to_float,
 )
 from mayedge.lighter.order_book import OrderBookFeed
+from mayedge.persist_oi import open_interest_sample_rows
+from mayedge.tone_alerts import ToneBook, ToneHit
+from mayedge.tone_timeframes import (
+    NATIVE_TONE_TIMEFRAMES,
+    TONE_TIMEFRAME_CAP,
+    TONE_TIMEFRAME_SECONDS,
+    load_tone_timeframes,
+    normalize_tone_timeframes,
+    save_tone_timeframes,
+)
 
 logger = logging.getLogger(__name__)
 
 _HEALTH_DEGRADED_S = 10.0
+_TONE_BACKFILL = 500
+_TONE_CLOSE_FETCH = 5
+_TONE_REST_GAP_S = 60.0 / 150.0
+_TONE_RETRY_S = 60.0
 
 
 class LighterGateway:
@@ -43,6 +57,7 @@ class LighterGateway:
         self._pinned_books: set[int] = set()
         self._ws_task: asyncio.Task[None] | None = None
         self._health_task: asyncio.Task[None] | None = None
+        self._oi_task: asyncio.Task[None] | None = None
         self._ws_connected = asyncio.Event()
         self._subscribers: list[Callable[[dict[str, Any]], None]] = []
         self._current_market_index: int | None = None
@@ -60,6 +75,11 @@ class LighterGateway:
         self._books = OrderBookFeed(self.broadcast, resubscribe=self._resubscribe_order_book_sync)
         self._liqs = LiquidationFeed(self.broadcast)
         self._alerts = ExploitDetector(self.broadcast)
+        self._tone_book = ToneBook()
+        self._tone_resync = asyncio.Event()
+        self._tone_generation = 0
+        self._tone_task: asyncio.Task[None] | None = None
+        self._tone_retry_at = 0.0
 
     async def start(self) -> None:
         self._client = lighter.ApiClient(Configuration(host=settings.base_url))
@@ -75,17 +95,28 @@ class LighterGateway:
         self._refresh_trade_targets()
         self._books.set_current_market(self._current_market_index)
         self._books.start_resync_loop(lambda: self._current_market_index)
+        try:
+            store.fold_open_interest(now_ms=int(time.time() * 1000))
+        except Exception:
+            logger.exception("failed to fold open interest")
         self._ws_task = asyncio.create_task(run_ws_loop(self))
         self._health_task = asyncio.create_task(self._health_loop())
+        self._oi_task = asyncio.create_task(self._oi_sample_loop())
+        self._tone_book.set_timeframes(load_tone_timeframes())
+        self._tone_generation += 1
+        self._tone_resync.set()
+        self._tone_task = asyncio.create_task(self._tone_loop())
 
     async def stop(self) -> None:
-        for task in (self._ws_task, self._health_task):
+        for task in (self._ws_task, self._health_task, self._oi_task, self._tone_task):
             if task:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         self._ws_task = None
         self._health_task = None
+        self._oi_task = None
+        self._tone_task = None
         await self._books.stop_resync_loop()
         if self._client:
             await self._client.close()
@@ -169,10 +200,13 @@ class LighterGateway:
                     self._markets[idx].change_24h = None if change is None else to_float(change)
                     min_imf = int(getattr(d, "min_initial_margin_fraction", 0) or 0)
                     default_imf = int(getattr(d, "default_initial_margin_fraction", 0) or 0)
+                    maintenance = int(getattr(d, "maintenance_margin_fraction", 0) or 0)
                     if min_imf > 0:
                         self._markets[idx].min_initial_margin_fraction = min_imf
                     if default_imf > 0:
                         self._markets[idx].default_initial_margin_fraction = default_imf
+                    if maintenance > 0:
+                        self._markets[idx].maintenance_margin_fraction = maintenance
         except Exception:
             logger.exception("failed to load order book details")
 
@@ -326,8 +360,10 @@ class LighterGateway:
             "1m": 60,
             "5m": 300,
             "15m": 900,
+            "30m": 1800,
             "1h": 3600,
             "4h": 14400,
+            "12h": 43200,
             "1d": 86400,
         }
         step = resolution_seconds.get(resolution, 60)
@@ -427,6 +463,29 @@ class LighterGateway:
             trade_subs_target=len(targets),
             broadcast=False,
         )
+
+    async def _oi_sample_loop(self) -> None:
+        """Write the open interest held at each UTC minute close. Missed minutes stay gaps."""
+        while True:
+            try:
+                now = time.time()
+                delay = (int(now) // 60 + 1) * 60 - now + 0.25
+                await asyncio.sleep(max(0.25, delay))
+                self._flush_open_interest()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("open interest sample failed")
+                await asyncio.sleep(5)
+
+    def _flush_open_interest(self) -> None:
+        closed = int(time.time()) // 60 - 1
+        if closed < 0:
+            return
+        rows = open_interest_sample_rows(self._markets.values())
+        if not rows:
+            return
+        store.flush_open_interest(rows, minute_index=closed)
 
     async def _health_loop(self) -> None:
         while True:
@@ -593,6 +652,148 @@ class LighterGateway:
         for trade in reversed(trades):
             self._apply_trade_1s(market_index, trade)
         return self._candles_1s.get(market_index, [])
+
+    def tone_timeframes_view(self) -> dict[str, Any]:
+        return {
+            "timeframes": list(self._tone_book.timeframes),
+            "choices": list(NATIVE_TONE_TIMEFRAMES),
+            "cap": TONE_TIMEFRAME_CAP,
+        }
+
+    def set_tone_timeframes(self, labels: list[str]) -> dict[str, Any]:
+        chosen = normalize_tone_timeframes(labels)
+        save_tone_timeframes(chosen)
+        self._tone_book.set_timeframes(chosen)
+        self._tone_generation += 1
+        self._tone_resync.set()
+        return self.tone_timeframes_view()
+
+    def _perp_indexes(self) -> list[int]:
+        return sorted(meta.market_index for meta in self._markets.values() if meta.is_perp)
+
+    def on_tone_candles(
+        self,
+        market_index: int,
+        resolution: str,
+        bars: Sequence[Mapping[str, Any]],
+    ) -> None:
+        book = getattr(self, "_tone_book", None)
+        if book is None or not bars:
+            return
+        candles = [
+            Candle(
+                time=int(bar["time"]),
+                open=float(bar["open"]),
+                high=float(bar["high"]),
+                low=float(bar["low"]),
+                close=float(bar["close"]),
+                volume=float(bar["volume"]),
+            )
+            for bar in bars
+        ]
+        hits = book.observe(market_index, resolution, candles, now=time.time())
+        self._emit_tone_hits(hits)
+
+    def _emit_tone_hits(self, hits: list[ToneHit]) -> None:
+        if not hits:
+            return
+        alerts = getattr(self, "_alerts", None)
+        markets = getattr(self, "_markets", {})
+        if alerts is None:
+            return
+        events: list[ExploitEvent] = []
+        for hit in hits:
+            meta = markets.get(hit.market_index)
+            symbol = meta.symbol if meta is not None else f"M{hit.market_index}"
+            step = TONE_TIMEFRAME_SECONDS[hit.resolution]
+            events.append(
+                ExploitEvent(
+                    id=f"tone-{hit.market_index}-{hit.resolution}-{hit.bar_time}",
+                    ts=(hit.bar_time + step) * 1000,
+                    symbol=symbol,
+                    market_index=hit.market_index,
+                    kind="tone",
+                    severity=2,
+                    direction="up" if hit.tone == "ucru" else "down",
+                    value=hit.close,
+                    baseline=None,
+                    unit="px",
+                    note=f"{hit.resolution} {hit.label}",
+                )
+            )
+        alerts.emit_events(events)
+
+    async def _tone_loop(self) -> None:
+        while True:
+            try:
+                try:
+                    await asyncio.wait_for(self._tone_resync.wait(), timeout=5.0)
+                except TimeoutError:
+                    await self._refresh_closed_tones()
+                    await self._retry_missing_tones()
+                    continue
+                self._tone_resync.clear()
+                generation = self._tone_generation
+                await self._backfill_tone_windows(generation)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("tone alert cycle failed")
+                await asyncio.sleep(5)
+
+    async def _retry_missing_tones(self) -> None:
+        now = time.time()
+        if now < self._tone_retry_at:
+            return
+        if not self._tone_book.missing(self._perp_indexes()):
+            return
+        self._tone_retry_at = now + _TONE_RETRY_S
+        await self._backfill_tone_windows(self._tone_generation, only_missing=True)
+
+    async def _refresh_closed_tones(self) -> None:
+        """Fetch the closed bar over REST. Candle sockets stay on the chart only."""
+        due = self._tone_book.due(now=time.time())
+        for market_index, resolution in due:
+            if self._tone_resync.is_set():
+                return
+            try:
+                candles = await self.get_candles(market_index, resolution, _TONE_CLOSE_FETCH)
+            except Exception:
+                logger.exception("tone close fetch failed market=%s %s", market_index, resolution)
+                continue
+            if not candles:
+                continue
+            now = time.time()
+            hits = self._tone_book.observe(market_index, resolution, candles, now=now)
+            hits.extend(self._tone_book.close_one(market_index, resolution, now=now))
+            self._emit_tone_hits(hits)
+            await asyncio.sleep(_TONE_REST_GAP_S)
+
+    async def _backfill_tone_windows(self, generation: int, *, only_missing: bool = False) -> None:
+        if only_missing:
+            wanted = self._tone_book.missing(self._perp_indexes())
+        else:
+            wanted = [
+                (market_index, resolution)
+                for market_index in self._perp_indexes()
+                for resolution in self._tone_book.timeframes
+            ]
+        if not wanted:
+            return
+        logger.info("tone backfill %d windows", len(wanted))
+        for market_index, resolution in wanted:
+            if generation != self._tone_generation:
+                return
+            try:
+                candles = await self.get_candles(market_index, resolution, _TONE_BACKFILL)
+            except Exception:
+                logger.exception("tone backfill failed market=%s %s", market_index, resolution)
+                continue
+            if generation != self._tone_generation:
+                return
+            hits = self._tone_book.seed(market_index, resolution, candles, now=time.time())
+            self._emit_tone_hits(hits)
+            await asyncio.sleep(_TONE_REST_GAP_S)
 
 
 gateway = LighterGateway()

@@ -1,8 +1,11 @@
 import type { Market, Position } from "@/lib/api";
+import { parseDecimal } from "@/lib/numbers";
 
 const CANONICAL_LEV = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100];
 
 export const SLIP_KEY = "mayedge-slippage-pct";
+export const SIZE_UNIT_KEY = "mayedge-size-unit";
+export type SizeUnit = "base" | "usd";
 export const SLIP_PRESETS = [0.2, 0.5, 1, 2];
 export const SIZE_PCTS = [25, 50, 75, 100];
 export const TIF_CHIPS = [
@@ -118,6 +121,133 @@ export function persistSlipPct(raw: string) {
   }
 }
 
+export function loadSizeUnit(): SizeUnit {
+  try {
+    const v = localStorage.getItem(SIZE_UNIT_KEY);
+    if (v === "usd" || v === "base") return v;
+  } catch {
+    /* ignore */
+  }
+  return "base";
+}
+
+export function persistSizeUnit(unit: SizeUnit) {
+  try {
+    localStorage.setItem(SIZE_UNIT_KEY, unit);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Limit price when set; otherwise mid, live side, or last. */
+export function ticketWorkingPrice(opts: {
+  kind: OrderKind;
+  priceNum: number;
+  spot: number | null;
+}): number | null {
+  if (opts.kind === "limit" && opts.priceNum > 0) return opts.priceNum;
+  return opts.spot;
+}
+
+export function baseToUsd(base: number, price: number | null): number {
+  if (!(base > 0) || price == null || !(price > 0)) return 0;
+  return base * price;
+}
+
+export function usdToBase(usd: number, price: number | null, decimals: number): number {
+  if (!(usd > 0) || price == null || !(price > 0)) return 0;
+  const d = Math.max(0, Math.min(decimals, 6));
+  const f = 10 ** d;
+  return Math.floor((usd / price) * f + 1e-9) / f;
+}
+
+export function formatUsdNotional(value: number): string {
+  if (!(value > 0) || !Number.isFinite(value)) return "";
+  return value.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function formatUsdRaw(value: number): string {
+  if (!(value > 0) || !Number.isFinite(value)) return "";
+  const s = value.toFixed(2);
+  return s.replace(/\.?0+$/, "") || s;
+}
+
+export function ticketSizeFromInput(
+  raw: string,
+  unit: SizeUnit,
+  price: number | null,
+  decimals: number
+): number {
+  const n = parseDecimal(raw) ?? 0;
+  if (n <= 0) return 0;
+  if (unit === "base") return n;
+  return usdToBase(n, price, decimals);
+}
+
+export function convertSizeOnUnitToggle(
+  raw: string,
+  from: SizeUnit,
+  to: SizeUnit,
+  price: number | null,
+  decimals: number
+): string {
+  const n = parseDecimal(raw) ?? 0;
+  if (n <= 0 || price == null || !(price > 0) || from === to) return raw;
+  if (from === "base" && to === "usd") return formatUsdRaw(baseToUsd(n, price));
+  if (from === "usd" && to === "base") return trimQty(usdToBase(n, price, decimals), decimals);
+  return raw;
+}
+
+export function sizePctValue(
+  pct: number,
+  maxBase: number,
+  unit: SizeUnit,
+  price: number | null,
+  decimals: number
+): string {
+  if (maxBase <= 0) return "";
+  const base = (maxBase * pct) / 100;
+  if (unit === "usd" && price != null && price > 0) {
+    return formatUsdRaw(baseToUsd(base, price));
+  }
+  return trimQty(base, decimals);
+}
+
+/** Full close within one size step snaps to the live position. */
+export function snapReduceOnlySize(
+  sizeNum: number,
+  absPos: number,
+  decimals: number
+): number {
+  if (!(absPos > 0) || !(sizeNum > 0)) return sizeNum;
+  const step = decimals >= 0 ? 10 ** -decimals : 0.01;
+  if (Math.abs(sizeNum - absPos) <= step + 1e-9) return absPos;
+  return Math.min(sizeNum, absPos);
+}
+
+export function sizeFieldOtherUnitHint(opts: {
+  raw: string;
+  unit: SizeUnit;
+  symbol: string;
+  price: number | null;
+  decimals: number;
+  sizeNum: number;
+}): string | null {
+  const typed = parseDecimal(opts.raw) ?? 0;
+  if (typed <= 0 || opts.price == null || !(opts.price > 0)) return null;
+  if (opts.unit === "usd") {
+    const base = trimQty(opts.sizeNum, opts.decimals);
+    return base ? `≈ ${base} ${opts.symbol}` : null;
+  }
+  const usd = formatUsdNotional(baseToUsd(opts.sizeNum, opts.price));
+  return usd ? `≈ ${usd}` : null;
+}
+
 export function trimQty(n: number, decimals: number): string {
   if (!Number.isFinite(n) || n <= 0) return "";
   const d = Math.max(0, Math.min(decimals, 6));
@@ -173,11 +303,29 @@ export function maxOrderSize(opts: {
   return opposite ? fromMargin + 2 * absPos : fromMargin;
 }
 
+function formatMaxMinSize(
+  base: number,
+  unit: SizeUnit,
+  symbol: string,
+  decimals: number,
+  price: number | null,
+  prefix: "Max" | "Min"
+): string {
+  if (unit === "usd" && price != null && price > 0) {
+    const usd = formatUsdNotional(base * price);
+    return usd ? `${prefix} ${usd}` : `${prefix} ${trimQty(base, decimals)} ${symbol}`;
+  }
+  return `${prefix} ${trimQty(base, decimals)} ${symbol}`;
+}
+
 export function ticketBlockReason(opts: {
   tradingEnabled: boolean;
   feedReady: boolean;
   feedReason?: string | null;
   sizeNum: number;
+  sizeRaw?: string;
+  sizeUnit?: SizeUnit;
+  workingPrice?: number | null;
   maxSize?: number;
   symbol: string;
   decimals: number;
@@ -187,15 +335,20 @@ export function ticketBlockReason(opts: {
   minSz: number;
   algoBlocked?: string | null;
 }): string | null {
+  const unit = opts.sizeUnit ?? "base";
+  const px = opts.workingPrice ?? null;
+  const typed = parseDecimal(opts.sizeRaw ?? "") ?? 0;
+
   if (!opts.tradingEnabled) return "Trading not configured";
   if (!opts.feedReady) return opts.feedReason ?? "Feed not ready";
+  if (unit === "usd" && (px == null || !(px > 0)) && typed > 0) return "No price";
   if (opts.sizeNum <= 0) return "Enter size";
   if (opts.maxSize != null && opts.maxSize > 0 && opts.sizeNum > opts.maxSize + 1e-9) {
-    return `Max ${trimQty(opts.maxSize, opts.decimals)} ${opts.symbol}`;
+    return formatMaxMinSize(opts.maxSize, unit, opts.symbol, opts.decimals, px, "Max");
   }
   if (opts.kind === "limit" && !opts.price) return "Enter price";
   if (opts.isMaker && opts.minSz > 0 && opts.sizeNum + 1e-9 < opts.minSz) {
-    return `Min ${trimQty(opts.minSz, opts.decimals)} ${opts.symbol}`;
+    return formatMaxMinSize(opts.minSz, unit, opts.symbol, opts.decimals, px, "Min");
   }
   if (opts.kind === "algo" && opts.algoBlocked) return opts.algoBlocked;
   return null;

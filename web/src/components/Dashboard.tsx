@@ -28,6 +28,7 @@ import {
   useLiveMinuteCandles,
 } from "@/lib/liveData";
 import { api, isLongPosition, type Market } from "@/lib/api";
+import { chartOrderPrice, stopTakeKind } from "@/lib/positionsTable";
 import { algoIsLive, algoOrderKind, preferPerpMarket } from "@/lib/algos";
 import { theme } from "@/lib/theme";
 import { useTradingReady } from "@/hooks/useTradingReady";
@@ -179,20 +180,26 @@ function ChartPanel({
     }
     const orders = (accountSnap?.open_orders ?? []).filter((o) => o.symbol === symbol);
     for (const o of orders.slice(0, 24)) {
-      const px = parseFloat(o.price);
-      if (!(px > 0)) continue;
+      const px = chartOrderPrice(o);
+      if (px == null) continue;
       const buy = o.side === "buy";
-      const kind = algoOrderKind(o.client_order_index, { reduceOnly: o.reduce_only });
-      const tag = kind ? `${kind} ` : "";
+      const protect = stopTakeKind(o.order_type);
+      const algo = algoOrderKind(o.client_order_index, { reduceOnly: o.reduce_only });
+      const tag = protect === "sl" ? "SL " : protect === "tp" ? "TP " : algo ? `${algo} ` : "";
+      const qty = parseFloat(o.remaining) > 0 ? formatSize(o.remaining) : "";
+      const side = buy ? "BUY" : "SELL";
+      const label = protect
+        ? `${tag}${qty}`.trim()
+        : `${tag}${side}${qty ? ` ${qty}` : ""}`;
       lines.push({
         id: `ord-${o.order_index}`,
         kind: "order",
         price: px,
         color: buy ? theme.bid : theme.ask,
-        label: `${tag}${buy ? "BUY" : "SELL"} ${formatSize(o.remaining)}`,
+        label,
         marketIndex: o.market_index,
         orderIndex: o.order_index,
-        interactive: tradingEnabled && !kind,
+        interactive: tradingEnabled && !algo,
       });
     }
     for (const algo of algoBook.working) {

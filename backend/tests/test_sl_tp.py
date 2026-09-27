@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mayedge.lighter.models import MarketMeta
+from mayedge.lighter.models import MarketMeta, OpenOrder
 from mayedge.lighter.orders import OrderService
 
 
@@ -142,3 +142,80 @@ class StopTakeOrderTests(IsolatedAsyncioTestCase):
                 sl={"kind": "market", "trigger": "110"},
             )
         self.assertIn("wrong side", str(ctx.exception).lower())
+
+    async def test_amends_an_existing_market_stop(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.modify_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0xmod"), None)
+        )
+        live = OpenOrder(
+            order_index=77,
+            client_order_index=9,
+            market_index=1,
+            symbol="ETH",
+            side="sell",
+            price="89.10",
+            size="1",
+            remaining="1",
+            order_type="stop-loss",
+            reduce_only=True,
+            trigger_price="90",
+        )
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[live],
+            ),
+        ):
+            out = await svc.create_sl_tp(
+                1,
+                "sell",
+                "1",
+                sl={"kind": "market", "trigger": "85"},
+            )
+        self.assertEqual(out["tx_hash"], "0xmod")
+        signer.create_sl_order.assert_not_called()
+        call = signer.modify_order.await_args.kwargs
+        self.assertEqual(call["order_index"], 77)
+        self.assertEqual(call["trigger_price"], 8500)
+        self.assertEqual(call["price"], 8415)
+
+    async def test_replaces_a_stop_when_the_kind_changes(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.cancel_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0xcx"), None)
+        )
+        live = OpenOrder(
+            order_index=77,
+            client_order_index=9,
+            market_index=1,
+            symbol="ETH",
+            side="sell",
+            price="89.10",
+            size="1",
+            remaining="1",
+            order_type="stop-loss",
+            reduce_only=True,
+            trigger_price="90",
+        )
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[live],
+            ),
+        ):
+            await svc.create_sl_tp(
+                1,
+                "sell",
+                "1",
+                sl={"kind": "limit", "trigger": "85", "price": "84.5"},
+            )
+        signer.cancel_order.assert_awaited()
+        signer.modify_order.assert_not_called()
+        signer.create_sl_limit_order.assert_awaited()

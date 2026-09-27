@@ -47,6 +47,7 @@ class MarketMeta:
     last_trade_price: float | None = None
     min_initial_margin_fraction: int = 500
     default_initial_margin_fraction: int = 500
+    maintenance_margin_fraction: int = 0
     volume_24h: float = 0.0
     volume_base_24h: float = 0.0
     change_24h: float | None = None

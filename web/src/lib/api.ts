@@ -70,6 +70,11 @@ export interface Candle {
   volume: number;
 }
 
+export interface OpenInterestSample {
+  time: number;
+  open_interest: number;
+}
+
 export interface Position {
   market_index: number;
   symbol: string;
@@ -289,7 +294,14 @@ export type AlertKind =
   | "premium"
   | "dislocation"
   | "funding"
-  | "liq_cluster";
+  | "liq_cluster"
+  | "tone";
+
+export interface ToneTimeframes {
+  timeframes: string[];
+  choices: string[];
+  cap: number;
+}
 
 export interface AlertEvent {
   id: string;
@@ -318,6 +330,8 @@ export const api = {
   market: (symbol: string) => request<Market>(`/markets/${symbol}`),
   candles: (symbol: string, resolution = "1m", count = 500) =>
     request<Candle[]>(`/candles/${symbol}?resolution=${resolution}&count=${count}`),
+  openInterest: (symbol: string, resolution = "1m", count = 500) =>
+    request<OpenInterestSample[]>(`/oi/${symbol}?resolution=${resolution}&count=${count}`),
   activateMarket: (symbol: string) =>
     request<{ status: string }>(`/markets/${symbol}/activate`, { method: "POST" }),
   account: () => request<Account>("/account"),
@@ -337,6 +351,12 @@ export const api = {
     const qs = q.toString();
     return request<AlertEvent[]>(`/alerts${qs ? `?${qs}` : ""}`);
   },
+  toneTimeframes: () => request<ToneTimeframes>("/alerts/timeframes"),
+  setToneTimeframes: (timeframes: string[]) =>
+    request<ToneTimeframes>("/alerts/timeframes", {
+      method: "PUT",
+      body: JSON.stringify({ timeframes }),
+    }),
   placeMarketOrder: (body: Record<string, unknown>) =>
     request("/orders/market", { method: "POST", body: JSON.stringify(body) }),
   placeLimitOrder: (body: Record<string, unknown>) =>

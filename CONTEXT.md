@@ -52,6 +52,30 @@ _Avoid_: Favorites, pairs, basket (unqualified), ranking by Path
 One of up to four Path charts on Watch. Each pane shows one Watch Set.
 _Avoid_: tile, mosaic, widget (for a Path chart)
 
+**Timeframe**:
+The bar size of the price chart.
+_Avoid_: interval, resolution, candle size
+
+**Pinned timeframe**:
+An operator-chosen Timeframe on the price chart. Cap 7. The active Timeframe may be unpinned.
+_Avoid_: Favorites, stars, bookmarks
+
+**MayRekt**:
+Candle coloring on the price chart. One Tone per bar, or none. Runs on the bars that chart already shows, including the forming bar.
+_Avoid_: indicator, Pine, signal, overlay, study
+
+**Tone**:
+The named color of one candle under MayRekt. Absent when the bar has no state.
+_Avoid_: barcolor, signal, alert
+
+**Tone alert**:
+A desk alert that a closed bar on any perp is blue or orange. The forming bar does not alert.
+_Avoid_: Tone, signal
+
+**Tone timeframes**:
+The native Timeframes whose closed bars can raise a Tone alert. At most two. Default is 30m and 4h.
+_Avoid_: Pinned timeframe, the chart's Timeframe
+
 **Path**:
 A Market’s percent change from the first sample in the visible window. Missing Last is unknown, not `0`.
 _Avoid_: Daily Change, Relative Strength, return, pair (for a listing)
@@ -83,6 +107,10 @@ _Avoid_: parent (unqualified), manual order, limit (for the working order itself
 **Quick size**:
 The single size the floating Buy/Sell buttons and an armed price-axis rest both use.
 _Avoid_: preset, clip size, ticket size (that's the Order panel)
+
+**Notional**:
+Size times the working price on a Ticket: the limit price when set, otherwise mid, live side, or last. The ticket may be typed in the asset or in USD; the order still goes out in Size.
+_Avoid_: USD size, value, quote size (that's the venue minimum)
 
 **Stop**:
 A reduce-only Ticket that closes all or part of a Position when mark hits the trigger. Market or Limit. Not a Clip.
@@ -154,6 +182,14 @@ _Avoid_: available (unqualified), trade_available, buying power
 The fraction of an Asset’s index value that counts toward Portfolio Margin. Quote (USDC, USDG) is `100%`.
 _Avoid_: haircut (unqualified), weight, discount
 
+**Liquidation threshold**:
+The fraction of an Asset’s index value that counts when deciding if the account is liquidated. At least the LTV. Quote is `100%`.
+_Avoid_: LTV, Portfolio Margin
+
+**Liquidation price**:
+The price of a cross Position at which the account, valued with each Asset’s Margin balance at its Liquidation threshold, meets maintenance margin.
+_Avoid_: Last, entry, a leverage estimate, the venue mark
+
 **Asset index**:
 The oracle price used to value an Asset. Not Last, not Daily Change.
 _Avoid_: mark, Last, index (unqualified)
@@ -161,6 +197,20 @@ _Avoid_: mark, Last, index (unqualified)
 **Asset uPnL**:
 Unrealized PnL of an Asset versus its spot average entry at the Asset index. Quote has none. Unknown without an entry.
 _Avoid_: Position uPnL, mixing into Positions
+
+### Open interest
+
+**Open interest**:
+The two-sided USD open interest of a perp: long plus short. The venue prints one side; the desk uses twice that. Spot has none.
+_Avoid_: one-sided OI, base size, resting size
+
+**OI sample**:
+A perp's open interest at the end of a UTC minute. Kept for 30 days.
+_Avoid_: tick, trade, candle
+
+**OI day**:
+A perp's high, low, and last open interest for one UTC day older than 30 days. Kept for the life of the desk. Last is the final sample of that day.
+_Avoid_: sum, Liquidation day, candle
 
 ### Explorer
 

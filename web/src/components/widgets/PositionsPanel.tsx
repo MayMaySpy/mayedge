@@ -757,7 +757,13 @@ export function PositionsPanel({
                       <TableCell className={o.side === "buy" ? "text-bid" : "text-ask"}>
                         {o.side}
                       </TableCell>
-                      <TableCell className="text-right">{formatPrice(o.price)}</TableCell>
+                      <TableCell className="text-right">
+                        {formatPrice(
+                          sltp && parseFloat(o.trigger_price ?? "") > 0
+                            ? o.trigger_price
+                            : o.price
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">{formatSize(o.remaining)}</TableCell>
                       <TableCell className="text-right">
                         {algoKind ? (

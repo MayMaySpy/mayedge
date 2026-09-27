@@ -112,6 +112,26 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
     largest_usd REAL NOT NULL,
     PRIMARY KEY (day_index, market_index)
 );
+
+CREATE TABLE IF NOT EXISTS oi_samples (
+    market_index INTEGER NOT NULL,
+    minute_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    oi_usd REAL NOT NULL,
+    PRIMARY KEY (market_index, minute_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oi_samples_minute ON oi_samples(minute_index);
+
+CREATE TABLE IF NOT EXISTS oi_days (
+    day_index INTEGER NOT NULL,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    oi_high REAL NOT NULL,
+    oi_low REAL NOT NULL,
+    oi_close REAL NOT NULL,
+    PRIMARY KEY (day_index, market_index)
+);
 """
 
 _LIQ_TABLE = """
@@ -144,7 +164,8 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
 """
 
 _last_liq_fold_at = time.time()
-SCHEMA_VERSION = 5
+_last_oi_fold_at = time.time()
+SCHEMA_VERSION = 6
 
 
 def _meta_int(
@@ -231,6 +252,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
     if version < 5:
         conn.execute(_LIQ_DAYS_TABLE)
+    if version < 6:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS oi_samples (
+                market_index INTEGER NOT NULL,
+                minute_index INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                oi_usd REAL NOT NULL,
+                PRIMARY KEY (market_index, minute_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_oi_samples_minute ON oi_samples(minute_index);
+            CREATE TABLE IF NOT EXISTS oi_days (
+                day_index INTEGER NOT NULL,
+                market_index INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                oi_high REAL NOT NULL,
+                oi_low REAL NOT NULL,
+                oi_close REAL NOT NULL,
+                PRIMARY KEY (day_index, market_index)
+            );
+            """
+        )
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 
@@ -321,14 +364,24 @@ from mayedge.persist_liq import (  # noqa: E402
     list_liquidations,
     summarize_liquidations,
 )
+from mayedge.persist_oi import (  # noqa: E402
+    flush_open_interest,
+    fold_open_interest,
+    fold_open_interest_if_due,
+    list_open_interest,
+)
 
 __all__ = [
     "close_db",
+    "flush_open_interest",
     "fold_liquidations",
     "fold_liquidations_if_due",
+    "fold_open_interest",
+    "fold_open_interest_if_due",
     "init_db",
     "insert_liquidations",
     "list_liquidations",
+    "list_open_interest",
     "load_active_runs",
     "load_counters",
     "load_history",

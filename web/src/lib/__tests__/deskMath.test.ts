@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { canonicalDecimal, decimalInput, parseDecimal } from "@/lib/numbers";
 import { chaseQuote, clipQty, roundPassive } from "@/lib/chaseIceberg";
-import { maxOrderSize, minSizeHint, ticketBlockReason } from "@/components/widgets/orderTicket/math";
+import {
+  baseToUsd,
+  convertSizeOnUnitToggle,
+  formatUsdNotional,
+  maxOrderSize,
+  minSizeHint,
+  snapReduceOnlySize,
+  sizeFieldOtherUnitHint,
+  sizePctValue,
+  ticketBlockReason,
+  ticketSizeFromInput,
+  ticketWorkingPrice,
+  usdToBase,
+} from "@/components/widgets/orderTicket/math";
 
 describe("parseDecimal", () => {
   it("parses comma decimals", () => {
@@ -144,11 +157,85 @@ describe("minSizeHint", () => {
   });
 });
 
+describe("ticketWorkingPrice", () => {
+  it("uses limit price when set", () => {
+    expect(ticketWorkingPrice({ kind: "limit", priceNum: 95, spot: 100 })).toBe(95);
+  });
+
+  it("falls back to spot for market", () => {
+    expect(ticketWorkingPrice({ kind: "market", priceNum: 0, spot: 100 })).toBe(100);
+  });
+});
+
+describe("usd notional conversion", () => {
+  it("converts usd to floored base", () => {
+    expect(usdToBase(10000, 100000, 4)).toBe(0.1);
+  });
+
+  it("converts base to usd", () => {
+    expect(baseToUsd(0.1, 100000)).toBe(10000);
+  });
+
+  it("derives base size from usd input", () => {
+    expect(ticketSizeFromInput("10000", "usd", 100000, 4)).toBe(0.1);
+  });
+
+  it("keeps base input as base size", () => {
+    expect(ticketSizeFromInput("0.1", "base", 100000, 4)).toBe(0.1);
+  });
+
+  it("converts on unit toggle", () => {
+    expect(convertSizeOnUnitToggle("0.1", "base", "usd", 100000, 4)).toBe("10000");
+    expect(convertSizeOnUnitToggle("10000", "usd", "base", 100000, 4)).toBe("0.1");
+  });
+
+  it("formats pct chips in usd", () => {
+    expect(sizePctValue(100, 0.1, "usd", 100000, 4)).toBe("10000");
+  });
+
+  it("shows other-unit hint", () => {
+    expect(
+      sizeFieldOtherUnitHint({
+        raw: "10000",
+        unit: "usd",
+        symbol: "ETH",
+        price: 100000,
+        decimals: 4,
+        sizeNum: 0.1,
+      })
+    ).toBe("≈ 0.1 ETH");
+    expect(
+      sizeFieldOtherUnitHint({
+        raw: "0.1",
+        unit: "base",
+        symbol: "ETH",
+        price: 100000,
+        decimals: 4,
+        sizeNum: 0.1,
+      })
+    ).toBe(`≈ ${formatUsdNotional(10000)}`);
+  });
+});
+
+describe("snapReduceOnlySize", () => {
+  it("snaps within one size step to full position", () => {
+    expect(snapReduceOnlySize(1.9999, 2, 2)).toBe(2);
+  });
+
+  it("caps partial close at position", () => {
+    expect(snapReduceOnlySize(1.5, 2, 2)).toBe(1.5);
+    expect(snapReduceOnlySize(3, 2, 2)).toBe(2);
+  });
+});
+
 describe("ticketBlockReason", () => {
   const base = {
     tradingEnabled: true,
     feedReady: true,
     sizeNum: 1,
+    sizeRaw: "1",
+    sizeUnit: "base" as const,
+    workingPrice: 100,
     maxSize: 10,
     symbol: "ETH",
     decimals: 2,
@@ -175,6 +262,47 @@ describe("ticketBlockReason", () => {
 
   it("blocks over max", () => {
     expect(ticketBlockReason({ ...base, sizeNum: 20 })).toMatch(/^Max /);
+  });
+
+  it("blocks over max in usd", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        sizeNum: 20,
+        sizeRaw: "2000",
+        sizeUnit: "usd",
+        workingPrice: 100,
+        maxSize: 10,
+      })
+    ).toBe(`Max ${formatUsdNotional(1000)}`);
+  });
+
+  it("blocks usd entry without price", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        sizeNum: 0,
+        sizeRaw: "1000",
+        sizeUnit: "usd",
+        workingPrice: null,
+      })
+    ).toBe("No price");
+  });
+
+  it("blocks under maker min in usd", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "limit",
+        price: "100",
+        isMaker: true,
+        sizeNum: 0.001,
+        sizeRaw: "0.1",
+        sizeUnit: "usd",
+        workingPrice: 100,
+        minSz: 0.01,
+      })
+    ).toBe(`Min ${formatUsdNotional(1)}`);
   });
 
   it("skips max when omitted", () => {

@@ -307,6 +307,11 @@ class ExploitDetector:
                 continue
             self._pending.append(ev)
 
+    def emit_events(self, events: list[ExploitEvent]) -> None:
+        """Record alerts that are not exploit scans. The caller chose severity."""
+        if events:
+            self._emit(events)
+
     def flush(self) -> None:
         if not self._pending:
             return

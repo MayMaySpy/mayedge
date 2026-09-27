@@ -28,6 +28,26 @@ from mayedge.numbers import check_notional, fmt_decimal, parse_decimal
 logger = logging.getLogger(__name__)
 
 
+def protect_role_kind(order_type: str) -> tuple[str, str] | None:
+    """``(sl|tp, market|limit)`` for a Stop or Take Profit. None for a Ticket."""
+    t = order_type.lower().replace("_", "").replace("-", "").replace(" ", "")
+    if t in {"2", "3"} or "stoploss" in t:
+        role = "sl"
+    elif t in {"4", "5"} or "takeprofit" in t:
+        role = "tp"
+    else:
+        return None
+    limit = "limit" in t or t in {"3", "5"}
+    return role, "limit" if limit else "market"
+
+
+def _position_tied(remaining: str) -> bool:
+    try:
+        return float(remaining) <= 0
+    except (TypeError, ValueError):
+        return False
+
+
 class OrderService:
     """SignerClient order placement; account state lives in account_service."""
 
@@ -511,11 +531,44 @@ class OrderService:
                 slippage=slippage,
             )
             built.append(("tp", str(tp.get("kind") or ""), req, coi))
-        if len(built) == 1:
-            role, kind, req, coi = built[0]
+        existing: dict[str, list[Any]] = {"sl": [], "tp": []}
+        for order in account_service.list_open_orders():
+            if order.market_index != market_index:
+                continue
+            parsed = protect_role_kind(order.order_type)
+            if parsed is None:
+                continue
+            if (order.side == "sell") != is_ask:
+                continue
+            existing[parsed[0]].append(order)
+        to_create: list[tuple[str, str, CreateOrderTxReq, int]] = []
+        amended: dict[str, Any] | None = None
+        for role, kind, req, coi in built:
+            same = [
+                order
+                for order in existing[role]
+                if protect_role_kind(order.order_type) == (role, kind)
+            ]
+            other = [order for order in existing[role] if order not in same]
+            for order in other:
+                await self.cancel_order(order.market_index, order.order_index)
+            target = same[0] if same and (req.BaseAmount > 0 or _position_tied(same[0].remaining)) else None
+            extras = same[1:] if target is not None else same
+            for order in extras:
+                await self.cancel_order(order.market_index, order.order_index)
+            if target is None:
+                to_create.append((role, kind, req, coi))
+                continue
+            amended = await self._modify_conditional(target.order_index, req)
+        if not to_create:
+            if amended is None:
+                raise ValueError("Set a stop or take profit")
+            return amended
+        if len(to_create) == 1:
+            role, kind, req, coi = to_create[0]
             tx_hash = await self._send_sl_tp_leg(role, kind, req, meta)
             return {"tx_hash": tx_hash, "client_order_index": coi}
-        orders = [row[2] for row in built]
+        orders = [row[2] for row in to_create]
         _tx, resp, err = await self._retry_nonce(
             lambda: self.signer.create_grouped_orders(
                 grouping_type=self.signer.GROUPING_TYPE_ONE_CANCELS_THE_OTHER,
@@ -525,8 +578,24 @@ class OrderService:
         tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {
             "tx_hash": tx_hash,
-            "client_order_index": built[0][3],
+            "client_order_index": to_create[0][3],
         }
+
+    async def _modify_conditional(self, order_index: int, req: CreateOrderTxReq) -> dict[str, Any]:
+        meta = self._market_meta(req.MarketIndex)
+        _tx, resp, err = await self._retry_nonce(
+            lambda: self.signer.modify_order(
+                market_index=req.MarketIndex,
+                order_index=order_index,
+                base_amount=req.BaseAmount,
+                price=req.Price,
+                trigger_price=req.TriggerPrice,
+            )
+        )
+        if err:
+            self._raise_order_err(err, meta)
+        tx_hash = self._require_tx(resp, err, action="Modify")
+        return {"tx_hash": tx_hash, "client_order_index": req.ClientOrderIndex}
 
     async def modify_order(
         self,
@@ -535,14 +604,25 @@ class OrderService:
         price: str,
         *,
         size: str | None = None,
+        trigger: str | None = None,
     ) -> dict[str, Any]:
-        """Amend a live order. order_index may be exchange index or client_order_index."""
+        """Amend a live order. order_index may be exchange index or client_order_index.
+
+        ``trigger`` is the Stop or Take Profit trigger. Omit it to leave the trigger.
+        ``size`` None leaves size unchanged (including a position-tied close).
+        """
         meta = self._market_meta(market_index)
         price_int = self._scale_price(price, meta.price_decimals)
+        trigger_int = (
+            0 if trigger is None else self._scale_price(trigger, meta.price_decimals)
+        )
         if size is not None:
             base_amount = self._scale_size(size, meta.size_decimals)
-            self._check_maker_size(meta, base_amount, price_int)
-            self._check_notional(meta, base_amount, price_int)
+            if trigger is None:
+                self._check_maker_size(meta, base_amount, price_int)
+                self._check_notional(meta, base_amount, price_int)
+            elif base_amount > 0:
+                self._check_notional(meta, base_amount, price_int)
         else:
             base_amount = 0  # NilOrderBaseAmount — leave size unchanged
         _tx, resp, err = await self._retry_nonce(
@@ -551,6 +631,7 @@ class OrderService:
                 order_index=order_index,
                 base_amount=base_amount,
                 price=price_int,
+                trigger_price=trigger_int,
             )
         )
         if err:
@@ -558,12 +639,48 @@ class OrderService:
         tx_hash = self._require_tx(resp, err, action="Modify")
         return {"tx_hash": tx_hash}
 
+    async def _amend_protect_trigger(
+        self,
+        live,
+        *,
+        role: str,
+        kind: str,
+        trigger: str,
+        slippage: float = 0.01,
+    ) -> dict[str, Any]:
+        """Move a Stop or Take Profit to a new trigger. Market cap follows the trigger."""
+        meta = self._market_meta(live.market_index)
+        is_ask = live.side == "sell"
+        self._check_trigger_side(meta, is_ask=is_ask, role=role, trigger=trigger)
+        if kind == "market":
+            price_int = self._trigger_exec_price(
+                meta,
+                is_ask=is_ask,
+                kind="market",
+                trigger=trigger,
+                price=None,
+                slippage=slippage,
+            )
+            price = fmt_decimal(from_scaled(price_int, meta.price_decimals)) or trigger
+        else:
+            price = str(live.price)
+        return await self.modify_order(
+            live.market_index,
+            live.order_index,
+            price,
+            trigger=trigger,
+        )
+
     async def amend_ticket(self, market_index: int, order_index: int, price: str) -> dict[str, Any]:
         live = account_service.find_open_order(market_index, order_index)
         if live is None:
             raise ValueError("Order not found")
         if is_algo_client_order(live.client_order_index):
             raise ValueError("Cannot amend a Clip")
+        parsed = protect_role_kind(live.order_type)
+        if parsed:
+            role, kind = parsed
+            return await self._amend_protect_trigger(live, role=role, kind=kind, trigger=price)
         return await self.modify_order(
             market_index,
             order_index,

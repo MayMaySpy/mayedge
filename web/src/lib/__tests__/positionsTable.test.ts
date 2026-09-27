@@ -11,6 +11,7 @@ import {
   protectTriggersLabel,
   roeFromPnl,
   sortPositionRows,
+  chartOrderPrice,
   stopTakeKind,
   triggerFromPnl,
   triggerOnCorrectSide,
@@ -134,6 +135,18 @@ describe("stopTakeKind", () => {
     expect(stopTakeKind("take-profit")).toBe("tp");
     expect(stopTakeKind("4")).toBe("tp");
     expect(stopTakeKind("limit")).toBeNull();
+  });
+});
+
+describe("chartOrderPrice", () => {
+  it("uses the trigger for a market stop, not the slippage cap", () => {
+    expect(
+      chartOrderPrice({ order_type: "stop-loss", price: "89.1", trigger_price: "90" })
+    ).toBe(90);
+  });
+
+  it("uses the limit price for a resting Ticket", () => {
+    expect(chartOrderPrice({ order_type: "limit", price: "100", trigger_price: "" })).toBe(100);
   });
 });
 
