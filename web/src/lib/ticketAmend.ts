@@ -5,11 +5,12 @@ export type TicketAmend = {
   marketIndex: number;
   orderIndex: string;
   price: string;
+  size?: string;
 };
 
 export type TicketAmendHit = {
   overlay: ChartOverlay;
-  region: "cancel" | "body";
+  region: "cancel" | "body" | "size";
 };
 
 export type TicketAmendHost = {
@@ -127,6 +128,12 @@ export function createTicketAmend(
     destroy() {
       captured = null;
       restorePan();
+    },
+    lock(overlayId: string) {
+      locked.add(overlayId);
+    },
+    isLocked(overlayId: string) {
+      return locked.has(overlayId);
     },
   };
 }

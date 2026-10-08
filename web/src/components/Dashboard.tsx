@@ -188,6 +188,7 @@ function ChartPanel({
       const tag = protect === "sl" ? "SL " : protect === "tp" ? "TP " : algo ? `${algo} ` : "";
       const qty = parseFloat(o.remaining) > 0 ? formatSize(o.remaining) : "";
       const side = buy ? "BUY" : "SELL";
+      const isLimitTicket = !protect && !algo;
       const label = protect
         ? `${tag}${qty}`.trim()
         : `${tag}${side}${qty ? ` ${qty}` : ""}`;
@@ -197,6 +198,9 @@ function ChartPanel({
         price: px,
         color: buy ? theme.bid : theme.ask,
         label,
+        prefixLabel: isLimitTicket ? `${tag}${side}` : undefined,
+        qtyLabel: isLimitTicket && qty ? qty : undefined,
+        qtyEditable: isLimitTicket && Boolean(qty) && tradingEnabled,
         marketIndex: o.market_index,
         orderIndex: o.order_index,
         interactive: tradingEnabled && !algo,
@@ -231,7 +235,7 @@ function ChartPanel({
 
   const handleTicketAmend = useCallback(async (amend: TicketAmend) => {
     try {
-      await api.amendOrder(amend.marketIndex, amend.orderIndex, amend.price);
+      await api.amendOrder(amend.marketIndex, amend.orderIndex, amend.price, amend.size);
       notifyOk("Order amended");
     } catch (e) {
       notifyErr(e instanceof Error ? e.message : "Amend failed");
@@ -324,7 +328,7 @@ export function Dashboard() {
 
   const slipFrac = useCallback(() => {
     const n = parseFloat(loadSlipPct());
-    return Number.isFinite(n) && n > 0 ? n / 100 : 0.01;
+    return Number.isFinite(n) && n > 0 ? Math.min(n / 100, 0.05) : 0.01;
   }, []);
 
   useEffect(() => {

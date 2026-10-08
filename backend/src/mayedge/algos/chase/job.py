@@ -30,6 +30,7 @@ from mayedge.algos.chase.util import (
 )
 from mayedge.algos.ledger import Ledger
 from mayedge.config import settings
+from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional
 
 logger = logging.getLogger(__name__)
@@ -417,6 +418,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                 self._publish()
 
     async def _run(self) -> None:
+        token = budget.enter_lane("algo")
         try:
             while not self._stop.is_set():
                 with contextlib.suppress(TimeoutError):
@@ -440,7 +442,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if _is_rate_limit(e) or _is_invalid_nonce(e):
+                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
                         self._handle_tx_err(e)
                         continue
                     logger.exception("chase iceberg error")
@@ -455,6 +457,8 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                     break
         except asyncio.CancelledError:
             raise
+        finally:
+            budget.leave_lane(token)
 
     def _exec(self) -> ChaseExecution:
         return self._book.execution()

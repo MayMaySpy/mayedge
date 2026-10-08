@@ -137,6 +137,95 @@ class TestOrderBookCurrentMarket(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(m.get("market_index") == 1 for m in books))
         self.assertFalse(any(m.get("market_index") == 120 for m in books))
 
+    async def test_payload_truncates_stored_depth(self) -> None:
+        feed = OrderBookFeed(lambda _msg: None)
+        feed.set_current_market(120)
+        bids = [{"price": str(1000 - i), "size": "1"} for i in range(300)]
+        asks = [{"price": str(2000 + i), "size": "1"} for i in range(300)]
+        await feed.handle_message(
+            {
+                "type": "subscribed/order_book",
+                "channel": "order_book:120",
+                "order_book": {"bids": bids, "asks": asks, "nonce": 7},
+            }
+        )
+        stored = feed._order_books[120]
+        self.assertEqual(len(stored.bids), 300)
+        self.assertEqual(len(stored.asks), 300)
+        payload = feed.order_book_payload(120)
+        assert payload is not None
+        self.assertEqual(len(payload["bids"]), 250)
+        self.assertEqual(len(payload["asks"]), 250)
+        self.assertEqual(payload["bids"][0]["price"], "1000")
+
+    async def test_nonce_gap_drops_deltas_until_snapshot(self) -> None:
+        resub: list[int] = []
+        feed = OrderBookFeed(lambda _msg: None, resubscribe=resub.append)
+        feed.set_current_market(120)
+        await feed.handle_message(
+            {
+                "type": "subscribed/order_book",
+                "channel": "order_book:120",
+                "order_book": {
+                    "bids": [{"price": "1", "size": "2"}],
+                    "asks": [{"price": "3", "size": "4"}],
+                    "nonce": 10,
+                },
+            }
+        )
+        self.assertEqual(feed.best_bid_ask(120), ("1", "3"))
+        await feed.handle_message(
+            {
+                "type": "update/order_book",
+                "channel": "order_book:120",
+                "order_book": {
+                    "bids": [{"price": "9", "size": "1"}],
+                    "asks": [],
+                    "nonce": 40,
+                    "begin_nonce": 1,
+                },
+            }
+        )
+        self.assertEqual(resub, [120])
+        self.assertFalse(feed.has_book(120))
+        self.assertFalse(feed.is_synced(120))
+        self.assertEqual(feed.best_bid_ask(120), (None, None))
+        await feed.handle_message(
+            {
+                "type": "update/order_book",
+                "channel": "order_book:120",
+                "order_book": {
+                    "bids": [{"price": "8", "size": "1"}],
+                    "asks": [{"price": "9", "size": "1"}],
+                    "nonce": 41,
+                    "begin_nonce": 40,
+                },
+            }
+        )
+        self.assertFalse(feed.has_book(120))
+        await feed.handle_message(
+            {
+                "type": "subscribed/order_book",
+                "channel": "order_book:120",
+                "order_book": {
+                    "bids": [{"price": "5", "size": "1"}],
+                    "asks": [{"price": "6", "size": "1"}],
+                    "nonce": 80,
+                },
+            }
+        )
+        self.assertTrue(feed.is_synced(120))
+        self.assertEqual(feed.best_bid_ask(120), ("5", "6"))
+
+    async def test_invalidate_hides_touch_until_snapshot(self) -> None:
+        feed = OrderBookFeed(lambda _msg: None)
+        feed.set_current_market(120)
+        await feed.handle_message(_SNAP)
+        feed.invalidate(120)
+        self.assertTrue(feed.has_book(120))
+        self.assertFalse(feed.is_synced(120))
+        self.assertEqual(feed.best_bid_ask(120), (None, None))
+
     async def test_same_market_activate_enables_book(self) -> None:
         gw = LighterGateway.__new__(LighterGateway)
         gw._lock = asyncio.Lock()

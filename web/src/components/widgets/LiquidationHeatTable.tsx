@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { api, type LiquidationSummaryHours, type Market } from "@/lib/api";
 import { uniqueSymbolMarkets } from "@/lib/algos";
+import { LIQ_HOURS, persistLiqHours } from "@/lib/liqHours";
 import {
   foldLiquidationWindow,
   rankLiquidationHeat,
@@ -21,15 +22,7 @@ import {
 import { alignRowToTop } from "@/lib/scanScroll";
 import { cn, formatUsdCompact } from "@/lib/utils";
 
-const HOURS_KEY = "mayedge-scan-liq-hours";
 const SORT_KEY = "mayedge-scan-liq-sort";
-const HOURS = [
-  { value: 1, label: "1h" },
-  { value: 4, label: "4h" },
-  { value: 24, label: "24h" },
-  { value: 168, label: "7d" },
-  { value: 720, label: "30d" },
-] as const;
 
 type PersistedSort = { key: LiqHeatSort; dir: LiqHeatDir };
 
@@ -44,24 +37,6 @@ const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end" }[]
   { key: "net", label: "Net", align: "end" },
   { key: null, label: "", align: "start" },
 ];
-
-function loadHours(fallback: LiquidationSummaryHours): LiquidationSummaryHours {
-  try {
-    const n = parseInt(localStorage.getItem(HOURS_KEY) ?? "", 10);
-    if (HOURS.some((h) => h.value === n)) return n as LiquidationSummaryHours;
-  } catch {
-    /* ignore */
-  }
-  return fallback;
-}
-
-function persistHours(hours: LiquidationSummaryHours) {
-  try {
-    localStorage.setItem(HOURS_KEY, String(hours));
-  } catch {
-    /* ignore */
-  }
-}
 
 function loadSort(): PersistedSort {
   try {
@@ -269,7 +244,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
   };
 
   const selectHours = (next: LiquidationSummaryHours) => {
-    persistHours(next);
+    persistLiqHours(next);
     onHoursChange(next);
   };
 
@@ -283,10 +258,10 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
           value={String(hours)}
           onValueChange={(v) => {
             const n = parseInt(v, 10);
-            if (HOURS.some((h) => h.value === n)) selectHours(n as LiquidationSummaryHours);
+            if (LIQ_HOURS.some((h) => h.value === n)) selectHours(n as LiquidationSummaryHours);
           }}
         >
-          {HOURS.map((h) => (
+          {LIQ_HOURS.map((h) => (
             <ToggleGroupItem
               key={h.value}
               value={String(h.value)}
@@ -427,5 +402,3 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
     </div>
   );
 });
-
-export { loadHours as loadLiqHours };

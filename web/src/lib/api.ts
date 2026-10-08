@@ -295,12 +295,46 @@ export type AlertKind =
   | "dislocation"
   | "funding"
   | "liq_cluster"
-  | "tone";
+  | "tone"
+  | "signal";
+
+export interface AlertFactorRow {
+  kind: string;
+  direction?: string;
+  value: number;
+  unit: string;
+  score?: number;
+  window?: string;
+}
+
+export interface AlertBoardRow {
+  market_index: number;
+  symbol: string;
+  score: number;
+  severity?: number;
+  setup: string;
+  direction: string;
+  factors: AlertFactorRow[];
+  /** 5m price move, sent even when price itself is not a factor. */
+  move_pct?: number | null;
+  ts: number;
+}
 
 export interface ToneTimeframes {
   timeframes: string[];
   choices: string[];
   cap: number;
+}
+
+export interface AutoKillState {
+  type?: string;
+  armed: boolean;
+  loss_usd: number | null;
+  profit_usd: number | null;
+  fired_at: number | null;
+  fired_reason: string | null;
+  fired_upnl: number | null;
+  last_kill_status: string | null;
 }
 
 export interface AlertEvent {
@@ -315,6 +349,10 @@ export interface AlertEvent {
   baseline: number | null;
   unit: string;
   note: string;
+  score?: number;
+  setup?: string;
+  factors?: AlertFactorRow[];
+  started_at?: number;
 }
 
 export const api = {
@@ -351,6 +389,7 @@ export const api = {
     const qs = q.toString();
     return request<AlertEvent[]>(`/alerts${qs ? `?${qs}` : ""}`);
   },
+  alertBoard: () => request<AlertBoardRow[]>("/alerts/board"),
   toneTimeframes: () => request<ToneTimeframes>("/alerts/timeframes"),
   setToneTimeframes: (timeframes: string[]) =>
     request<ToneTimeframes>("/alerts/timeframes", {
@@ -370,10 +409,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ market_index, order_index: String(order_index) }),
     }),
-  amendOrder: (market_index: number, order_index: string | number, price: string) =>
+  amendOrder: (
+    market_index: number,
+    order_index: string | number,
+    price: string,
+    size?: string,
+  ) =>
     request("/orders/modify", {
       method: "POST",
-      body: JSON.stringify({ market_index, order_index: String(order_index), price }),
+      body: JSON.stringify({
+        market_index,
+        order_index: String(order_index),
+        price,
+        ...(size != null ? { size } : {}),
+      }),
     }),
   cancelAll: (market_index?: number | null) =>
     request("/orders/cancel-all", {
@@ -435,4 +484,7 @@ export const api = {
       flatten?: Array<{ market_index?: number; symbol?: string; ok?: boolean; error?: string | null }>;
       algos?: AlgoBook;
     }>("/kill", { method: "POST", body: JSON.stringify({ flatten }) }),
+  autoKill: () => request<AutoKillState>("/kill/auto"),
+  setAutoKill: (body: { armed: boolean; loss_usd?: number | null; profit_usd?: number | null }) =>
+    request<AutoKillState>("/kill/auto", { method: "PUT", body: JSON.stringify(body) }),
 };

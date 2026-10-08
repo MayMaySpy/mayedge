@@ -31,6 +31,7 @@ class OrderBookFeed:
         self._book_seq: dict[int, int] = {}
         self._book_synced: dict[int, bool] = {}
         self._pending_snapshot: set[int] = set()
+        self._awaiting_snapshot: set[int] = set()
         self._pending_delta_bids: dict[int, dict[str, str]] = {}
         self._pending_delta_asks: dict[int, dict[str, str]] = {}
         self._book_flush_task: asyncio.Task[None] | None = None
@@ -96,7 +97,7 @@ class OrderBookFeed:
 
     @classmethod
     def sorted_side(
-        cls, levels: list[OrderBookLevel], *, bids: bool, depth: int = BOOK_DEPTH
+        cls, levels: list[OrderBookLevel], *, bids: bool, depth: int | None = None
     ) -> list[OrderBookLevel]:
         kept: list[OrderBookLevel] = []
         for lvl in levels:
@@ -107,6 +108,8 @@ class OrderBookFeed:
             if size > 0 and lvl.price:
                 kept.append(lvl)
         kept.sort(key=cls._level_price, reverse=bids)
+        if depth is None:
+            return kept
         return kept[:depth]
 
     @classmethod
@@ -116,7 +119,7 @@ class OrderBookFeed:
         updates: list[OrderBookLevel],
         *,
         bids: bool,
-        depth: int = BOOK_DEPTH,
+        depth: int | None = None,
     ) -> list[OrderBookLevel]:
         by_price = {lvl.price: lvl for lvl in existing}
         for lvl in updates:
@@ -150,12 +153,14 @@ class OrderBookFeed:
             "type": "order_book_snapshot",
             "market_index": market_index,
             "seq": seq,
-            "bids": [{"price": b.price, "size": b.size} for b in snap.bids],
-            "asks": [{"price": a.price, "size": a.size} for a in snap.asks],
+            "bids": [{"price": b.price, "size": b.size} for b in snap.bids[:BOOK_DEPTH]],
+            "asks": [{"price": a.price, "size": a.size} for a in snap.asks[:BOOK_DEPTH]],
             "timestamp": snap.timestamp,
         }
 
     def best_bid_ask(self, market_index: int) -> tuple[str | None, str | None]:
+        if not self.is_synced(market_index):
+            return None, None
         snap = self._order_books.get(market_index)
         if not snap:
             return None, None
@@ -175,11 +180,11 @@ class OrderBookFeed:
             return
         self._broadcast({"type": "book_sync", "market_index": market_index, "synced": synced})
 
-    def request_snapshot(self, market_index: int | None = None) -> None:
-        mi = market_index if market_index is not None else self._current_market_index
-        if mi is None or mi not in self._order_books:
-            return
-        self._queue_snapshot(mi)
+    def invalidate(self, market_index: int) -> None:
+        """Drop sync until the next ``subscribed/order_book``. In-flight deltas are ignored."""
+        self._awaiting_snapshot.add(market_index)
+        self._emit_book_sync(market_index, False)
+        self._clear_pending_deltas(market_index)
 
     @staticmethod
     def _accumulate_delta(
@@ -316,19 +321,23 @@ class OrderBookFeed:
                     last,
                     begin_nonce,
                 )
-        if isinstance(nonce, int):
-            self._last_book_nonce[market_index] = nonce
-
         if nonce_gap:
             self._order_books.pop(market_index, None)
             self._last_book_nonce.pop(market_index, None)
             self._clear_pending_deltas(market_index)
-            self._emit_book_sync(market_index, False)
+            self.invalidate(market_index)
             if self._resubscribe:
                 self._resubscribe(market_index)
             return
 
-        if is_snapshot or prev is None:
+        if not is_snapshot and (market_index in self._awaiting_snapshot or prev is None):
+            return
+
+        if isinstance(nonce, int):
+            self._last_book_nonce[market_index] = nonce
+
+        if is_snapshot:
+            self._awaiting_snapshot.discard(market_index)
             snapshot = OrderBookSnapshot(
                 market_index=market_index,
                 bids=self.sorted_side(incoming_bids, bids=True),
@@ -347,6 +356,8 @@ class OrderBookFeed:
             self._queue_snapshot(market_index)
             return
 
+        if prev is None:
+            return
         snapshot = OrderBookSnapshot(
             market_index=market_index,
             bids=self.merge_side(prev.bids, incoming_bids, bids=True),

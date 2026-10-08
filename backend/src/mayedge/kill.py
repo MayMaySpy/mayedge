@@ -29,8 +29,6 @@ class OrdersKill(Protocol):
         reduce_only: bool,
     ) -> Any: ...
 
-    def kick_refresh(self) -> None: ...
-
 
 class AccountSummaryKill(Protocol):
     positions: list[Any]
@@ -119,8 +117,6 @@ async def kill(
 
     flatten_ok = all(leg.get("ok") for leg in flatten_legs) if flatten_legs else True
     killed = cancel_ok and (not flatten or flatten_ok)
-    if orders.enabled:
-        orders.kick_refresh()
 
     return KillResult(
         status="killed" if killed else "partial",

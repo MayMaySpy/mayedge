@@ -59,6 +59,45 @@ class AmendTicketTests(IsolatedAsyncioTestCase):
         self.assertEqual(call["price"], 10125)
         self.assertEqual(call["base_amount"], 4)
 
+    async def test_amends_remaining_size_only(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        svc._signer.modify_order = AsyncMock(return_value=(None, "0xmod", None))
+        live = _ticket()
+
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order",
+                return_value=live,
+            ),
+        ):
+            out = await svc.amend_ticket(1, 42, "100.00", size="0.2")
+
+        self.assertEqual(out["tx_hash"], "0xmod")
+        call = svc._signer.modify_order.await_args.kwargs
+        self.assertEqual(call["price"], 10000)
+        self.assertEqual(call["base_amount"], 2)
+
+    async def test_rejects_size_on_a_stop(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        svc._signer.modify_order = AsyncMock(return_value=(None, "0xmod", None))
+        live = _ticket()
+        live.side = "sell"
+        live.order_type = "stop-loss"
+        live.reduce_only = True
+        live.trigger_price = "90"
+        live.price = "89.10"
+
+        with patch(
+            "mayedge.lighter.orders.account_service.find_open_order",
+            return_value=live,
+        ), self.assertRaisesRegex(ValueError, "size"):
+            await svc.amend_ticket(1, 42, "85", size="0.2")
+
+        svc._signer.modify_order.assert_not_called()
+
     async def test_chart_drag_of_a_market_stop_moves_the_trigger(self) -> None:
         svc = OrderService()
         svc._signer = MagicMock()

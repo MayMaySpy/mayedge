@@ -111,3 +111,32 @@ class AdvancedTwapJobTests(IsolatedAsyncioTestCase):
             self.assertEqual(orders.creates[0]["price"], "99.5")
             await book.stop()
             self.assertEqual(len(orders.cancels), 1)
+
+    async def test_failed_send_does_not_leave_a_live_clip(self) -> None:
+        from mayedge.algos.twap.job import AdvancedTwapRunner
+
+        with isolated_twap():
+            gw = FakeGateway()
+            gw.set_book("99.5", "100.5")
+            gw.market.mark_price = 100.0
+            orders = FakeOrderService()
+            orders.create_error = ValueError("venue down")
+            book = AdvancedTwapBook(
+                execution=lambda: make_execution(gw, orders),
+                broadcast=lambda _p: None,
+            )
+            job = AdvancedTwapRunner(book)
+            with self.assertRaises(ValueError):
+                await job.start(
+                    algo_id="twap-1",
+                    market_index=1,
+                    params=AdvancedTwapParams(
+                        side="buy",
+                        qty=Decimal("10"),
+                        duration_seconds=60,
+                        frequency_seconds=30,
+                        style="passive",
+                        randomize=False,
+                    ),
+                )
+            self.assertEqual(job.ledger.live_clips(), [])

@@ -111,6 +111,24 @@ class ToneBook:
                     out.append((market_index, resolution))
         return out
 
+    def gaps(self, markets: Iterable[int], *, now: float) -> list[tuple[int, str]]:
+        """Unseeded series, plus seeded ones whose last bar is more than one step behind."""
+        out = list(self.missing(markets))
+        seen = set(out)
+        for market_index in markets:
+            for resolution in self.timeframes:
+                key = (market_index, resolution)
+                if key in seen:
+                    continue
+                window = self._series.get(key)
+                if window is None or not window.bars:
+                    out.append(key)
+                    continue
+                step = TONE_TIMEFRAME_SECONDS[resolution]
+                if now > window.bars[-1].time + 2 * step:
+                    out.append(key)
+        return out
+
     def seed(
         self,
         market_index: int,

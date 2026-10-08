@@ -14,6 +14,7 @@ import websockets
 
 from mayedge import feed_health
 from mayedge.config import settings
+from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.channels import split_ws_type
 from mayedge.lighter.equity import (
     format_cross_liquidation_price,
@@ -21,7 +22,7 @@ from mayedge.lighter.equity import (
     portfolio_margin_usd,
     trade_available_usd,
 )
-from mayedge.lighter.errors import RATE_MSG, VenueBlocked, venue_client_error
+from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
@@ -38,22 +39,21 @@ from mayedge.lighter.parse import (
     parse_order,
     parse_position,
     parse_position_fundings_page,
+    position_funding_query_params,
     public_assets,
 )
 
 logger = logging.getLogger(__name__)
 
-_ACCOUNT_WS_TTL = 6 * 60
+# Auth tokens last up to 8h. Reconnect before a 7h token dies.
+_AUTH_TTL_S = 7 * 60 * 60
+_ACCOUNT_WS_TTL = _AUTH_TTL_S - 10 * 60
 _PING_EVERY = 25.0
 _SILENCE_S = 45.0
 _REFRESH_DELAY = 0.2
 _ACCOUNT_PUBLISH_MS = 0.15
 _LIMITS_TTL_S = 300.0
 _ASSET_META_TTL_S = 300.0
-_REST_COOLDOWN_S = 90.0
-# Lighter Standard is 60 REST / rolling minute. Stay under so UI + stop still fit.
-_REST_BUDGET = 50
-_REST_WINDOW_S = 60.0
 
 
 class AccountService:
@@ -74,8 +74,6 @@ class AccountService:
         self._orders_hydrated = False
         self._limits_at = 0.0
         self._asset_meta_at = 0.0
-        self._rest_cool_until = 0.0
-        self._rest_hits: list[float] = []
 
     def orders_hydrated(self) -> bool:
         return self._orders_hydrated
@@ -133,6 +131,9 @@ class AccountService:
         payload = self._summary.to_public_dict()
         payload["type"] = "account"
         return payload
+
+    def cached_summary(self) -> AccountSummary:
+        return self._summary
 
     def _remember_assets(self, incoming: Any) -> None:
         if not incoming:
@@ -241,34 +242,18 @@ class AccountService:
         gateway.broadcast(self.cached_account_payload() or {})
 
     def _rest_cooling(self) -> bool:
-        return time.monotonic() < self._rest_cool_until
+        return budget.cooling()
 
     def _note_rest_error(self, err: BaseException, what: str) -> bool:
+        if isinstance(err, BudgetRefused):
+            logger.info("%s: %s", what, err)
+            return True
         mapped = venue_client_error(err)
         if not mapped:
             return False
-        self._rest_cool_until = time.monotonic() + _REST_COOLDOWN_S
-        logger.warning("%s: %s — cooling off %.0fs", what, mapped[1], _REST_COOLDOWN_S)
+        budget.note_blocked()
+        logger.warning("%s: %s — cooling off %.0fs", what, mapped[1], 60)
         return True
-
-    def _require_rest(self) -> None:
-        if self._rest_cooling():
-            wait = max(1, int(self._rest_cool_until - time.monotonic()))
-            raise VenueBlocked(429, f"{RATE_MSG} ({wait}s)")
-
-    def _take_rest(self, n: int = 1) -> None:
-        """Spend ``n`` of the rolling 60s REST budget. Raises VenueBlocked if empty."""
-        self._require_rest()
-        if n <= 0:
-            return
-        now = time.monotonic()
-        self._rest_hits = [t for t in self._rest_hits if now - t < _REST_WINDOW_S]
-        if len(self._rest_hits) + n > _REST_BUDGET:
-            oldest = self._rest_hits[0] if self._rest_hits else now
-            wait = max(1, int(_REST_WINDOW_S - (now - oldest)))
-            self._rest_cool_until = now + wait
-            raise VenueBlocked(429, f"{RATE_MSG} ({wait}s)")
-        self._rest_hits.extend([now] * n)
 
     def _copy_fees(self, src: AccountSummary, dest: AccountSummary) -> None:
         dest.user_tier = src.user_tier
@@ -284,7 +269,7 @@ class AccountService:
         if not force and self._limits_at and now - self._limits_at < _LIMITS_TTL_S:
             return
         try:
-            self._take_rest()
+            await budget.take("background")
         except VenueBlocked:
             return
         try:
@@ -351,11 +336,35 @@ class AccountService:
             logger.warning("account ws auth token error")
             return None
 
+    async def _reconcile_account(self) -> None:
+        """REST snapshot after the account socket drops. The live feed covers the rest."""
+        token = budget.enter_lane("read")
+        try:
+            await self._load_asset_meta()
+            prev = self._summary
+            self._summary = await self.fetch_account_summary()
+            self._copy_fees(prev, self._summary)
+            self._orders_by_market = self._index_orders(self._summary.open_orders)
+            self._orders_hydrated = True
+            await self._refresh_limits()
+            self._publish()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if not self._note_rest_error(e, "account reconcile failed"):
+                logger.exception("account reconcile failed")
+        finally:
+            budget.leave_lane(token)
+
     async def _run_account_ws(self) -> None:
+        connected_once = False
         while True:
             try:
+                if connected_once:
+                    await self._reconcile_account()
                 feed_health.set_account_ws("reconnecting")
                 await self._stream_account()
+                connected_once = True
             except asyncio.CancelledError:
                 feed_health.set_account_ws("down")
                 break
@@ -532,7 +541,7 @@ class AccountService:
         if self._asset_meta and not force and now - self._asset_meta_at < _ASSET_META_TTL_S:
             return
         try:
-            self._take_rest()
+            await budget.take("background")
             resp = await lighter.OrderApi(gateway.client).asset_details()
         except VenueBlocked:
             return
@@ -558,7 +567,7 @@ class AccountService:
         if not settings.lighter_account_index:
             return AccountSummary(collateral="0", available="0", unrealized_pnl="0")
         # account() + account_active_orders()
-        self._take_rest(2)
+        await budget.take(n=2)
 
         try:
             account_api = lighter.AccountApi(gateway.client)
@@ -636,7 +645,7 @@ class AccountService:
         account_index = settings.lighter_account_index
         if not account_index or not self._auth_token_fn:
             raise ValueError("Account not configured")
-        self._take_rest()
+        await budget.take()
         try:
             auth = await self._auth_token_fn()
             order_api = lighter.OrderApi(gateway.client)
@@ -669,15 +678,14 @@ class AccountService:
         account_index = settings.lighter_account_index
         if not account_index or not self._auth_token_fn:
             raise ValueError("Account not configured")
-        self._take_rest()
-        params: dict[str, Any] = {
-            "account_index": account_index,
-            "limit": min(max(limit, 1), 100),
-        }
-        if cursor:
-            params["cursor"] = cursor
-        if market_id is not None:
-            params["market_ids"] = str(int(market_id))
+        lim = min(max(limit, 1), 100)
+        params = position_funding_query_params(
+            account_index,
+            lim,
+            cursor=cursor,
+            market_id=market_id,
+        )
+        await budget.take()
         try:
             auth = await self._auth_token_fn()
             async with httpx.AsyncClient(base_url=settings.base_url, timeout=20.0) as client:

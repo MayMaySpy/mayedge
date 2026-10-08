@@ -24,13 +24,12 @@ class Settings(BaseSettings):
 
     lighter_network: LighterNetwork = LighterNetwork.TESTNET
     lighter_account_index: int | None = None
-    lighter_api_key_index: int = 2
+    lighter_api_key_index: int = 4
     lighter_api_private_key: str | None = None
     default_market_symbol: str = "LIT"
     db_path: str = "./data/mayedge.db"
     web_root: str = ""
     alerts_config: str = "./config/alerts.yaml"
-    liq_subscribe_mode: str = "all"
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
     max_order_notional: float | None = 50_000.0

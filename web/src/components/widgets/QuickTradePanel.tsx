@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
 import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
@@ -12,7 +13,6 @@ import { useQuickPanel } from "@/lib/quickPanel";
 import { cn } from "@/lib/utils";
 
 const POS_KEY = "mayedge-quick-panel-pos";
-const SLIP_KEY = "mayedge-slippage-pct";
 
 interface Pos {
   x: number;
@@ -37,13 +37,8 @@ function clamp01(n: number) {
 }
 
 function slipFrac() {
-  try {
-    const n = parseFloat(localStorage.getItem(SLIP_KEY) ?? "");
-    if (Number.isFinite(n) && n > 0 && n <= 50) return n / 100;
-  } catch {
-    /* ignore */
-  }
-  return 0.01;
+  const n = parseFloat(loadSlipPct());
+  return Number.isFinite(n) && n > 0 ? n / 100 : 0.01;
 }
 
 interface QuickTradePanelProps {

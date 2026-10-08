@@ -275,6 +275,25 @@ def desk_position_funding(raw: Any) -> dict[str, Any]:
     }
 
 
+def position_funding_query_params(
+    account_index: int,
+    limit: int,
+    *,
+    cursor: str | None = None,
+    market_id: int | None = None,
+) -> dict[str, Any]:
+    """Query params for GET /api/v1/positionFunding (venue filter is ``market_ids``)."""
+    params: dict[str, Any] = {
+        "account_index": account_index,
+        "limit": limit,
+    }
+    if cursor:
+        params["cursor"] = cursor
+    if market_id is not None:
+        params["market_ids"] = str(int(market_id))
+    return params
+
+
 def parse_position_fundings_page(payload: Any) -> dict[str, Any]:
     """Desk shape for GET /api/v1/positionFunding, skipping the SDK models."""
     if not isinstance(payload, dict):

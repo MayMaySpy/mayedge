@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from mayedge.lighter.account import AccountService
 from mayedge.lighter.equity import format_cross_liquidation_price, liquidation_threshold_usd
 from mayedge.lighter.gateway import LighterGateway
-from mayedge.lighter.models import MarketMeta, Position
+from mayedge.lighter.models import MarketMeta, Position, parse_to_int
 
 
 def _position(**overrides: object) -> Position:
@@ -150,6 +150,11 @@ class CrossLiquidationPriceTests(TestCase):
 
 
 class AssetMetaTests(IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from mayedge.lighter.budget import budget
+
+        budget.reset()
+
     async def test_asset_details_keep_liquidation_threshold(self) -> None:
         asset = SimpleNamespace(
             symbol="ETH",
@@ -170,17 +175,15 @@ class AssetMetaTests(IsolatedAsyncioTestCase):
         self.assertEqual(svc._asset_meta["ETH"]["loan_to_value"], 0.7)
 
     async def test_order_book_details_store_maintenance_fraction(self) -> None:
-        book = SimpleNamespace(
+        detail = SimpleNamespace(
             symbol="LIT",
             market_id=120,
-            supported_price_decimals=4,
-            supported_size_decimals=2,
+            status="active",
+            price_decimals=4,
+            size_decimals=2,
             min_base_amount="1",
             min_quote_amount="10",
             market_type="perp",
-        )
-        detail = SimpleNamespace(
-            market_id=120,
             last_trade_price=4.7,
             mark_price=4.7,
             market_config=None,
@@ -192,12 +195,69 @@ class AssetMetaTests(IsolatedAsyncioTestCase):
             maintenance_margin_fraction=1200,
         )
         order_api = MagicMock()
-        order_api.order_books = AsyncMock(return_value=SimpleNamespace(order_books=[book]))
         order_api.order_book_details = AsyncMock(
-            return_value=SimpleNamespace(order_book_details=[detail])
+            return_value=SimpleNamespace(order_book_details=[detail], spot_order_book_details=[])
         )
         gw = LighterGateway()
         gw._client = cast(Any, object())
         with patch("mayedge.lighter.gateway.lighter.OrderApi", return_value=order_api):
             await gw._load_markets()
         self.assertEqual(gw._markets[120].maintenance_margin_fraction, 1200)
+
+    async def test_zero_size_decimals_are_kept(self) -> None:
+        """SKY size scale is 0. Treating 0 as missing sends 10_000× the order."""
+        detail = SimpleNamespace(
+            symbol="SKY",
+            market_id=79,
+            status="active",
+            price_decimals=6,
+            size_decimals=0,
+            min_base_amount="100",
+            min_quote_amount="10",
+            market_type="perp",
+        )
+        order_api = MagicMock()
+        order_api.order_book_details = AsyncMock(
+            return_value=SimpleNamespace(order_book_details=[detail], spot_order_book_details=[])
+        )
+        gw = LighterGateway()
+        gw._client = cast(Any, object())
+        with patch("mayedge.lighter.gateway.lighter.OrderApi", return_value=order_api):
+            await gw._load_markets()
+        meta = gw._markets[79]
+        self.assertEqual(meta.size_decimals, 0)
+        self.assertEqual(meta.price_decimals, 6)
+        self.assertEqual(parse_to_int("100", meta.size_decimals), 100)
+
+    async def test_inactive_markets_are_skipped_and_mark_comes_from_details(self) -> None:
+        from mayedge.lighter.budget import budget
+
+        budget.reset()
+        live = SimpleNamespace(
+            symbol="ETH",
+            market_id=0,
+            status="active",
+            price_decimals=2,
+            size_decimals=4,
+            market_type="perp",
+            additional_properties={"mark_price": 2500.5},
+        )
+        dead = SimpleNamespace(
+            symbol="DEAD",
+            market_id=9,
+            status="inactive",
+            price_decimals=2,
+            size_decimals=4,
+            market_type="perp",
+        )
+        order_api = MagicMock()
+        order_api.order_book_details = AsyncMock(
+            return_value=SimpleNamespace(order_book_details=[live, dead], spot_order_book_details=[])
+        )
+        gw = LighterGateway()
+        gw._client = cast(Any, object())
+        with patch("mayedge.lighter.gateway.lighter.OrderApi", return_value=order_api):
+            await gw._load_markets()
+        self.assertEqual(set(gw._markets), {0})
+        self.assertEqual(gw._markets[0].mark_price, 2500.5)
+        order_api.order_books.assert_not_called()

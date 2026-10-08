@@ -9,6 +9,7 @@ from mayedge.lighter.parse import (
     merge_positions,
     parse_order,
     parse_position_fundings_page,
+    position_funding_query_params,
     realized_close_pnl,
 )
 from mayedge.numbers import parse_decimal
@@ -386,6 +387,11 @@ class DeskAccountPositionsTests(TestCase):
 
 
 class DeskPositionFundingTests(TestCase):
+    def test_query_params_use_market_ids(self) -> None:
+        params = position_funding_query_params(42, 50, market_id=7)
+        self.assertEqual(params["market_ids"], "7")
+        self.assertNotIn("market_id", params)
+
     def test_coerces_numeric_fields_and_side(self) -> None:
         page = parse_position_fundings_page(
             {

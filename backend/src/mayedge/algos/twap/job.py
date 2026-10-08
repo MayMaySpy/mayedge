@@ -24,6 +24,7 @@ from mayedge.algos.twap.plan import (
     validate_params,
 )
 from mayedge.config import settings
+from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional, fmt_decimal
 
 logger = logging.getLogger(__name__)
@@ -417,6 +418,7 @@ class AdvancedTwapRunner:
             self._finish()
 
     async def _run(self) -> None:
+        token = budget.enter_lane("algo")
         try:
             while not self._stop.is_set():
                 await self._run_gate.wait()
@@ -433,6 +435,10 @@ class AdvancedTwapRunner:
                     continue
                 try:
                     await self._step()
+                except BudgetRefused:
+                    self.reason = "budget"
+                    self._publish()
+                    continue
                 except Exception as e:
                     logger.exception("advanced twap error")
                     self.status = ChaseStatus.ERROR
@@ -442,6 +448,8 @@ class AdvancedTwapRunner:
                     return
         except asyncio.CancelledError:
             raise
+        finally:
+            budget.leave_lane(token)
 
     async def _step(self) -> None:
         if self.status != ChaseStatus.RUNNING or not self.params:
@@ -522,13 +530,6 @@ class AdvancedTwapRunner:
         kind = quote.get("kind")
         now = now_ms()
         px = Decimal(str(quote["price"])) if quote.get("price") else (mark or Decimal("0"))
-        clip = self.ledger.place(
-            client_order_index=coi,
-            price=px if px > 0 else Decimal("0"),
-            qty=qty,
-            now=now,
-            side=p.side,
-        )
         self.rest_qty = qty
         self.rest_price = px if px > 0 else None
         self.quote_action = "rest"
@@ -542,6 +543,13 @@ class AdvancedTwapRunner:
                 self._slippage(mark),
                 self.reduce_only,
                 client_order_index=coi,
+            )
+            clip = self.ledger.place(
+                client_order_index=coi,
+                price=px if px > 0 else Decimal("0"),
+                qty=qty,
+                now=now,
+                side=p.side,
             )
             clip.seen_on_book = True
             self.ledger.close_missing(clip, canceling=False, now=now_ms())
@@ -562,6 +570,13 @@ class AdvancedTwapRunner:
             tif,
             self.reduce_only,
             client_order_index=coi,
+        )
+        clip = self.ledger.place(
+            client_order_index=coi,
+            price=px if px > 0 else Decimal("0"),
+            qty=qty,
+            now=now,
+            side=p.side,
         )
         idx = result.get("order_index") if isinstance(result, dict) else None
         if not idx:

@@ -23,6 +23,12 @@ export function canonicalDecimal(raw: string): string | null {
   return sign === "-" ? `-${s}` : s;
 }
 
+/** Drop fractional trailing zeros. `110` stays `110`; `1.50` becomes `1.5`. */
+export function stripFractionalZeros(s: string): string {
+  if (!s.includes(".")) return s;
+  return s.replace(/0+$/, "").replace(/\.$/, "") || "0";
+}
+
 export function parseDecimal(raw: string): number | null {
   const s = canonicalDecimal(raw);
   if (s == null) return null;

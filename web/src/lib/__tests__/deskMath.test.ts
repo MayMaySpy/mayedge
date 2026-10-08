@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { canonicalDecimal, decimalInput, parseDecimal } from "@/lib/numbers";
 import { chaseQuote, clipQty, roundPassive } from "@/lib/chaseIceberg";
 import {
   baseToUsd,
   convertSizeOnUnitToggle,
   formatUsdNotional,
+  makerMinSize,
   maxOrderSize,
   minSizeHint,
   snapReduceOnlySize,
@@ -13,7 +14,10 @@ import {
   ticketBlockReason,
   ticketSizeFromInput,
   ticketWorkingPrice,
+  trimQty,
   usdToBase,
+  loadSlipPct,
+  persistSlipPct,
 } from "@/components/widgets/orderTicket/math";
 
 describe("parseDecimal", () => {
@@ -136,6 +140,25 @@ describe("maxOrderSize", () => {
       reduceOnly: true,
     });
     expect(size).toBe(2);
+  });
+});
+
+describe("trimQty", () => {
+  it("keeps integer trailing zeros when the size scale is 0", () => {
+    expect(trimQty(110, 0)).toBe("110");
+    expect(trimQty(100, 0)).toBe("100");
+    expect(trimQty(10, 0)).toBe("10");
+  });
+
+  it("strips only fractional zeros", () => {
+    expect(trimQty(110, 2)).toBe("110");
+    expect(trimQty(1.5, 2)).toBe("1.5");
+  });
+});
+
+describe("makerMinSize", () => {
+  it("rounds SKY's $10 minimum up to a whole token", () => {
+    expect(makerMinSize(100, 10, 0.094, 0)).toBe(107);
   });
 });
 
@@ -327,5 +350,25 @@ describe("ticketBlockReason", () => {
 
   it("allows valid market order", () => {
     expect(ticketBlockReason(base)).toBeNull();
+  });
+});
+
+describe("slippage cap", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stores at most 5 percent", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    });
+    persistSlipPct("50");
+    expect(loadSlipPct()).toBe("5");
+    persistSlipPct("1.5");
+    expect(loadSlipPct()).toBe("1.5");
   });
 });

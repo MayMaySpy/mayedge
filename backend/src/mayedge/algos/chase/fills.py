@@ -19,6 +19,7 @@ from mayedge.algos.chase.iceberg import Action, leftover_is_dust
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.chase.util import _dec, _is_rate_limit
 from mayedge.algos.ledger import Clip, Ledger
+from mayedge.lighter.budget import BudgetRefused
 from mayedge.lighter.models import maker_min_base
 
 logger = logging.getLogger(__name__)
@@ -98,10 +99,13 @@ class ChaseFillMixin(Generic[BookT, StateT]):
             return Decimal("0")
         bid_s, ask_s = self._exec().best_bid_ask(self._state.market_index)
         px = _dec(bid_s) if bid_s else (_dec(ask_s) if ask_s else Decimal("0"))
-        min_qty = maker_min_base(
-            meta.min_base_amount, meta.min_quote_amount, px if px > 0 else None
-        )
         qty_step = Decimal(10) ** -meta.size_decimals
+        min_qty = maker_min_base(
+            meta.min_base_amount,
+            meta.min_quote_amount,
+            px if px > 0 else None,
+            qty_step,
+        )
         if min_qty <= 0:
             min_qty = qty_step
         return min_qty
@@ -241,6 +245,8 @@ class ChaseFillMixin(Generic[BookT, StateT]):
         try:
             summary = await ex.get_account_summary()
         except Exception as e:
+            if isinstance(e, BudgetRefused):
+                return None
             if _is_rate_limit(e):
                 on_limit = getattr(self, "_on_rate_limit", None)
                 if callable(on_limit):
@@ -319,6 +325,8 @@ class ChaseFillMixin(Generic[BookT, StateT]):
             )
             return True
         except Exception as e:
+            if isinstance(e, BudgetRefused):
+                return False
             if _is_rate_limit(e):
                 on_limit = getattr(self, "_on_rate_limit", None)
                 if callable(on_limit):
@@ -414,35 +422,32 @@ class ChaseFillMixin(Generic[BookT, StateT]):
         if clip is None:
             self._reconcile_master()
             return
+        await self._sync_clip(clip)
+        self._reconcile_master()
+
+    async def _sync_clip(self, clip: Clip) -> None:
         found = self._find_open(clip.client_order_index)
         now = util.now_ms()
         if found is None:
             if self._canceling:
                 self._state.ledger.close_missing(clip, canceling=True, now=now)
-                self._reconcile_master()
                 return
             if not clip.seen_on_book:
                 if now - clip.placed_at < STALE_ACK_MS:
-                    self._reconcile_master()
                     return
                 if getattr(self, "_backoff_until", 0) > now:
-                    self._reconcile_master()
                     return
                 await self._resolve_vanished_clip(clip, now=now)
                 return
             if self._may_invent_fill(clip, now):
                 self._close_missing_clip(clip, now=now, assume_fill=True)
-                self._reconcile_master()
                 return
             if clip.missing_since is None:
                 clip.missing_since = now
-                self._reconcile_master()
                 return
             if now - clip.missing_since < self._book.missing_fill_grace_ms:
-                self._reconcile_master()
                 return
             if getattr(self, "_backoff_until", 0) > now:
-                self._reconcile_master()
                 return
             if clip.seq not in self._missing_refreshed:
                 self._missing_refreshed.add(clip.seq)
@@ -458,7 +463,6 @@ class ChaseFillMixin(Generic[BookT, StateT]):
             order_index=idx,
             book_filled=filled if filled > 0 else None,
         )
-        self._reconcile_master()
 
     def _find_open(self, coi: int) -> dict[str, Any] | None:
         payload = self._exec().cached_account_payload() or {}

@@ -49,6 +49,7 @@ from mayedge.algos.grid.decide import (
 from mayedge.algos.grid.state import GridBookView, GridState
 from mayedge.algos.ledger import Clip
 from mayedge.config import settings
+from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional
 
 logger = logging.getLogger(__name__)
@@ -846,6 +847,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
+        token = budget.enter_lane("algo")
         try:
             while not self._stop.is_set():
                 with contextlib.suppress(TimeoutError):
@@ -865,7 +867,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if _is_rate_limit(e) or _is_invalid_nonce(e):
+                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
                         self._handle_tx_err(e)
                         continue
                     logger.exception("chase-grid error")
@@ -876,6 +878,8 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                     return
         except asyncio.CancelledError:
             raise
+        finally:
+            budget.leave_lane(token)
 
     def on_gateway(self, msg: dict[str, Any]) -> None:
         if self._state.status not in ACTIVE_STATUSES:

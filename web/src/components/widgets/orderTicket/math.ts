@@ -1,5 +1,5 @@
 import type { Market, Position } from "@/lib/api";
-import { parseDecimal } from "@/lib/numbers";
+import { parseDecimal, stripFractionalZeros } from "@/lib/numbers";
 
 const CANONICAL_LEV = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100];
 
@@ -93,7 +93,7 @@ export function chaseBandFromPct(
   const px = mid ?? market.last_trade_price ?? market.mark_price;
   if (!px || px <= 0 || !(pct > 0)) return { floor: "", ceiling: "" };
   const d = Math.max(0, market.price_decimals ?? 2);
-  const fmt = (n: number) => n.toFixed(d).replace(/\.?0+$/, "");
+  const fmt = (n: number) => stripFractionalZeros(n.toFixed(d));
   const lo = px * (1 - pct / 100);
   const hi = px * (1 + pct / 100);
   return { floor: fmt(lo), ceiling: fmt(hi) };
@@ -101,10 +101,13 @@ export function chaseBandFromPct(
 
 export const CHASE_BAND_PCTS = [0.5, 1, 2] as const;
 
+const SLIP_MAX = 5;
+
 export function loadSlipPct(): string {
   try {
     const n = parseFloat(localStorage.getItem(SLIP_KEY) ?? "");
-    if (Number.isFinite(n) && n > 0 && n <= 50) return String(n);
+    if (!Number.isFinite(n) || n <= 0) return "1";
+    return String(Math.min(n, SLIP_MAX));
   } catch {
     /* ignore */
   }
@@ -115,7 +118,7 @@ export function persistSlipPct(raw: string) {
   const n = parseFloat(raw);
   if (!Number.isFinite(n) || n <= 0) return;
   try {
-    localStorage.setItem(SLIP_KEY, String(n));
+    localStorage.setItem(SLIP_KEY, String(Math.min(n, SLIP_MAX)));
   } catch {
     /* ignore */
   }
@@ -174,7 +177,7 @@ export function formatUsdNotional(value: number): string {
 export function formatUsdRaw(value: number): string {
   if (!(value > 0) || !Number.isFinite(value)) return "";
   const s = value.toFixed(2);
-  return s.replace(/\.?0+$/, "") || s;
+  return stripFractionalZeros(s) || s;
 }
 
 export function ticketSizeFromInput(
@@ -254,13 +257,22 @@ export function trimQty(n: number, decimals: number): string {
   const f = 10 ** d;
   const q = Math.floor(n * f + 1e-9) / f;
   if (q <= 0) return "";
-  return q.toFixed(d).replace(/\.?0+$/, "") || "0";
+  return stripFractionalZeros(q.toFixed(d)) || "0";
 }
 
-export function makerMinSize(minBase: number, minQuote: number, price: number | null): number {
+/** Stricter of min base and min quote, rounded up to the size step. */
+export function makerMinSize(
+  minBase: number,
+  minQuote: number,
+  price: number | null,
+  decimals = 8
+): number {
   let floor = minBase > 0 ? minBase : 0;
   if (price && price > 0 && minQuote > 0) floor = Math.max(floor, minQuote / price);
-  return floor;
+  if (!(floor > 0)) return 0;
+  const d = Math.max(0, Math.min(decimals, 8));
+  const f = 10 ** d;
+  return Math.ceil(floor * f - 1e-9) / f;
 }
 
 /** Ticket hint for venue min size. Warns once a typed qty is below the floor. */

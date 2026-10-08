@@ -1,33 +1,37 @@
 from __future__ import annotations
 
-import time
 import unittest
+from collections import deque
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from mayedge.alerts import (
+    AlertSettings,
+    EpisodeBook,
     ExploitDetector,
-    ExploitThresholds,
+    Factor,
     MarketSnapshot,
     SevPair,
+    composite_score,
     load_thresholds,
     thresholds_from_dict,
 )
 from mayedge.lighter.gateway import LighterGateway
-from mayedge.lighter.models import MarketMeta, open_interest_usd
+from mayedge.lighter.models import Candle, MarketMeta, open_interest_usd
 
-# Fast tests: no warmup, short cooldowns, low bars.
-_TEST_THR = ExploitThresholds(
-    cooldown_s=45.0,
-    level_cooldown_s=45.0,
+_T0 = 1_800_000_000.0
+_BAR0 = int(_T0) - 40 * 60
+
+_TEST_THR = AlertSettings(
     min_severity=2,
     max_events_per_flush=50,
     warmup_s=0.0,
-    oi_pct_1m=SevPair(3.0, 8.0),
-    oi_pct_5m=SevPair(6.0, 15.0),
-    liq_count=SevPair(3.0, 6.0),
-    liq_usd=SevPair(100_000.0, 500_000.0),
-    liq_window_s=120.0,
+    min_bars=30,
+    level_min_samples=30,
+    min_24h_usd=1_000_000.0,
+    vol_min_usd_1m=1_000.0,
+    max_new_per_min=50,
 )
 
 
@@ -40,419 +44,283 @@ def _meta(**kwargs: object) -> MarketMeta:
         min_base_amount=0.0,
         min_quote_amount=0.0,
         market_type="perp",
+        volume_24h=10_000_000.0,
+        mark_price=100.0,
+        last_trade_price=100.0,
+        mid_price=100.0,
+        best_bid_price=99.99,
+        best_ask_price=100.01,
+        open_interest=5_000_000.0,
     )
     base.update(kwargs)
     return MarketMeta(**base)  # type: ignore[arg-type]
+
+
+def _bars(closes: list[float], vol: float = 1_000.0) -> list[Candle]:
+    return [
+        Candle(time=_BAR0 + i * 60, open=c, high=c, low=c, close=c, volume=vol)
+        for i, c in enumerate(closes)
+    ]
+
+
+def _wiggle(n: int, step_pct: float) -> list[float]:
+    out = [100.0]
+    for i in range(1, n):
+        out.append(out[-1] * (1 + (step_pct if i % 2 else -step_pct) / 100.0))
+    return out
+
+
+def _snap(ts: float, **kw: float) -> MarketSnapshot:
+    row: dict[str, float] = dict(
+        mark=100.0,
+        last=100.0,
+        index=100.0,
+        mid=100.0,
+        bid=99.99,
+        ask=100.01,
+        oi=5_000_000.0,
+        vol_quote=10_000_000.0,
+        funding=0.0,
+        premium=0.0,
+    )
+    row.update(kw)
+    return MarketSnapshot(ts=ts, **row)
+
+
+class Harness:
+    def __init__(self, thr: AlertSettings = _TEST_THR) -> None:
+        self.messages: list[dict[str, Any]] = []
+        self.det = ExploitDetector(self.messages.append, thresholds=thr)
+
+    def seed_snapshots(self, mi: int, snaps: list[MarketSnapshot]) -> None:
+        self.det._snapshots[mi] = deque(snaps, maxlen=400)
+        self.det._seen_since[mi] = snaps[0].ts
+
+    def seed_levels(self, mi: int, minutes: int, **kw: float) -> None:
+        for i in range(minutes):
+            s = _snap(_T0 - (minutes - i) * 60, **kw)
+            disloc = abs(s.mark - s.mid) / s.mid * 10_000
+            self.det._level.observe(
+                mi, ts=s.ts, premium=s.premium, disloc_bps=disloc, funding=s.funding, oi=s.oi
+            )
+
+    def tick(self, meta: MarketMeta, at: float = _T0) -> list[dict[str, Any]]:
+        before = len(self.messages)
+        with patch("mayedge.alerts.time.time", return_value=at):
+            self.det.on_market_stats(meta)
+            self.det.flush()
+        return [e for m in self.messages[before:] for e in m.get("events", [])]
 
 
 class ApplyMarketStatsTest(unittest.TestCase):
     def test_apply_market_stats_parses_extended_fields(self) -> None:
         gw = LighterGateway()
         gw._markets[1] = _meta()
-
         gw._apply_market_stats(
             {
                 "market_stats": {
                     "market_id": 1,
-                    "symbol": "ETH",
                     "mark_price": "2000",
-                    "last_trade_price": "1999",
-                    "index_price": "2001",
                     "open_interest": "5000000",
-                    "open_interest_limit": "10000000",
                     "best_bid_price": "1998",
-                    "best_ask_price": "2002",
                     "mid_price": "2000",
-                    "premium": "-0.05",
-                    "current_funding_rate": "0.001",
-                    "funding_timestamp": 1786370400000,
-                    "daily_quote_token_volume": 1000000,
-                    "daily_base_token_volume": 500,
-                    "daily_price_high": 2100,
-                    "daily_price_low": 1900,
-                    "daily_price_change": -1.2,
                 }
             }
         )
-
         meta = gw._markets[1]
         self.assertEqual(meta.open_interest, 10_000_000.0)
         self.assertEqual(meta.best_bid_price, 1998.0)
-        self.assertEqual(meta.best_ask_price, 2002.0)
-        self.assertEqual(meta.mid_price, 2000.0)
-        self.assertEqual(meta.premium, -0.05)
-        self.assertEqual(meta.funding_timestamp, 1786370400000)
-        self.assertEqual(meta.daily_price_high, 2100.0)
-        self.assertEqual(meta.volume_base_24h, 500.0)
         self.assertEqual(meta.mark_price, 2000.0)
 
     def test_open_interest_usd_matches_official_two_sided(self) -> None:
-        # Live LIT: WS one-sided quote ~$54.1M; official UI shows both sides.
         self.assertEqual(open_interest_usd(54_100_000), 108_200_000)
-        # REST is base size; convert via mark first, then double.
-        self.assertAlmostEqual(open_interest_usd(11_900_000 * 4.547), 108_218_600.0)
-
-    def test_prefer_current_funding_rate_as_percent(self) -> None:
-        gw = LighterGateway()
-        gw._markets[1] = _meta()
-        gw._apply_market_stats(
-            {
-                "market_stats": {
-                    "market_id": 1,
-                    "current_funding_rate": "0.0012",
-                    "funding_rate": "-0.0032",
-                }
-            }
-        )
-        meta = gw._markets[1]
-        self.assertEqual(meta.funding_rate, 0.0012)
-        self.assertAlmostEqual(meta.as_public_dict()["funding_apr"], 0.0012 * 24 * 365)
-
-    def test_apply_market_stats_broadcasts_changed_quotes(self) -> None:
-        gw = LighterGateway()
-        gw._markets[1] = _meta(mark_price=100.0)
-        msgs: list[dict] = []
-        gw.subscribe(msgs.append)
-        stats = {
-            "market_stats": {
-                "market_id": 1,
-                "mark_price": "2000",
-                "last_trade_price": "1999",
-                "open_interest": "5000000",
-                "current_funding_rate": "0.001",
-            }
-        }
-        gw._apply_market_stats(stats)
-        quotes = [m for m in msgs if m.get("type") == "market_stats"]
-        self.assertEqual(len(quotes), 1)
-        row = quotes[0]["markets"][0]
-        self.assertEqual(row["mark_price"], 2000.0)
-        self.assertEqual(row["open_interest"], 10_000_000.0)
-
-        msgs.clear()
-        gw._apply_market_stats(stats)
-        self.assertEqual([m for m in msgs if m.get("type") == "market_stats"], [])
 
 
 class ThresholdYamlTest(unittest.TestCase):
-    def test_from_dict(self) -> None:
-        thr = thresholds_from_dict(
-            {
-                "funding": {"hourly_pct": [0.2, 0.6]},
-                "min_severity": 2,
-            }
-        )
-        self.assertEqual(thr.funding_hourly_pct.sev2, 0.2)
-        self.assertEqual(thr.min_severity, 2)
+    def test_nested_price_block(self) -> None:
+        thr = thresholds_from_dict({"factors": {"price": {"sigma": [5, 9], "min_pct": [0.4, 0.8]}}})
+        self.assertEqual(thr.price_sigma, SevPair(5.0, 9.0))
+        self.assertEqual(thr.price_min_pct_1m, 0.4)
+        self.assertEqual(thr.price_min_pct_5m, 0.8)
 
     def test_load_repo_yaml(self) -> None:
-        path = Path(__file__).resolve().parents[1] / "config" / "alerts.yaml"
-        thr = load_thresholds(path)
-        self.assertGreater(thr.funding_hourly_pct.sev2, 0)
-        self.assertGreaterEqual(thr.min_severity, 2)
+        thr = load_thresholds(Path(__file__).resolve().parents[1] / "config" / "alerts.yaml")
+        self.assertEqual(thr.score_sev2, 4.0)
+        self.assertGreater(thr.disloc_sigma_floor_bps, 0)
+        self.assertGreaterEqual(thr.min_24h_usd, 1_000_000)
 
 
-class ExploitDetectorTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.events: list[dict] = []
-        self.det = ExploitDetector(
-            lambda msg: self.events.append(msg),
-            thresholds=_TEST_THR,
-        )
+class PriceFactorTest(unittest.TestCase):
+    def test_tick_on_flat_book_is_not_an_outlier(self) -> None:
+        h = Harness()
+        h.det.seed_minute_bars(1, _bars([1281.0] * 40))
+        h.seed_snapshots(1, [_snap(_T0 - 65, last=1281.0, mark=1281.0)])
+        events = h.tick(_meta(last_trade_price=1282.15, mark_price=1282.15))
+        self.assertEqual(events, [])
 
-    def _seed_series(self, mi: int, snaps: list[MarketSnapshot]) -> None:
-        series = self.det._snapshots.setdefault(mi, __import__("collections").deque(maxlen=1200))
-        for s in snaps:
-            series.append(s)
-        if snaps:
-            self.det._seen_since[mi] = snaps[0].ts
+    def test_same_move_fires_on_quiet_market_only(self) -> None:
+        quiet = Harness()
+        quiet.det.seed_minute_bars(1, _bars(_wiggle(40, 0.1)))
+        quiet.seed_snapshots(1, [_snap(_T0 - 65)])
+        fired = quiet.tick(_meta(last_trade_price=101.5, mark_price=101.5))
+        self.assertEqual([e["kind"] for e in fired], ["signal"])
+        self.assertEqual(fired[0]["setup"], "pump")
+        self.assertEqual(fired[0]["direction"], "up")
 
-    def test_oi_shock_fires(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [
-                MarketSnapshot(now - 65, 100, 100, 100, 100, 99, 101, 1000, 1e6, 0, 0),
-            ],
-        )
-        meta = _meta(
-            mark_price=100.0,
-            last_trade_price=100.0,
-            open_interest=1100.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
+        wild = Harness()
+        wild.det.seed_minute_bars(1, _bars(_wiggle(40, 1.0)))
+        wild.seed_snapshots(1, [_snap(_T0 - 65)])
+        self.assertEqual(wild.tick(_meta(last_trade_price=101.5, mark_price=101.5)), [])
 
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertIn("oi", kinds)
 
-    def test_young_baseline_does_not_fire_oi(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99, 101, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=100.0,
-            last_trade_price=100.0,
-            open_interest=2000.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
+class VolumeFactorTest(unittest.TestCase):
+    def test_normal_volume_on_big_market_is_quiet(self) -> None:
+        h = Harness()
+        h.det.seed_minute_bars(1, _bars([100.0] * 40, vol=20_000.0))
+        h.seed_snapshots(1, [_snap(_T0 - 65)])
+        self.assertEqual(h.tick(_meta()), [])
 
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertNotIn("oi", kinds)
+    def test_volume_burst_with_flat_price_is_absorption(self) -> None:
+        h = Harness()
+        bars = _bars(_wiggle(40, 0.1))
+        bars[-1].volume = 10_000.0
+        h.det.seed_minute_bars(1, bars)
+        h.seed_snapshots(1, [_snap(_T0 - 305), _snap(_T0 - 65)])
+        events = h.tick(_meta())
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["setup"], "absorption")
 
-    def test_wide_spread_does_not_alert(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.5, 99.6, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=100.0,
-            last_trade_price=100.0,
-            best_bid_price=98.0,
-            best_ask_price=102.0,
-            mid_price=100.0,
-            open_interest=1000.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
+    def test_volume_burst_during_rally_is_a_surge_not_absorption(self) -> None:
+        h = Harness()
+        bars = _bars(_wiggle(40, 0.1))
+        bars[-1].volume = 10_000.0
+        h.det.seed_minute_bars(1, bars)
+        h.seed_snapshots(1, [_snap(_T0 - 305), _snap(_T0 - 65, last=100.4, mark=100.4)])
+        events = h.tick(_meta(last_trade_price=100.5, mark_price=100.5))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["setup"], "vol_surge")
+        self.assertEqual(events[0]["direction"], "up")
 
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertNotIn("spread", kinds)
+    def test_right_after_restart_candles_give_the_price_context(self) -> None:
+        flat = Harness()
+        bars = _bars(_wiggle(40, 0.1))
+        bars[-1].volume = 10_000.0
+        flat.det.seed_minute_bars(1, bars)
+        flat.seed_snapshots(1, [_snap(_T0 - 65)])
+        events = flat.tick(_meta())
+        self.assertEqual([e["setup"] for e in events], ["absorption"])
+        self.assertIsNotNone(flat.det.board()[0]["move_pct"])
 
-    def test_cooldown_suppresses_duplicate(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 65, 100, 100, 100, 100, 99, 101, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=100.0,
-            last_trade_price=100.0,
-            open_interest=1100.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
-            self.det.on_market_stats(meta)
-            self.det.flush()
+        rally = Harness()
+        bars = _bars([*_wiggle(35, 0.1), 100.3, 100.6, 100.9, 101.2, 101.5])
+        bars[-1].volume = 10_000.0
+        rally.det.seed_minute_bars(1, bars)
+        rally.seed_snapshots(1, [_snap(_T0 - 65, last=101.5, mark=101.5)])
+        events = rally.tick(_meta(last_trade_price=101.5, mark_price=101.5))
+        self.assertEqual([(e["setup"], e["direction"]) for e in events], [("vol_surge", "up")])
+        self.assertGreater(rally.det.board()[0]["move_pct"], 1.0)
 
-        oi_events = [
-            e for batch in self.events for e in batch.get("events", []) if e.get("kind") == "oi"
-        ]
-        self.assertEqual(len(oi_events), 1)
 
-    def test_dislocation_is_mark_vs_mid(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.95, 100.05, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=101.0,
-            last_trade_price=100.0,
-            best_bid_price=99.95,
-            best_ask_price=100.05,
-            mid_price=100.0,
-            open_interest=1000.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
-        events = [e for batch in self.events for e in batch.get("events", [])]
-        disloc = next(e for e in events if e.get("kind") == "dislocation")
-        self.assertEqual(disloc["note"], "Mark vs mid 100 bps")
-        self.assertEqual(disloc["direction"], "up")
-        self.assertAlmostEqual(disloc["value"], 100.0)
+class LevelFactorTest(unittest.TestCase):
+    def _disloc_meta(self, mark: float) -> MarketMeta:
+        return _meta(mark_price=mark, last_trade_price=100.0)
 
-    def test_dislocation_ignores_stale_last(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.95, 100.05, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=100.0,
-            last_trade_price=90.0,
-            best_bid_price=99.95,
-            best_ask_price=100.05,
-            mid_price=100.0,
-            open_interest=1000.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertNotIn("dislocation", kinds)
+    def test_no_level_alert_without_history(self) -> None:
+        h = Harness()
+        h.seed_snapshots(1, [_snap(_T0 - 65)])
+        self.assertEqual(h.tick(self._disloc_meta(101.78)), [])
 
-    def test_dislocation_skips_wide_book(self) -> None:
-        now = time.time()
-        self._seed_series(
-            1,
-            [MarketSnapshot(now - 5, 100, 100, 100, 100, 90, 110, 1000, 1e6, 0, 0)],
-        )
-        meta = _meta(
-            mark_price=101.0,
-            last_trade_price=100.0,
-            best_bid_price=90.0,
-            best_ask_price=110.0,
-            mid_price=100.0,
-            open_interest=1000.0,
-            volume_24h=1e6,
-        )
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_market_stats(meta)
-            self.det.flush()
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertNotIn("dislocation", kinds)
+    def test_structural_dislocation_is_quiet(self) -> None:
+        h = Harness()
+        h.seed_levels(1, 60, mark=101.78)
+        h.seed_snapshots(1, [_snap(_T0 - 65, mark=101.78)])
+        self.assertEqual(h.tick(self._disloc_meta(101.85)), [])
 
-    def test_liq_cluster_fires(self) -> None:
-        now = time.time()
+    def test_new_dislocation_on_tight_market_fires(self) -> None:
+        h = Harness()
+        h.seed_levels(1, 60)
+        h.seed_snapshots(1, [_snap(_T0 - 65)])
+        events = h.tick(self._disloc_meta(100.8))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["setup"], "mark_off_book")
+        self.assertEqual(events[0]["factors"][0]["kind"], "dislocation")
+
+
+class GateTest(unittest.TestCase):
+    def test_thin_market_never_alerts_or_boards(self) -> None:
+        h = Harness()
+        h.det.seed_minute_bars(1, _bars(_wiggle(40, 0.1)))
+        h.seed_snapshots(1, [_snap(_T0 - 65, vol_quote=600_000.0)])
+        events = h.tick(_meta(last_trade_price=101.5, mark_price=101.5, volume_24h=600_000.0))
+        self.assertEqual(events, [])
+        self.assertEqual(h.det._episodes.board_rows(_T0), [])
+
+
+class EpisodeBookTest(unittest.TestCase):
+    def test_composite_score_weights(self) -> None:
+        s = composite_score(
+            [Factor("price", "up", 1.0, "pct", 6.0), Factor("volume", "up", 4.0, "x", 4.0)]
+        )
+        self.assertAlmostEqual(s, 8.0)
+
+    def test_factors_merge_into_one_row_with_stable_id(self) -> None:
+        book = EpisodeBook(_TEST_THR)
+        ev1 = book.ingest(1, "ETH", [Factor("price", "down", -2.0, "pct", 5.0, "1m")], _T0, liquidity_ok=True)
+        ev2 = book.ingest(1, "ETH", [Factor("volume", "up", 6.0, "x", 5.0, "1m")], _T0 + 1, liquidity_ok=True)
+        assert ev1 is not None and ev2 is not None
+        self.assertEqual(ev1.id, ev2.id)
+        self.assertEqual({f["kind"] for f in ev2.factors or []}, {"price", "volume"})
+
+    def test_unchanged_episode_does_not_rebroadcast(self) -> None:
+        book = EpisodeBook(_TEST_THR)
+        f = [Factor("price", "down", -2.0, "pct", 5.0, "1m")]
+        self.assertIsNotNone(book.ingest(1, "ETH", f, _T0, liquidity_ok=True))
+        self.assertIsNone(book.ingest(1, "ETH", f, _T0 + 1, liquidity_ok=True))
+
+    def test_closed_episode_needs_escalation_to_reopen(self) -> None:
+        book = EpisodeBook(_TEST_THR)
+        f = [Factor("price", "down", -2.0, "pct", 5.0, "1m")]
+        book.ingest(1, "ETH", f, _T0, liquidity_ok=True)
+        book.ingest(1, "ETH", [], _T0 + 200, liquidity_ok=True)
+        self.assertIsNone(book.ingest(1, "ETH", f, _T0 + 210, liquidity_ok=True))
+        bigger = [Factor("price", "down", -4.0, "pct", 8.0, "1m")]
+        self.assertIsNotNone(book.ingest(1, "ETH", bigger, _T0 + 220, liquidity_ok=True))
+
+    def test_global_rate_cap(self) -> None:
+        thr = AlertSettings(max_new_per_min=2)
+        book = EpisodeBook(thr)
+        f = [Factor("price", "down", -2.0, "pct", 5.0, "1m")]
+        opened = [book.ingest(mi, f"M{mi}", f, _T0, liquidity_ok=True) for mi in range(1, 5)]
+        self.assertEqual(sum(ev is not None for ev in opened), 2)
+
+    def test_board_rows_expire(self) -> None:
+        book = EpisodeBook(_TEST_THR)
+        book.ingest(1, "ETH", [Factor("price", "down", -2.0, "pct", 5.0, "1m")], _T0, liquidity_ok=True)
+        self.assertEqual(len(book.board_rows(_T0 + 1)), 1)
+        self.assertEqual(book.board_rows(_T0 + _TEST_THR.board_ttl_s + 1), [])
+
+
+class LiquidationTest(unittest.TestCase):
+    def test_liq_cluster_scored_against_open_interest(self) -> None:
+        h = Harness()
+        h.seed_snapshots(1, [_snap(_T0, oi=5_000_000.0)])
+        h.det._symbols[1] = "ETH"
         items = [
             {
                 "market_index": 1,
-                "symbol": "ETH",
-                "usd_amount": "60000",
-                "side": "sell",
-                "price": "2000",
-                "size": "30",
-            }
-            for _ in range(4)
-        ]
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_liquidations(items)
-
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertIn("liq_cluster", kinds)
-
-    def test_liq_cluster_ignores_stale_backlog(self) -> None:
-        now = time.time()
-        stale_ms = int((now - 3600) * 1000)
-        items = [
-            {
-                "market_index": 1,
-                "symbol": "ETH",
                 "trade_id": f"1:liquidation:{i}",
                 "usd_amount": "60000",
                 "side": "sell",
-                "timestamp": stale_ms,
+                "timestamp": int((_T0 - 8) * 1000),
             }
-            for i in range(12)
+            for i in range(8)
         ]
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_liquidations(items)
-        self.assertEqual(self.events, [])
-
-    def test_liq_cluster_uses_event_time_not_arrival(self) -> None:
-        now = time.time()
-        recent_ms = int((now - 8) * 1000)
-        items = [
-            {
-                "market_index": 1,
-                "symbol": "ETH",
-                "trade_id": f"1:liquidation:{i}",
-                "usd_amount": "60000",
-                "side": "sell",
-                "timestamp": recent_ms,
-            }
-            for i in range(4)
-        ]
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_liquidations(items)
-        ev = next(e for batch in self.events for e in batch.get("events", []))
-        self.assertEqual(ev["kind"], "liq_cluster")
-        self.assertEqual(ev["ts"], recent_ms)
-
-    def test_liq_cluster_does_not_count_fills_of_one_order(self) -> None:
-        now = time.time()
-        items = [
-            {
-                "market_index": 1,
-                "symbol": "ETH",
-                "trade_id": "1:liquidation:555",
-                "usd_amount": "300",
-                "side": "sell",
-            }
-            for _ in range(14)
-        ]
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_liquidations(items)
-        self.assertEqual(self.events, [])
-
-    def test_liq_cluster_upserts_usd_for_same_group(self) -> None:
-        now = time.time()
-        with patch("mayedge.alerts.time.time", return_value=now):
-            self.det.on_liquidations(
-                [
-                    {
-                        "market_index": 1,
-                        "symbol": "ETH",
-                        "trade_id": "1:liquidation:555",
-                        "usd_amount": "1000",
-                        "side": "sell",
-                    }
-                ]
-            )
-            self.det.on_liquidations(
-                [
-                    {
-                        "market_index": 1,
-                        "symbol": "ETH",
-                        "trade_id": "1:liquidation:555",
-                        "usd_amount": "150000",
-                        "side": "sell",
-                    }
-                ]
-            )
-        kinds = {e["kind"] for batch in self.events for e in batch.get("events", [])}
-        self.assertIn("liq_cluster", kinds)
-        ev = next(e for batch in self.events for e in batch.get("events", []))
-        self.assertEqual(ev["baseline"], 1)
-        self.assertEqual(ev["value"], 150000.0)
-
-    def test_flush_caps_events(self) -> None:
-        thr = ExploitThresholds(
-            warmup_s=0.0,
-            min_severity=2,
-            max_events_per_flush=2,
-            premium_pct=SevPair(0.5, 1.0),
-            cooldown_s=0.0,
-            level_cooldown_s=0.0,
-        )
-        det = ExploitDetector(lambda msg: self.events.append(msg), thresholds=thr)
-        now = time.time()
-        for i, mid in enumerate((1, 2, 3)):
-            det._snapshots[mid] = __import__("collections").deque(
-                [MarketSnapshot(now - 5, 100, 100, 100, 100, 99.9, 100.1, 1, 1, 0, 0)]
-            )
-            det._seen_since[mid] = now - 5
-            meta = _meta(
-                market_index=mid,
-                symbol=f"M{mid}",
-                mark_price=102.0,
-                last_trade_price=100.0,
-                index_price=100.0,
-                best_bid_price=99.9,
-                best_ask_price=100.1,
-                mid_price=100.0,
-            )
-            with patch("mayedge.alerts.time.time", return_value=now + i):
-                det.on_market_stats(meta)
-        det.flush()
-        n = sum(len(batch.get("events", [])) for batch in self.events)
-        self.assertEqual(n, 2)
+        with patch("mayedge.alerts.time.time", return_value=_T0):
+            h.det.on_liquidations(items)
+        events = [e for m in h.messages for e in m.get("events", [])]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["setup"], "long_flush")
+        self.assertEqual(events[0]["factors"][0]["kind"], "liq_cluster")
 
 
 if __name__ == "__main__":

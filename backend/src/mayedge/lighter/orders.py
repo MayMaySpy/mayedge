@@ -9,7 +9,8 @@ import lighter
 from lighter.signer_client import CreateOrderTxReq
 
 from mayedge.config import settings
-from mayedge.lighter.account import account_service
+from mayedge.lighter.account import _AUTH_TTL_S, account_service
+from mayedge.lighter.budget import budget
 from mayedge.lighter.coi import (
     init_manual_coi_seq,
     is_algo_client_order,
@@ -107,7 +108,8 @@ class OrderService:
     def _check_maker_size(self, meta, size_int: int, price_int: int | None) -> None:
         qty = from_scaled(size_int, meta.size_decimals)
         px = from_scaled(price_int, meta.price_decimals) if price_int else None
-        need = maker_min_base(meta.min_base_amount, meta.min_quote_amount, px)
+        step = Decimal(10) ** -int(meta.size_decimals)
+        need = maker_min_base(meta.min_base_amount, meta.min_quote_amount, px, step)
         if qty >= need:
             return
         need_s = fmt_decimal(need) or "0"
@@ -142,19 +144,29 @@ class OrderService:
             raise ValueError("Account order cap reached")
         if "21718" in text:
             raise ValueError("Per-market order cap reached")
+        if "21711" in text:
+            raise ValueError("Order expiry must be between 5 minutes and 30 days")
+        if "21719" in text or "21720" in text:
+            raise ValueError("Pending order cap reached")
+        if "21728" in text:
+            raise ValueError("Duplicate client order id")
         mapped = venue_client_error(err)
         if mapped:
+            budget.note_blocked()
             raise VenueBlocked(*mapped)
         raise ValueError(err)
 
     def _market_worst_price(self, meta, *, is_ask: bool, slippage: float) -> int:
-        """IOC cap from the local book — do not REST-fetch Lighter's order book (WAF)."""
+        """IOC cap from a synced book, else the market_stats quote. No REST book fetch."""
         bid_s, ask_s = gateway.best_bid_ask(meta.market_index)
         touch = 0.0
-        if is_ask and bid_s:
-            touch = float(bid_s)
-        elif not is_ask and ask_s:
-            touch = float(ask_s)
+        raw = bid_s if is_ask else ask_s
+        if raw:
+            touch = float(raw)
+        if touch <= 0:
+            stat = meta.best_bid_price if is_ask else meta.best_ask_price
+            if stat:
+                touch = float(stat)
         spot = touch or float(meta.last_trade_price or meta.mark_price or 0)
         if spot <= 0:
             raise ValueError("No book — cannot price market order")
@@ -223,29 +235,22 @@ class OrderService:
             getattr(ret, "message", None)
         )
 
-    async def _refresh_nonce(self) -> None:
-        nm = getattr(self.signer, "nonce_manager", None)
-        refresh = getattr(nm, "async_hard_refresh_nonce", None)
-        if refresh is None:
-            return
-        keys = list(getattr(nm, "api_keys_list", None) or [settings.lighter_api_key_index])
-        for key in keys:
-            try:
-                await refresh(int(key))
-            except Exception:
-                logger.warning("nonce refresh failed for key %s", key, exc_info=True)
-
     async def _retry_nonce(self, send):
+        await budget.take(tx=True)
         created, ret, err = await send()
         if not self._nonce_stale(ret, err):
             return created, ret, err
-        logger.warning("invalid nonce, refreshing and retrying once")
-        await self._refresh_nonce()
+        logger.warning("invalid nonce, retrying once")
+        await budget.take(tx=True)
         return await send()
 
     @staticmethod
     def _require_tx(resp: Any, err: Any, *, action: str) -> str:
         if err:
+            mapped = venue_client_error(err)
+            if mapped:
+                budget.note_blocked()
+                raise VenueBlocked(*mapped)
             raise ValueError(err)
         if resp is None:
             raise ValueError(f"{action} failed")
@@ -254,6 +259,10 @@ class OrderService:
             msg = getattr(resp, "message", None) or f"{action} failed ({code})"
             if str(code) not in str(msg):
                 msg = f"{msg} ({code})"
+            mapped = venue_client_error(msg)
+            if mapped:
+                budget.note_blocked()
+                raise VenueBlocked(*mapped)
             raise ValueError(msg)
         tx_hash = getattr(resp, "tx_hash", None)
         return str(tx_hash) if tx_hash else str(resp)
@@ -285,7 +294,7 @@ class OrderService:
     async def _auth_token(self) -> str:
         if not self.enabled:
             raise ValueError("Trading not configured")
-        auth, err = self.signer.create_auth_token_with_expiry()
+        auth, err = self.signer.create_auth_token_with_expiry(_AUTH_TTL_S)
         if err:
             raise ValueError(err)
         if not auth:
@@ -306,7 +315,8 @@ class OrderService:
     ) -> dict[str, Any]:
         meta = self._market_meta(market_index)
         base_amount = self._scale_size(size, meta.size_decimals)
-        self._check_notional(meta, base_amount)
+        if not reduce_only:
+            self._check_notional(meta, base_amount)
         is_ask = self._is_ask(side)
         coi = client_order_index or self._next_client_order_index()
         price_int = self._market_worst_price(meta, is_ask=is_ask, slippage=slippage)
@@ -377,9 +387,14 @@ class OrderService:
         client_order_index: int | None = None,
     ) -> dict[str, Any]:
         meta = self._market_meta(market_index)
+        if duration_seconds < 300:
+            raise ValueError("TWAP duration must be at least 5 minutes")
         base_amount = self._scale_size(size, meta.size_decimals)
         ref_px = meta.last_trade_price or meta.mark_price or 0
         bid_s, ask_s = gateway.best_bid_ask(market_index)
+        if not (bid_s and ask_s) and meta.best_bid_price and meta.best_ask_price:
+            bid_s = str(meta.best_bid_price)
+            ask_s = str(meta.best_ask_price)
         mid = 0.0
         if bid_s and ask_s:
             bid = float(bid_s)
@@ -399,16 +414,18 @@ class OrderService:
         expiry_ms = int(time.time() * 1000) + duration_seconds * 1000
         price_int = self._scale_price(str(worst), meta.price_decimals)
 
-        _tx, resp, err = await self.signer.create_order(
-            market_index=market_index,
-            client_order_index=coi,
-            base_amount=base_amount,
-            price=price_int,
-            is_ask=is_ask,
-            order_type=self.signer.ORDER_TYPE_TWAP,
-            time_in_force=self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
-            reduce_only=reduce_only,
-            order_expiry=expiry_ms,
+        _tx, resp, err = await self._retry_nonce(
+            lambda: self.signer.create_order(
+                market_index=market_index,
+                client_order_index=coi,
+                base_amount=base_amount,
+                price=price_int,
+                is_ask=is_ask,
+                order_type=self.signer.ORDER_TYPE_TWAP,
+                time_in_force=self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+                reduce_only=reduce_only,
+                order_expiry=expiry_ms,
+            )
         )
         tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
         return {"tx_hash": tx_hash, "client_order_index": coi}
@@ -671,7 +688,14 @@ class OrderService:
             trigger=trigger,
         )
 
-    async def amend_ticket(self, market_index: int, order_index: int, price: str) -> dict[str, Any]:
+    async def amend_ticket(
+        self,
+        market_index: int,
+        order_index: int,
+        price: str,
+        *,
+        size: str | None = None,
+    ) -> dict[str, Any]:
         live = account_service.find_open_order(market_index, order_index)
         if live is None:
             raise ValueError("Order not found")
@@ -679,13 +703,16 @@ class OrderService:
             raise ValueError("Cannot amend a Clip")
         parsed = protect_role_kind(live.order_type)
         if parsed:
+            if size is not None:
+                raise ValueError("Cannot amend size on a conditional order")
             role, kind = parsed
             return await self._amend_protect_trigger(live, role=role, kind=kind, trigger=price)
+        amend_size = size if size is not None else live.remaining
         return await self.modify_order(
             market_index,
             order_index,
             price,
-            size=live.remaining,
+            size=amend_size,
         )
 
     async def cancel_tickets(
@@ -720,10 +747,12 @@ class OrderService:
 
     async def cancel_all_orders(self, market_index: int | None = None) -> dict[str, Any]:
         idx = self.signer.NIL_MARKET_INDEX if market_index is None else market_index
-        _tx, resp, err = await self.signer.cancel_all_orders(
-            time_in_force=self.signer.CANCEL_ALL_TIF_IMMEDIATE,
-            timestamp_ms=0,
-            cancel_all_market_index=idx,
+        _tx, resp, err = await self._retry_nonce(
+            lambda: self.signer.cancel_all_orders(
+                time_in_force=self.signer.CANCEL_ALL_TIF_IMMEDIATE,
+                timestamp_ms=0,
+                cancel_all_market_index=idx,
+            )
         )
         tx_hash = self._require_tx(resp, err, action="Cancel all")
         return {"tx_hash": tx_hash}
@@ -738,13 +767,14 @@ class OrderService:
             raise ValueError(f"{meta.symbol} leverage must be one of {opts}")
         imf = leverage_to_imf(leverage, meta.min_initial_margin_fraction)
         margin_mode = 0 if cross else 1
-        _tx, tx_hash, err = await self.signer.update_leverage(
-            market_index=market_index,
-            margin_mode=margin_mode,
-            leverage=leverage,
+        _tx, resp, err = await self._retry_nonce(
+            lambda: self.signer.update_leverage(
+                market_index=market_index,
+                margin_mode=margin_mode,
+                leverage=leverage,
+            )
         )
-        if err:
-            raise ValueError(err)
+        tx_hash = self._require_tx(resp, err, action="Leverage")
         return {
             "tx_hash": tx_hash,
             "leverage": leverage,

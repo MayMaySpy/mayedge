@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
-from mayedge.api.app import create_app
+from mayedge.api.app import _account_summary_for_kill, create_app
 from mayedge.kill import kill
 from mayedge.lighter.models import AccountSummary, Position
 from mayedge.numbers import parse_decimal
@@ -81,6 +81,19 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.flatten, [])
         orders.cancel_all_orders.assert_awaited_once_with(None)
         orders.create_market_order.assert_not_called()
+
+
+class AccountSummaryForKillTests(unittest.IsolatedAsyncioTestCase):
+    @patch("mayedge.api.app.order_service")
+    @patch("mayedge.api.app.account_service")
+    async def test_falls_back_to_cache_when_rest_fails(
+        self, account_svc, order_svc
+    ) -> None:
+        order_svc.get_account_summary = AsyncMock(side_effect=RuntimeError("budget"))
+        cached = AccountSummary(collateral="1", available="1", unrealized_pnl="0")
+        account_svc.cached_summary.return_value = cached
+        got = await _account_summary_for_kill()
+        self.assertIs(got, cached)
 
 
 class KillSwitchEndpointTests(unittest.IsolatedAsyncioTestCase):

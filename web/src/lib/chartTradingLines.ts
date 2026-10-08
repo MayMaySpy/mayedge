@@ -21,6 +21,9 @@ export interface ChartOverlay {
   price: number;
   color: string;
   label: string;
+  prefixLabel?: string;
+  qtyLabel?: string;
+  qtyEditable?: boolean;
   pnl?: number;
   marketIndex?: number;
   orderIndex?: string;
@@ -46,7 +49,7 @@ const PILL_BG = "rgba(14, 17, 22, 0.92)";
 const REV_YELLOW = theme.warn;
 const LINE_HIT = 6;
 
-type HitAction = OverlayActionName | "body";
+type HitAction = OverlayActionName | "body" | "size";
 
 type HitBox = {
   x: number;
@@ -64,10 +67,13 @@ type LineGeom = {
   pillX: number;
   pillY: number;
   label: string;
+  prefixText: string;
+  qtyText: string | null;
   pnlText: string | null;
   pnlColor: string;
   showActions: boolean;
   showCancel: boolean;
+  hideQty: boolean;
 };
 
 let measureCtx: CanvasRenderingContext2D | null = null;
@@ -243,8 +249,10 @@ class PaneRenderer implements IPrimitivePaneRenderer {
 
   private _drawPill(ctx: CanvasRenderingContext2D, g: LineGeom) {
     const y = g.pillY;
-    let x = g.pillX;
-    const labelW = measure(g.label, FONT);
+    const x = g.pillX;
+    const labelW = g.qtyText
+      ? measure(`${g.prefixText} `, FONT) + measure(g.qtyText, FONT)
+      : measure(g.label, FONT);
     let inner = PAD_X + labelW + PAD_X;
     if (g.pnlText) inner += 2 + measure(g.pnlText, FONT) + PAD_X;
     if (g.showActions) inner += BTN + BTN + 4;
@@ -264,8 +272,15 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     ctx.fillStyle = g.line.color;
     ctx.textAlign = "left";
     let tx = x + PAD_X;
-    ctx.fillText(g.label, tx, y + PILL_H / 2);
-    tx += labelW + PAD_X;
+    if (g.qtyText) {
+      ctx.fillText(`${g.prefixText} `, tx, y + PILL_H / 2);
+      tx += measure(`${g.prefixText} `, FONT);
+      if (!g.hideQty) ctx.fillText(g.qtyText, tx, y + PILL_H / 2);
+      tx += measure(g.qtyText, FONT) + PAD_X;
+    } else {
+      ctx.fillText(g.label, tx, y + PILL_H / 2);
+      tx += labelW + PAD_X;
+    }
 
     if (g.pnlText) {
       ctx.fillStyle = "rgba(255,255,255,0.12)";
@@ -313,11 +328,12 @@ class PaneView implements IPrimitivePaneView {
     for (const line of lines) {
       const y = series.priceToCoordinate(line.price);
       if (y == null) continue;
-      const geom = layoutLine(line, y, paneW);
+      const geom = layoutLine(line, y, paneW, this._source.omitQtyId() === line.id);
       geoms.push(geom);
       hits.push(...geom.hits);
     }
     this._geoms = geoms;
+    this._source.setGeoms(geoms);
     this._source.setHits(hits);
   }
 
@@ -326,21 +342,30 @@ class PaneView implements IPrimitivePaneView {
   }
 }
 
+function labelWidth(line: ChartOverlay): number {
+  if (line.qtyEditable && line.prefixLabel && line.qtyLabel) {
+    return measure(`${line.prefixLabel} `, FONT) + measure(line.qtyLabel, FONT);
+  }
+  return measure(line.label, FONT);
+}
+
 function pillWidth(line: ChartOverlay, pnlText: string | null, showActions: boolean, showCancel: boolean): number {
-  const labelW = measure(line.label, FONT);
-  let inner = PAD_X + labelW + PAD_X;
+  let inner = PAD_X + labelWidth(line) + PAD_X;
   if (pnlText) inner += 2 + measure(pnlText, FONT) + PAD_X;
   if (showActions) inner += BTN + BTN + 4;
   if (showCancel) inner += BTN;
   return inner;
 }
 
-function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
+function layoutLine(line: ChartOverlay, y: number, paneW: number, hideQty: boolean): LineGeom {
   const pos = line.kind === "position";
   const pillY = y - PILL_H / 2;
   const interactive = Boolean(line.interactive);
   const showActions = pos && interactive;
   const showCancel = (line.kind === "order" || line.kind === "algo") && interactive;
+  const splitQty = Boolean(line.qtyEditable && line.prefixLabel && line.qtyLabel);
+  const prefixText = splitQty ? line.prefixLabel! : line.label;
+  const qtyText = splitQty ? line.qtyLabel! : null;
   const pnlText =
     pos && line.pnl != null && Number.isFinite(line.pnl) ? formatSignedPnl(line.pnl) : null;
   const pnlColor =
@@ -352,7 +377,8 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
 
   const hits: HitBox[] = [];
   if (line.kind !== "band") {
-    let tx = pillX + PAD_X + measure(line.label, FONT) + PAD_X;
+    const labelW = labelWidth(line);
+    let tx = pillX + PAD_X + labelW + PAD_X;
     if (pnlText) tx += measure(pnlText, FONT) + PAD_X;
     if (showActions) {
       hits.push({ x: tx, y: pillY, w: BTN, h: PILL_H, id: line.id, action: "reverse" });
@@ -362,8 +388,29 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
       hits.push({ x: tx, y: pillY, w: BTN, h: PILL_H, id: line.id, action: "cancel" });
     }
     if (interactive && line.kind === "order") {
-      const pillBodyW = width - (showCancel ? BTN : 0);
-      hits.push({ x: pillX, y: pillY, w: Math.max(1, pillBodyW), h: PILL_H, id: line.id, action: "body" });
+      if (splitQty) {
+        const prefixW = measure(`${prefixText} `, FONT);
+        const qtyW = measure(qtyText!, FONT);
+        hits.push({
+          x: pillX + PAD_X + prefixW,
+          y: pillY,
+          w: Math.max(1, qtyW),
+          h: PILL_H,
+          id: line.id,
+          action: "size",
+        });
+        hits.push({
+          x: pillX,
+          y: pillY,
+          w: Math.max(1, PAD_X + prefixW),
+          h: PILL_H,
+          id: line.id,
+          action: "body",
+        });
+      } else {
+        const pillBodyW = width - (showCancel ? BTN : 0);
+        hits.push({ x: pillX, y: pillY, w: Math.max(1, pillBodyW), h: PILL_H, id: line.id, action: "body" });
+      }
       hits.push({
         x: 0,
         y: y - LINE_HIT,
@@ -382,10 +429,13 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number): LineGeom {
     pillX,
     pillY,
     label: line.label,
+    prefixText,
+    qtyText,
     pnlText,
     pnlColor,
     showActions,
     showCancel,
+    hideQty,
   };
 }
 
@@ -395,6 +445,8 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
   private _requestUpdate: (() => void) | undefined;
   private _lines: ChartOverlay[] = [];
   private _hits: HitBox[] = [];
+  private _geoms: LineGeom[] = [];
+  private _omitQtyId: string | null = null;
   private readonly _paneView = new PaneView(this);
   private _paneViews: PaneView[] = [this._paneView];
   private _priceAxisViews: PriceAxisLabel[] = [];
@@ -437,6 +489,20 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
     this._hits = hits;
   }
 
+  setGeoms(geoms: LineGeom[]) {
+    this._geoms = geoms;
+  }
+
+  omitQtyId() {
+    return this._omitQtyId;
+  }
+
+  setOmitQty(id: string | null) {
+    if (this._omitQtyId === id) return;
+    this._omitQtyId = id;
+    this._requestUpdate?.();
+  }
+
   setLines(lines: ChartOverlay[]) {
     this._lines = lines;
     const key = lines.map((l) => l.id).join("\0");
@@ -464,23 +530,42 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
   hitTest(x: number, y: number) {
     for (const box of this._hits) {
       if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) {
+        const cursorStyle =
+          box.action === "body"
+            ? ("ns-resize" as const)
+            : box.action === "size"
+              ? ("text" as const)
+              : ("pointer" as const);
         return {
           externalId: `${box.id}::${box.action}`,
           zOrder: "top" as const,
-          cursorStyle: box.action === "body" ? ("ns-resize" as const) : ("pointer" as const),
+          cursorStyle,
         };
       }
     }
     return null;
   }
 
-  hitAt(x: number, y: number): { overlay: ChartOverlay; region: "cancel" | "body" } | null {
-    for (const box of this._hits) {
-      if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) continue;
-      if (box.action !== "cancel" && box.action !== "body") return null;
-      const overlay = this.lineById(box.id);
-      if (!overlay) return null;
-      return { overlay, region: box.action };
+  hitAt(x: number, y: number): { overlay: ChartOverlay; region: "cancel" | "body" | "size" } | null {
+    for (const prefer of ["size", "cancel", "body"] as const) {
+      for (const box of this._hits) {
+        if (box.action !== prefer) continue;
+        if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h) continue;
+        const overlay = this.lineById(box.id);
+        if (!overlay) continue;
+        return { overlay, region: box.action };
+      }
+    }
+    return null;
+  }
+
+  qtyHitRect(id: string): { x: number; y: number; w: number; h: number } | null {
+    for (const geom of this._geoms) {
+      if (geom.line.id !== id || !geom.qtyText) continue;
+      for (const box of geom.hits) {
+        if (box.action !== "size") continue;
+        return { x: box.x, y: box.y, w: box.w, h: box.h };
+      }
     }
     return null;
   }

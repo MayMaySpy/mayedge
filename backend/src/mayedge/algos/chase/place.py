@@ -35,6 +35,7 @@ from mayedge.algos.chase.util import (
     _is_rate_limit,
     _is_would_cross,
 )
+from mayedge.lighter.budget import BudgetRefused
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,9 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
         self._publish()
 
     def _handle_tx_err(self, err: BaseException) -> bool:
+        if isinstance(err, BudgetRefused):
+            self._hold_clip("budget")
+            return True
         if _is_rate_limit(err):
             self._on_rate_limit(err)
             return True
@@ -258,9 +262,7 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
                 await self._abandon_and_replace_working(quote)
                 return
             if _is_order_not_found(e):
-                self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
-                self._reconcile_master()
-                await self._place_working(quote)
+                await self._resolve_vanished_clip(clip, now=util.now_ms())
                 return
             if self._handle_tx_err(e):
                 return
@@ -269,9 +271,7 @@ class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
             return
         except Exception as e:
             if _is_order_not_found(e):
-                self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
-                self._reconcile_master()
-                await self._place_working(quote)
+                await self._resolve_vanished_clip(clip, now=util.now_ms())
                 return
             if self._handle_tx_err(e):
                 return

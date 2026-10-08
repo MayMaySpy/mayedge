@@ -4,9 +4,10 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from mayedge.config import settings
 from mayedge.lighter.account import AccountService
 from mayedge.lighter.errors import VenueBlocked, venue_client_error
-from mayedge.lighter.models import MarketMeta
+from mayedge.lighter.models import MarketMeta, parse_to_int
 from mayedge.lighter.orders import OrderService
 
 WAF_HTML = (
@@ -29,6 +30,33 @@ def _eth() -> MarketMeta:
     )
 
 
+def _sky() -> MarketMeta:
+    return MarketMeta(
+        market_index=79,
+        symbol="SKY",
+        price_decimals=6,
+        size_decimals=0,
+        min_base_amount=100,
+        min_quote_amount=10,
+    )
+
+
+class MakerMinTests(TestCase):
+    def test_sky_110_clears_ten_dollar_min(self) -> None:
+        meta = _sky()
+        OrderService()._check_maker_size(
+            meta, parse_to_int("110", 0), parse_to_int("0.094", 6)
+        )
+
+    def test_sky_106_asks_for_107(self) -> None:
+        meta = _sky()
+        with self.assertRaises(ValueError) as ctx:
+            OrderService()._check_maker_size(
+                meta, parse_to_int("106", 0), parse_to_int("0.094", 6)
+            )
+        self.assertEqual(str(ctx.exception), "Min 107 SKY (or $10)")
+
+
 class VenueClientErrorTests(TestCase):
     def test_waf_captcha_html_is_429(self) -> None:
         mapped = venue_client_error(WAF_HTML)
@@ -42,6 +70,10 @@ class VenueClientErrorTests(TestCase):
 
 
 class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        from mayedge.lighter.budget import budget
+
+        budget.reset()
     async def test_buy_uses_ask_and_does_not_rest_fetch_book(self) -> None:
         svc = OrderService()
         svc._signer = MagicMock()
@@ -82,6 +114,24 @@ class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
         call = svc._signer.create_market_order.await_args.kwargs
         self.assertEqual(call["avg_execution_price"], 9900)
         self.assertEqual(call["is_ask"], True)
+
+    async def test_reduce_only_skips_notional_cap(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        svc._signer.create_market_order = AsyncMock(return_value=(None, "0xabc", None))
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+
+        with (
+            patch.object(settings, "max_order_notional", 100.0),
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.gateway.best_bid_ask",
+                return_value=("100", "100.10"),
+            ),
+        ):
+            out = await svc.create_market_order(1, "sell", "1000", slippage=0.01, reduce_only=True)
+
+        self.assertEqual(out["tx_hash"], "0xabc")
 
     async def test_waf_on_send_is_venue_blocked(self) -> None:
         svc = OrderService()
@@ -145,11 +195,16 @@ class OrderCapRejectTests(IsolatedAsyncioTestCase):
 
 
 class AccountRestCooldownTests(IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        from mayedge.lighter.budget import budget
+
+        budget.reset()
+
     async def test_summary_raises_while_cooling(self) -> None:
-        import time
+        from mayedge.lighter.budget import budget
 
         svc = AccountService()
-        svc._rest_cool_until = time.monotonic() + 60
+        budget.note_blocked()
         with (
             patch("mayedge.lighter.account.settings") as settings,
             patch("mayedge.lighter.account.lighter.AccountApi") as api,
@@ -166,13 +221,11 @@ class AccountRestCooldownTests(IsolatedAsyncioTestCase):
         svc.kick_refresh()
         self.assertIsNone(svc._refresh_task)
 
-    def test_token_bucket_blocks_before_venue_429(self) -> None:
-        from mayedge.lighter import account as account_mod
+    def test_local_refusal_does_not_start_cooldown(self) -> None:
+        from mayedge.lighter.budget import CAP, budget
 
-        svc = AccountService()
-        for _ in range(account_mod._REST_BUDGET):
-            svc._take_rest()
-        with self.assertRaises(VenueBlocked) as ctx:
-            svc._take_rest()
-        self.assertEqual(ctx.exception.status, 429)
-        self.assertTrue(svc._rest_cooling())
+        budget.reset()
+        for _ in range(CAP):
+            self.assertTrue(budget.try_acquire(lane="critical"))
+        self.assertFalse(budget.try_acquire(lane="critical"))
+        self.assertFalse(budget.cooling())

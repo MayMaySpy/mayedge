@@ -22,9 +22,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SUB_BATCH = 40
-_SUB_MIN_INTERVAL = 60.0 / 150.0
+_PACE_PER_MIN = 150
 _PING_EVERY = 25.0
 _SILENCE_S = 45.0
+_TONE_CONN_CAP = 450
+
+
+class SendPacer:
+    """Space client WS frames across every connection. 200/min is per IP."""
+
+    def __init__(self, per_min: int = _PACE_PER_MIN) -> None:
+        self._interval = 60.0 / per_min
+        self._lock = asyncio.Lock()
+        self._next = 0.0
+
+    async def wait(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            slot = self._next if self._next > now else now
+            self._next = slot + self._interval
+        delay = slot - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
+send_pacer = SendPacer()
 
 
 async def ws_send(ws: Any, payload: dict[str, Any]) -> None:
@@ -162,8 +184,6 @@ async def pace_trade_subs(gw: LighterGateway, ws: Any) -> None:
         )
         return
     logger.info("pacing %d trade subscriptions (active=%s first)", len(pending), active)
-    sent_in_window = 0
-    window_start = time.monotonic()
     while True:
         pending_set = gw._trade_subs_target - gw._trade_subs
         if not pending_set:
@@ -175,20 +195,10 @@ async def pace_trade_subs(gw: LighterGateway, ws: Any) -> None:
         batch = remaining[:_SUB_BATCH]
         for mi in batch:
             await gw._focus_gate.wait()
-            now = time.monotonic()
-            if now - window_start >= 60:
-                window_start = now
-                sent_in_window = 0
-            if sent_in_window >= 150:
-                await asyncio.sleep(max(0.1, 60 - (now - window_start)))
-                window_start = time.monotonic()
-                sent_in_window = 0
-                await gw._focus_gate.wait()
+            await send_pacer.wait()
             async with gw._send_lock:
                 await ws_send(ws, {"type": "subscribe", "channel": f"trade/{mi}"})
                 gw._trade_subs.add(mi)
-            sent_in_window += 1
-            await asyncio.sleep(_SUB_MIN_INTERVAL)
         feed_health.set_market_ws(
             "live",
             trade_subs=len(gw._trade_subs),
@@ -203,6 +213,9 @@ async def pace_trade_subs(gw: LighterGateway, ws: Any) -> None:
 
 
 async def handle_ws_message(gw: LighterGateway, msg: dict[str, Any]) -> None:
+    if msg.get("error") or msg.get("type") == "error":
+        logger.warning("market ws error: %s", msg.get("error") or msg)
+        return
     action, kind = split_ws_type(msg.get("type"))
     if kind == "order_book":
         await gw._books.handle_message(msg)
@@ -354,3 +367,110 @@ async def handle_candle(gw: LighterGateway, msg: dict[str, Any]) -> None:
     else:
         payload["candles"] = parsed
     gw.broadcast(payload)
+
+
+async def run_tone_ws(gw: LighterGateway) -> None:
+    """Candle closes for tone alerts. One connection per 450 channels."""
+    while True:
+        epoch = gw._tone_epoch
+        try:
+            await _tone_session(gw, epoch)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("tone ws error, reconnecting in 3s")
+            await asyncio.sleep(3)
+        if gw._tone_epoch == epoch:
+            gw._request_tone_fill("stale")
+
+
+async def _tone_session(gw: LighterGateway, epoch: int) -> None:
+    channels = gw.tone_channels()
+    if not channels:
+        await asyncio.sleep(5)
+        return
+    groups = [channels[i : i + _TONE_CONN_CAP] for i in range(0, len(channels), _TONE_CONN_CAP)]
+    tasks = [asyncio.create_task(_tone_conn(gw, epoch, group)) for group in groups]
+    try:
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                raise exc
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+
+async def _tone_subscribe(gw: LighterGateway, epoch: int, ws: Any, channels: list[str]) -> None:
+    for channel in channels:
+        if gw._tone_epoch != epoch:
+            return
+        await send_pacer.wait()
+        await ws_send(ws, {"type": "subscribe", "channel": channel})
+
+
+async def _tone_conn(gw: LighterGateway, epoch: int, channels: list[str]) -> None:
+    async with websockets.connect(settings.ws_url) as ws:
+        # Read while subscribing: paced subs take minutes, and unread snapshots stall keepalive pongs.
+        side = [
+            asyncio.create_task(_tone_subscribe(gw, epoch, ws, channels)),
+            asyncio.create_task(_tone_ping(ws)),
+        ]
+        try:
+            last = time.monotonic()
+            while gw._tone_epoch == epoch:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                except TimeoutError:
+                    if time.monotonic() - last >= _SILENCE_S:
+                        logger.warning("tone ws silent — reconnecting")
+                        return
+                    continue
+                last = time.monotonic()
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                kind = msg.get("type")
+                if kind == "ping":
+                    await ws_send(ws, {"type": "pong"})
+                    continue
+                if kind == "pong":
+                    continue
+                if msg.get("error") or kind == "error":
+                    logger.warning("tone ws error: %s", msg.get("error") or msg)
+                    continue
+                _apply_tone_candles(gw, msg)
+        finally:
+            for task in side:
+                task.cancel()
+            for task in side:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+
+
+async def _tone_ping(ws: Any) -> None:
+    while True:
+        await asyncio.sleep(_PING_EVERY)
+        await ws_send(ws, {"type": "ping"})
+
+
+def _apply_tone_candles(gw: LighterGateway, msg: dict[str, Any]) -> None:
+    resolution = candle_channel_resolution(msg.get("channel"))
+    market_index = parse_channel_market(msg.get("channel"), "candle")
+    if resolution is None or market_index is None:
+        return
+    raw_rows = msg.get("candles") or []
+    if not raw_rows and msg.get("candlestick"):
+        raw_rows = [msg["candlestick"]]
+    bars: list[dict[str, float | int]] = []
+    for raw in raw_rows:
+        bar = _ws_candle(raw)
+        if bar is not None:
+            bars.append(bar)
+    if bars:
+        gw.on_tone_candles(market_index, resolution, bars)

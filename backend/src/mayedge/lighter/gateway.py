@@ -14,8 +14,9 @@ from mayedge import db as store
 from mayedge import feed_health
 from mayedge.alerts import ExploitDetector, ExploitEvent
 from mayedge.config import settings
+from mayedge.lighter.budget import budget
 from mayedge.lighter.liquidations import LiquidationFeed
-from mayedge.lighter.market_ws import run_ws_loop, ws_send
+from mayedge.lighter.market_ws import run_tone_ws, run_ws_loop, ws_send
 from mayedge.lighter.models import (
     Candle,
     MarketMeta,
@@ -38,11 +39,24 @@ from mayedge.tone_timeframes import (
 
 logger = logging.getLogger(__name__)
 
+
+def _detail_field(obj: Any, *names: str) -> Any:
+    extra = getattr(obj, "additional_properties", None)
+    for name in names:
+        val = getattr(obj, name, None)
+        if val is not None:
+            return val
+        if isinstance(extra, dict) and extra.get(name) is not None:
+            return extra[name]
+    return None
+
+
 _HEALTH_DEGRADED_S = 10.0
+_MARKET_REFRESH_S = 3600.0
 _TONE_BACKFILL = 500
-_TONE_CLOSE_FETCH = 5
-_TONE_REST_GAP_S = 60.0 / 150.0
-_TONE_RETRY_S = 60.0
+_ALERT_MINUTE_BARS = 240
+_REST_CANDLE_CAP = 500
+_BOARD_BROADCAST_S = 3.0
 
 
 class LighterGateway:
@@ -79,7 +93,13 @@ class LighterGateway:
         self._tone_resync = asyncio.Event()
         self._tone_generation = 0
         self._tone_task: asyncio.Task[None] | None = None
-        self._tone_retry_at = 0.0
+        self._tone_ws_task: asyncio.Task[None] | None = None
+        self._market_task: asyncio.Task[None] | None = None
+        self._tone_fill = ""
+        self._tone_epoch = 0
+        self._alert_minute_task: asyncio.Task[None] | None = None
+        self._alert_board_task: asyncio.Task[None] | None = None
+        self._last_board_sig: str = ""
 
     async def start(self) -> None:
         self._client = lighter.ApiClient(Configuration(host=settings.base_url))
@@ -102,13 +122,27 @@ class LighterGateway:
         self._ws_task = asyncio.create_task(run_ws_loop(self))
         self._health_task = asyncio.create_task(self._health_loop())
         self._oi_task = asyncio.create_task(self._oi_sample_loop())
+        self._market_task = asyncio.create_task(self._market_refresh_loop())
         self._tone_book.set_timeframes(load_tone_timeframes())
         self._tone_generation += 1
+        self._tone_fill = "full"
         self._tone_resync.set()
         self._tone_task = asyncio.create_task(self._tone_loop())
+        self._tone_ws_task = asyncio.create_task(run_tone_ws(self))
+        self._alert_minute_task = asyncio.create_task(self._alert_minute_backfill_loop())
+        self._alert_board_task = asyncio.create_task(self._alert_board_loop())
 
     async def stop(self) -> None:
-        for task in (self._ws_task, self._health_task, self._oi_task, self._tone_task):
+        for task in (
+            self._ws_task,
+            self._health_task,
+            self._oi_task,
+            self._tone_task,
+            self._tone_ws_task,
+            self._market_task,
+            self._alert_minute_task,
+            self._alert_board_task,
+        ):
             if task:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -117,6 +151,10 @@ class LighterGateway:
         self._health_task = None
         self._oi_task = None
         self._tone_task = None
+        self._tone_ws_task = None
+        self._market_task = None
+        self._alert_minute_task = None
+        self._alert_board_task = None
         await self._books.stop_resync_loop()
         if self._client:
             await self._client.close()
@@ -148,67 +186,86 @@ class LighterGateway:
         return self._client
 
     async def _load_markets(self) -> None:
+        await budget.take("background", wait=True)
         order_api = lighter.OrderApi(self.client)
-        details = await order_api.order_books()
-        self._markets.clear()
+        detail_resp = await order_api.order_book_details()
+        rows = list(getattr(detail_resp, "order_book_details", None) or [])
+        rows.extend(getattr(detail_resp, "spot_order_book_details", None) or [])
+        seen: set[int] = set()
         self._symbol_to_index.clear()
         self._perp_by_symbol.clear()
         self._spot_by_symbol.clear()
-        for book in details.order_books or []:
-            symbol = getattr(book, "symbol", None) or f"M{book.market_id}"
-            meta = MarketMeta(
-                market_index=book.market_id,
+        for book in rows:
+            status = str(_detail_field(book, "status") or "").lower()
+            if status and status != "active":
+                continue
+            idx = int(book.market_id)
+            symbol = str(getattr(book, "symbol", None) or f"M{idx}")
+            price_dec = _detail_field(book, "price_decimals", "supported_price_decimals")
+            size_dec = _detail_field(book, "size_decimals", "supported_size_decimals")
+            last = to_float(_detail_field(book, "last_trade_price"))
+            mark = to_float(_detail_field(book, "mark_price")) or last
+            meta = self._markets.get(idx) or MarketMeta(
+                market_index=idx,
                 symbol=symbol,
-                price_decimals=getattr(book, "supported_price_decimals", 2) or 2,
-                size_decimals=getattr(book, "supported_size_decimals", 4) or 4,
-                min_base_amount=to_float(getattr(book, "min_base_amount", 0)),
-                min_quote_amount=to_float(getattr(book, "min_quote_amount", 0)),
-                market_type=normalize_market_type(getattr(book, "market_type", None)),
+                price_decimals=2 if price_dec is None else int(price_dec),
+                size_decimals=4 if size_dec is None else int(size_dec),
+                min_base_amount=0.0,
+                min_quote_amount=0.0,
             )
-            self._markets[meta.market_index] = meta
+            meta.symbol = symbol
+            meta.price_decimals = 2 if price_dec is None else int(price_dec)
+            meta.size_decimals = 4 if size_dec is None else int(size_dec)
+            meta.min_base_amount = to_float(_detail_field(book, "min_base_amount"))
+            meta.min_quote_amount = to_float(_detail_field(book, "min_quote_amount"))
+            meta.market_type = normalize_market_type(_detail_field(book, "market_type"))
+            if mark:
+                meta.mark_price = mark
+            meta.last_trade_price = last or meta.last_trade_price
+            config = getattr(book, "market_config", None)
+            index = to_float(_detail_field(book, "index_price"))
+            if not index and config is not None:
+                index = to_float(getattr(config, "index_price", None))
+            if index:
+                meta.index_price = index
+            meta.volume_24h = to_float(_detail_field(book, "daily_quote_token_volume"))
+            raw_oi = _detail_field(book, "open_interest")
+            if raw_oi is not None and mark:
+                meta.open_interest = open_interest_usd(to_float(raw_oi) * mark)
+            change = _detail_field(book, "daily_price_change")
+            meta.change_24h = None if change is None else to_float(change)
+            min_imf = int(_detail_field(book, "min_initial_margin_fraction") or 0)
+            default_imf = int(_detail_field(book, "default_initial_margin_fraction") or 0)
+            maintenance = int(_detail_field(book, "maintenance_margin_fraction") or 0)
+            if min_imf > 0:
+                meta.min_initial_margin_fraction = min_imf
+            if default_imf > 0:
+                meta.default_initial_margin_fraction = default_imf
+            if maintenance > 0:
+                meta.maintenance_margin_fraction = maintenance
+            self._markets[idx] = meta
+            seen.add(idx)
             key = symbol.upper()
             if meta.is_perp:
-                self._perp_by_symbol[key] = meta.market_index
-                self._symbol_to_index[key] = meta.market_index
+                self._perp_by_symbol[key] = idx
+                self._symbol_to_index[key] = idx
             else:
-                self._spot_by_symbol[key] = meta.market_index
-                self._symbol_to_index.setdefault(key, meta.market_index)
+                self._spot_by_symbol[key] = idx
+                self._symbol_to_index.setdefault(key, idx)
+        for idx in list(self._markets):
+            if idx not in seen:
+                del self._markets[idx]
 
-        try:
-            detail_resp = await order_api.order_book_details()
-            for d in detail_resp.order_book_details or []:
-                idx = d.market_id
-                if idx in self._markets:
-                    last = to_float(getattr(d, "last_trade_price", None))
-                    mark = to_float(getattr(d, "mark_price", None)) or last
-                    self._markets[idx].mark_price = mark
-                    self._markets[idx].index_price = to_float(
-                        getattr(d, "market_config", None)
-                        and getattr(d.market_config, "index_price", None)
-                    )
-                    self._markets[idx].last_trade_price = last
-                    self._markets[idx].volume_24h = to_float(
-                        getattr(d, "daily_quote_token_volume", None)
-                    )
-                    raw_oi = getattr(d, "open_interest", None)
-                    if raw_oi is not None and mark:
-                        # REST OI is base size; convert to two-sided quote notional.
-                        self._markets[idx].open_interest = open_interest_usd(
-                            to_float(raw_oi) * mark
-                        )
-                    change = getattr(d, "daily_price_change", None)
-                    self._markets[idx].change_24h = None if change is None else to_float(change)
-                    min_imf = int(getattr(d, "min_initial_margin_fraction", 0) or 0)
-                    default_imf = int(getattr(d, "default_initial_margin_fraction", 0) or 0)
-                    maintenance = int(getattr(d, "maintenance_margin_fraction", 0) or 0)
-                    if min_imf > 0:
-                        self._markets[idx].min_initial_margin_fraction = min_imf
-                    if default_imf > 0:
-                        self._markets[idx].default_initial_margin_fraction = default_imf
-                    if maintenance > 0:
-                        self._markets[idx].maintenance_margin_fraction = maintenance
-        except Exception:
-            logger.exception("failed to load order book details")
+    async def _market_refresh_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(_MARKET_REFRESH_S)
+                await self._load_markets()
+                self._refresh_trade_targets()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("market refresh failed")
 
     def _apply_market_stats(self, msg: dict[str, Any]) -> None:
         stats_blob = msg.get("market_stats")
@@ -347,6 +404,8 @@ class LighterGateway:
         market_index: int,
         resolution: str = "1m",
         count: int = 500,
+        *,
+        lane: str = "read",
     ) -> list[Candle]:
         if resolution == "1s":
             series = self._candles_1s.get(market_index)
@@ -354,6 +413,8 @@ class LighterGateway:
                 series = self._rebuild_1s(market_index)
             return list(series[-count:])
 
+        count = min(max(int(count), 1), _REST_CANDLE_CAP)
+        await budget.take(lane, wait=lane == "background")
         candle_api = lighter.CandlestickApi(self.client)
         end = int(time.time()) * 1000
         resolution_seconds = {
@@ -426,6 +487,7 @@ class LighterGateway:
             try:
                 async with self._send_lock:
                     if not same and prev is not None and prev not in self._pinned_books:
+                        self._books.invalidate(prev)
                         await ws_send(ws, {"type": "unsubscribe", "channel": f"order_book/{prev}"})
                         await ws_send(ws, {"type": "unsubscribe", "channel": f"candle/{prev}/1m"})
                     await ws_send(
@@ -519,13 +581,12 @@ class LighterGateway:
 
     def request_book_snapshot(self, market_index: int | None = None) -> None:
         mi = market_index if market_index is not None else self._current_market_index
-        self._books.request_snapshot(mi)
-        if mi is None or self._books.has_book(mi):
+        if mi is None:
             return
+        self._books.invalidate(mi)
         if self._ws is None:
-            logger.warning("resync_book skipped; no ws and no local book market=%s", mi)
+            logger.warning("resync_book skipped; no ws market=%s", mi)
             return
-        logger.info("resync_book: re-subscribe order_book/%s (no local snapshot)", mi)
         asyncio.create_task(self._resubscribe_order_book(mi))
 
     def _resubscribe_order_book_sync(self, market_index: int) -> None:
@@ -545,7 +606,7 @@ class LighterGateway:
             if self._books.is_synced(market_index):
                 return True
             await asyncio.sleep(0.03)
-        return self._books.has_book(market_index)
+        return self._books.is_synced(market_index)
 
     def release_order_book(self, market_index: int) -> None:
         self._pinned_books.discard(market_index)
@@ -568,8 +629,13 @@ class LighterGateway:
         ws = self._ws
         if ws is None:
             return
+        self._books.invalidate(market_index)
         try:
             async with self._send_lock:
+                with contextlib.suppress(Exception):
+                    await ws_send(
+                        ws, {"type": "unsubscribe", "channel": f"order_book/{market_index}"}
+                    )
                 await ws_send(ws, {"type": "subscribe", "channel": f"order_book/{market_index}"})
         except Exception:
             logger.exception("re-subscribe order_book/%s failed", market_index)
@@ -606,6 +672,9 @@ class LighterGateway:
 
     def recent_alerts(self) -> list[dict[str, Any]]:
         return self._alerts.recent()
+
+    def recent_alert_board(self) -> list[dict[str, Any]]:
+        return self._alerts.board()
 
     def _prune_trade_buffers(self, keep: int | None = None) -> None:
         keep_idx = keep if keep is not None else self._current_market_index
@@ -665,6 +734,8 @@ class LighterGateway:
         save_tone_timeframes(chosen)
         self._tone_book.set_timeframes(chosen)
         self._tone_generation += 1
+        self._tone_fill = "full"
+        self._tone_epoch += 1
         self._tone_resync.set()
         return self.tone_timeframes_view()
 
@@ -677,8 +748,7 @@ class LighterGateway:
         resolution: str,
         bars: Sequence[Mapping[str, Any]],
     ) -> None:
-        book = getattr(self, "_tone_book", None)
-        if book is None or not bars:
+        if not bars:
             return
         candles = [
             Candle(
@@ -691,8 +761,13 @@ class LighterGateway:
             )
             for bar in bars
         ]
-        hits = book.observe(market_index, resolution, candles, now=time.time())
-        self._emit_tone_hits(hits)
+        alerts = getattr(self, "_alerts", None)
+        if resolution == "1m" and alerts is not None:
+            alerts.on_minute_bars(market_index, candles)
+        book = getattr(self, "_tone_book", None)
+        if book is not None and resolution in book.timeframes:
+            hits = book.observe(market_index, resolution, candles, now=time.time())
+            self._emit_tone_hits(hits)
 
     def _emit_tone_hits(self, hits: list[ToneHit]) -> None:
         if not hits:
@@ -723,55 +798,92 @@ class LighterGateway:
             )
         alerts.emit_events(events)
 
+    def tone_channels(self) -> list[str]:
+        labels = set(self._tone_book.timeframes)
+        labels.add("1m")
+        ordered = sorted(labels, key=lambda x: TONE_TIMEFRAME_SECONDS.get(x, 0))
+        return [
+            f"candle/{market_index}/{label}"
+            for market_index in self._perp_indexes()
+            for label in ordered
+        ]
+
+    async def _alert_minute_backfill_loop(self) -> None:
+        await asyncio.sleep(2)
+        while True:
+            try:
+                await self._backfill_alert_minute_books()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("alert minute backfill failed")
+            await asyncio.sleep(3600)
+
+    async def _backfill_alert_minute_books(self) -> None:
+        perps = sorted(
+            (m for m in self._markets.values() if m.is_perp),
+            key=lambda m: to_float(m.volume_24h),
+            reverse=True,
+        )
+        book = self._alerts.minute_book()
+        for meta in perps:
+            if book.seeded(meta.market_index):
+                continue
+            try:
+                candles = await self.get_candles(
+                    meta.market_index, "1m", _ALERT_MINUTE_BARS, lane="background"
+                )
+            except Exception:
+                logger.exception("alert minute seed failed market=%s", meta.market_index)
+                continue
+            self._alerts.seed_minute_bars(meta.market_index, candles)
+
+    async def _alert_board_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(_BOARD_BROADCAST_S)
+                rows = self._alerts.board()
+                sig = str(
+                    [
+                        (r.get("market_index"), r.get("score"), r.get("setup"), r.get("direction"), r.get("move_pct"))
+                        for r in rows
+                    ]
+                )
+                if sig == self._last_board_sig:
+                    continue
+                self._last_board_sig = sig
+                self.broadcast({"type": "alert_board", "rows": rows})
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("alert board broadcast failed")
+
+    def _request_tone_fill(self, kind: str) -> None:
+        if self._tone_fill != "full":
+            self._tone_fill = kind
+        self._tone_resync.set()
+
     async def _tone_loop(self) -> None:
         while True:
             try:
-                try:
-                    await asyncio.wait_for(self._tone_resync.wait(), timeout=5.0)
-                except TimeoutError:
-                    await self._refresh_closed_tones()
-                    await self._retry_missing_tones()
-                    continue
+                await self._tone_resync.wait()
+                kind = self._tone_fill or "full"
+                self._tone_fill = ""
                 self._tone_resync.clear()
                 generation = self._tone_generation
-                await self._backfill_tone_windows(generation)
+                if kind == "stale":
+                    await self._backfill_tone_windows(generation, only_gaps=True)
+                else:
+                    await self._backfill_tone_windows(generation)
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("tone alert cycle failed")
                 await asyncio.sleep(5)
 
-    async def _retry_missing_tones(self) -> None:
-        now = time.time()
-        if now < self._tone_retry_at:
-            return
-        if not self._tone_book.missing(self._perp_indexes()):
-            return
-        self._tone_retry_at = now + _TONE_RETRY_S
-        await self._backfill_tone_windows(self._tone_generation, only_missing=True)
-
-    async def _refresh_closed_tones(self) -> None:
-        """Fetch the closed bar over REST. Candle sockets stay on the chart only."""
-        due = self._tone_book.due(now=time.time())
-        for market_index, resolution in due:
-            if self._tone_resync.is_set():
-                return
-            try:
-                candles = await self.get_candles(market_index, resolution, _TONE_CLOSE_FETCH)
-            except Exception:
-                logger.exception("tone close fetch failed market=%s %s", market_index, resolution)
-                continue
-            if not candles:
-                continue
-            now = time.time()
-            hits = self._tone_book.observe(market_index, resolution, candles, now=now)
-            hits.extend(self._tone_book.close_one(market_index, resolution, now=now))
-            self._emit_tone_hits(hits)
-            await asyncio.sleep(_TONE_REST_GAP_S)
-
-    async def _backfill_tone_windows(self, generation: int, *, only_missing: bool = False) -> None:
-        if only_missing:
-            wanted = self._tone_book.missing(self._perp_indexes())
+    async def _backfill_tone_windows(self, generation: int, *, only_gaps: bool = False) -> None:
+        if only_gaps:
+            wanted = self._tone_book.gaps(self._perp_indexes(), now=time.time())
         else:
             wanted = [
                 (market_index, resolution)
@@ -782,10 +894,12 @@ class LighterGateway:
             return
         logger.info("tone backfill %d windows", len(wanted))
         for market_index, resolution in wanted:
-            if generation != self._tone_generation:
+            if generation != self._tone_generation or self._tone_fill == "full":
                 return
             try:
-                candles = await self.get_candles(market_index, resolution, _TONE_BACKFILL)
+                candles = await self.get_candles(
+                    market_index, resolution, _TONE_BACKFILL, lane="background"
+                )
             except Exception:
                 logger.exception("tone backfill failed market=%s %s", market_index, resolution)
                 continue
@@ -793,7 +907,6 @@ class LighterGateway:
                 return
             hits = self._tone_book.seed(market_index, resolution, candles, now=time.time())
             self._emit_tone_hits(hits)
-            await asyncio.sleep(_TONE_REST_GAP_S)
 
 
 gateway = LighterGateway()

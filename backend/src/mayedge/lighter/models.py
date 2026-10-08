@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any
 
 from mayedge.numbers import fmt_decimal
@@ -363,10 +363,23 @@ def from_scaled(value: int, decimals: int) -> Decimal:
     return Decimal(value) / (Decimal(10) ** decimals)
 
 
-def maker_min_base(min_base: float, min_quote: float, price: Decimal | None) -> Decimal:
-    """Lighter applies the stricter of min base and min quote for maker orders."""
+def maker_min_base(
+    min_base: float,
+    min_quote: float,
+    price: Decimal | None,
+    step: Decimal | None = None,
+) -> Decimal:
+    """Stricter of min base and min quote, rounded up to a legal size step.
+
+    SKY's step is 1. ``$10 / $0.094`` is 106.38, which is not a placeable size —
+    the venue minimum is 107. Leaving the raw quotient rejects 106 and prints
+    an unrounded fraction.
+    """
     floor = Decimal(str(min_base or 0))
     quote = Decimal(str(min_quote or 0))
     if price is not None and price > 0 and quote > 0:
         floor = max(floor, quote / price)
-    return floor
+    if step is None or step <= 0 or floor <= 0:
+        return floor
+    units = (floor / step).to_integral_value(rounding=ROUND_UP)
+    return units * step

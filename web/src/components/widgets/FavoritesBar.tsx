@@ -39,8 +39,6 @@ export const FavoritesBar = memo(function FavoritesBar({
   const [fade, setFade] = useState({ fadeL: 0, fadeR: 0, showRight: false });
   const rowRef = useRef<HTMLDivElement>(null);
   const orderRef = useRef<string[]>(favorites);
-  const favoritesRef = useRef(favorites);
-  favoritesRef.current = favorites;
   const dragRef = useRef<{
     id: string;
     pointerId: number;
@@ -93,7 +91,7 @@ export const FavoritesBar = memo(function FavoritesBar({
     e.stopPropagation();
     const pointerId = e.pointerId;
     dragRef.current = { id, pointerId, startX: e.clientX, moved: false };
-    orderRef.current = [...(draft ?? favoritesRef.current)];
+    orderRef.current = [...(draft ?? favorites)];
 
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;

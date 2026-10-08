@@ -1,5 +1,14 @@
 import { useSyncExternalStore } from "react";
-import type { Account, AccountTrade, AlgoBook, AlgoState, Candle, AlertEvent, Market } from "@/lib/api";
+import type {
+  Account,
+  AccountTrade,
+  AlgoBook,
+  AlgoState,
+  AlertBoardRow,
+  Candle,
+  AlertEvent,
+  Market,
+} from "@/lib/api";
 import { algoIsWorking } from "@/lib/algos";
 import { liqIdentity } from "@/lib/venuePair";
 
@@ -968,6 +977,35 @@ export function useLiveAlerts() {
   return useSyncExternalStore(subscribeAlerts, getAlerts, getAlerts);
 }
 
+let alertBoard: AlertBoardRow[] = [];
+const boardNotify = makeThrottledNotify(100);
+
+export function subscribeAlertBoard(onChange: () => void) {
+  return boardNotify.subscribe(onChange);
+}
+
+export function getAlertBoard() {
+  return alertBoard;
+}
+
+export function setAlertBoard(rows: AlertBoardRow[]) {
+  const same =
+    rows.length === alertBoard.length &&
+    rows.every(
+      (r, i) =>
+        r.market_index === alertBoard[i]?.market_index &&
+        r.score === alertBoard[i]?.score &&
+        r.setup === alertBoard[i]?.setup
+    );
+  if (same) return;
+  alertBoard = rows;
+  boardNotify.notify();
+}
+
+export function useLiveAlertBoard() {
+  return useSyncExternalStore(subscribeAlertBoard, getAlertBoard, getAlertBoard);
+}
+
 export function subscribeFeedHealth(onChange: () => void) {
   healthListeners.add(onChange);
   return () => {
@@ -994,6 +1032,58 @@ export function setFeedHealth(next: Partial<FeedHealth> & { type?: string }) {
 
 export function useFeedHealth() {
   return useSyncExternalStore(subscribeFeedHealth, getFeedHealth, getFeedHealth);
+}
+
+export interface LiveAutoKill {
+  armed: boolean;
+  loss_usd: number | null;
+  profit_usd: number | null;
+  fired_at: number | null;
+  fired_reason: string | null;
+  fired_upnl: number | null;
+  last_kill_status: string | null;
+}
+
+const defaultAutoKill: LiveAutoKill = {
+  armed: false,
+  loss_usd: null,
+  profit_usd: null,
+  fired_at: null,
+  fired_reason: null,
+  fired_upnl: null,
+  last_kill_status: null,
+};
+
+let autoKillState: LiveAutoKill = defaultAutoKill;
+const autoKillListeners = new Set<() => void>();
+
+export function subscribeAutoKill(onChange: () => void) {
+  autoKillListeners.add(onChange);
+  return () => {
+    autoKillListeners.delete(onChange);
+  };
+}
+
+export function getAutoKill() {
+  return autoKillState;
+}
+
+export function setAutoKill(next: Partial<LiveAutoKill> & { type?: string }) {
+  autoKillState = {
+    armed: next.armed ?? autoKillState.armed,
+    loss_usd: next.loss_usd !== undefined ? next.loss_usd : autoKillState.loss_usd,
+    profit_usd: next.profit_usd !== undefined ? next.profit_usd : autoKillState.profit_usd,
+    fired_at: next.fired_at !== undefined ? next.fired_at : autoKillState.fired_at,
+    fired_reason: next.fired_reason !== undefined ? next.fired_reason : autoKillState.fired_reason,
+    fired_upnl: next.fired_upnl !== undefined ? next.fired_upnl : autoKillState.fired_upnl,
+    last_kill_status:
+      next.last_kill_status !== undefined ? next.last_kill_status : autoKillState.last_kill_status,
+  };
+  autoKillListeners.forEach((fn) => fn());
+}
+
+export function useAutoKill() {
+  return useSyncExternalStore(subscribeAutoKill, getAutoKill, getAutoKill);
 }
 
 function flushLiveUi() {

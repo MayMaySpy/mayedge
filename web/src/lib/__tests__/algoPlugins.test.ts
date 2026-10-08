@@ -196,6 +196,30 @@ describe("chase plugin blockReason", () => {
 describe("twap plugin blockReason", () => {
   const ctx = { sizeNum: 10, decimals: 2, minSz: 0, symbol: "ETH", spot: 100, slipFrac: 0.01 };
 
+  it("blocks a venue twap shorter than 5 minutes", () => {
+    expect(
+      twapPlugin.blockReason(
+        { ...twapPlugin.defaultState, twapHours: "", twapMinutes: "1" },
+        ctx
+      )
+    ).toBe("Running time 5m–30d");
+  });
+
+  it("allows a 1 minute desk twap", () => {
+    expect(
+      twapPlugin.blockReason(
+        {
+          ...twapPlugin.defaultState,
+          twapAdvanced: true,
+          twapHours: "",
+          twapMinutes: "1",
+          twapFreq: "10",
+        },
+        ctx
+      )
+    ).toBeNull();
+  });
+
   it("blocks without duration", () => {
     expect(
       twapPlugin.blockReason(

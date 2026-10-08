@@ -14,13 +14,14 @@ import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "reac
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
-import { loadLiqHours } from "@/components/widgets/LiquidationHeatTable";
+import { loadLiqHours } from "@/lib/liqHours";
 import { ScanBoard, type ScanTab } from "@/components/widgets/ScanBoard";
 import { TimeframePins } from "@/components/widgets/TimeframePins";
 import { WatchBoard } from "@/components/widgets/WatchBoard";
 import {
   api,
   type Candle,
+  type AccountTrade,
   type LiquidationSummaryHours,
   type Market,
   type OpenInterestSample,
@@ -49,19 +50,25 @@ import { useQuickPanel } from "@/lib/quickPanel";
 import { getQuickSize } from "@/lib/quickSizes";
 import {
   createTicketAmend,
+  snapTick,
   type TicketAmend,
   type TicketAmendHost,
 } from "@/lib/ticketAmend";
 import { createTicketPlace, type TicketPlace } from "@/lib/ticketPlace";
+import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
 import {
   rollLiveCandles,
   seedCandles1s,
+  setMinuteCandles,
   useLiveCandles1s,
   useLiveMinuteCandles,
   useLiveQuotes,
   useLiveTopOfBook,
+  useLiveAccountTrades,
 } from "@/lib/liveData";
 import { bucketOpen, buildOiLine, type OiLinePoint } from "@/lib/openInterest";
+import { fillMarks, type FillMark } from "@/lib/fillMarks";
+import { FillMarksPrimitive, type FillSpot } from "@/lib/fillMarkPrimitive";
 import { theme } from "@/lib/theme";
 import {
   candleSource,
@@ -96,6 +103,16 @@ const RIGHT_OFFSET = 8;
 const CHART_MODES = ["price", "scan", "watch"] as const;
 type ChartMode = (typeof CHART_MODES)[number];
 const SCAN_TABS = ["rel", "liqs"] as const;
+
+type QtyEditState = {
+  overlayId: string;
+  marketIndex: number;
+  orderIndex: string;
+  price: number;
+  color: string;
+  initial: string;
+  rect: { x: number; y: number; w: number; h: number };
+};
 
 interface ChartWidgetProps {
   symbol: string;
@@ -237,6 +254,8 @@ function loadScanTab(): ScanTab {
 }
 
 const EMPTY_CANDLES: Candle[] = [];
+const EMPTY_FILLS: FillMark[] = [];
+const EMPTY_SPOTS: FillSpot[] = [];
 const EMPTY_OI: OpenInterestSample[] = [];
 const EMPTY_OI_LINE: OiLinePoint[] = [];
 
@@ -273,12 +292,14 @@ function OhlcReadout({
   showVolume,
   showOi,
   oi,
+  fills,
 }: {
   bar: Ohlc | null;
   decimals: number;
   showVolume?: boolean;
   showOi?: boolean;
   oi?: number | null;
+  fills?: FillMark[];
 }) {
   if (!bar) {
     return <span className="font-mono text-sm text-muted-foreground">—</span>;
@@ -305,6 +326,15 @@ function OhlcReadout({
           <span className="text-muted-foreground">{formatUsdCompact(oi) || "—"}</span>
         </span>
       ) : null}
+      {fills?.map((mark) => (
+        <span
+          key={mark.side}
+          className={cn("shrink-0", mark.side === "buy" ? "text-bid" : "text-ask")}
+        >
+          {mark.side === "buy" ? "Buy" : "Sell"} {formatSize(mark.size)} @ {formatPrice(mark.price, decimals)}
+          {mark.count > 1 ? ` · ${mark.count}` : ""}
+        </span>
+      ))}
     </span>
   );
 }
@@ -390,7 +420,13 @@ export const ChartWidget = memo(function ChartWidget({
     key: "",
     candles: [],
   });
-  const [hover, setHover] = useState<{ key: string; bar: Ohlc; oi: number | null } | null>(null);
+  const [hover, setHover] = useState<{
+    key: string;
+    bar: Ohlc;
+    oi: number | null;
+    time: number | null;
+  } | null>(null);
+  const [qtyEdit, setQtyEdit] = useState<QtyEditState | null>(null);
   const [oiHist, setOiHist] = useState<{ key: string; points: OpenInterestSample[] }>({
     key: "",
     points: [],
@@ -405,6 +441,7 @@ export const ChartWidget = memo(function ChartWidget({
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const fillMarksRef = useRef<FillMarksPrimitive | null>(null);
   const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const oiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const tradingLinesRef = useRef<TradingLinesPrimitive | null>(null);
@@ -421,6 +458,7 @@ export const ChartWidget = memo(function ChartWidget({
   const placeRef = useRef<ReturnType<typeof createTicketPlace> | null>(null);
   const ghostRef = useRef<ChartOverlay | null>(null);
   const suppressClickRef = useRef(false);
+  const sizeClickRef = useRef<ChartOverlay | null>(null);
   const paintLinesRef = useRef<() => void>(() => {});
   const { armed: axisArmed, setArmed: setAxisArmed } = useAxisTicket();
   const { open: quickOn, setOpen: setQuickOn } = useQuickPanel();
@@ -435,15 +473,48 @@ export const ChartWidget = memo(function ChartWidget({
   const hoverBar = hover?.key === seriesKey ? hover.bar : null;
   const showOi = isPrice && oiOn && supportsOpenInterest(bar);
   const oiSamples = oiHist.key === seriesKey ? oiHist.points : EMPTY_OI;
-  const liveOi = useMemo(() => {
+  const liveFills = useLiveAccountTrades();
+  const [fillPage, setFillPage] = useState<{ key: number; rows: AccountTrade[] } | null>(null);
+  const chartMarket = useMemo(() => {
     const key = symbol.toUpperCase();
-    const market =
+    return (
       markets.find((m) => m.symbol.toUpperCase() === key && m.is_perp !== false) ??
-      markets.find((m) => m.symbol.toUpperCase() === key);
-    if (!market) return null;
-    const oi = quotes[market.market_index]?.open_interest ?? market.open_interest;
+      markets.find((m) => m.symbol.toUpperCase() === key) ??
+      null
+    );
+  }, [markets, symbol]);
+  const liveOi = useMemo(() => {
+    if (!chartMarket) return null;
+    const oi = quotes[chartMarket.market_index]?.open_interest ?? chartMarket.open_interest;
     return oi != null && Number.isFinite(oi) && oi > 0 ? oi : null;
-  }, [markets, quotes, symbol]);
+  }, [chartMarket, quotes]);
+  const fillMarkList = useMemo(() => {
+    if (!isPrice || !chartMarket) return EMPTY_FILLS;
+    const rest = fillPage?.key === chartMarket.market_index ? fillPage.rows : [];
+    return fillMarks([...rest, ...liveFills], chartMarket.market_index, bar.seconds);
+  }, [isPrice, chartMarket, fillPage, liveFills, bar.seconds]);
+  const hoverFills =
+    hover?.key === seriesKey && hover.time != null
+      ? fillMarkList.filter((mark) => mark.time === hover.time)
+      : EMPTY_FILLS;
+
+  useEffect(() => {
+    const index = chartMarket?.market_index;
+    if (!isPrice || index == null) return;
+    let cancelled = false;
+    void api
+      .accountTrades({ market_index: index, limit: 100 })
+      .then((page) => {
+        if (!cancelled) setFillPage({ key: index, rows: page.trades });
+      })
+      .catch(() => {
+        if (!cancelled) setFillPage({ key: index, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPrice, chartMarket?.market_index]);
+
   const oiLine = useMemo(() => {
     if (!supportsOpenInterest(bar) || !oiOn || !isPrice) return EMPTY_OI_LINE;
     const step = bar.seconds;
@@ -452,6 +523,45 @@ export const ChartWidget = memo(function ChartWidget({
   }, [isPrice, oiOn, bar, oiSamples, liveOi, nowSec]);
   const oiLineRef = useRef(oiLine);
   const oiShape = oiLine.map((point) => point.time).join(",");
+
+  const marketByIndex = useMemo(
+    () => new Map(markets.map((m) => [m.market_index, m])),
+    [markets]
+  );
+  const shownQtyEdit =
+    qtyEdit && overlays.some((o) => o.id === qtyEdit.overlayId && o.qtyEditable)
+      ? qtyEdit
+      : null;
+
+  useEffect(() => {
+    tradingLinesRef.current?.setOmitQty(shownQtyEdit?.overlayId ?? null);
+  }, [shownQtyEdit?.overlayId]);
+
+  useEffect(() => {
+    const id = shownQtyEdit?.overlayId;
+    if (!id) return;
+    let frame = 0;
+    const tick = () => {
+      const rect = tradingLinesRef.current?.qtyHitRect(id);
+      if (rect) {
+        setQtyEdit((prev) => {
+          if (!prev || prev.overlayId !== id) return prev;
+          if (
+            prev.rect.x === rect.x &&
+            prev.rect.y === rect.y &&
+            prev.rect.w === rect.w &&
+            prev.rect.h === rect.h
+          ) {
+            return prev;
+          }
+          return { ...prev, rect };
+        });
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [shownQtyEdit?.overlayId]);
 
   useEffect(() => {
     oiLineRef.current = oiLine;
@@ -518,12 +628,27 @@ export const ChartWidget = memo(function ChartWidget({
       .candles(symbol, source, 500)
       .then((data) => {
         if (cancelled) return;
+        if (source === "1m") setMinuteCandles(data);
         const candles = source === bar.label ? data : aggregateCandles(data, bar.seconds);
         setHist({ key, candles });
       })
       .catch(() => {
         if (!cancelled) setHist({ key, candles: [] });
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, bar, fromSeconds, isPrice]);
+
+  useEffect(() => {
+    if (!isPrice || fromSeconds || candleSource(bar) === "1m") return;
+    let cancelled = false;
+    api
+      .candles(symbol, "1m", 500)
+      .then((data) => {
+        if (!cancelled) setMinuteCandles(data);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -580,6 +705,28 @@ export const ChartWidget = memo(function ChartWidget({
     return foldMinutes(histBars, minuteCandles, bar.seconds);
   }, [fromSeconds, bar, candles1s, minuteCandles, histBars]);
 
+  const fillSpots = useMemo(() => {
+    if (!fillMarkList.length || !display.length) return EMPTY_SPOTS;
+    const bars = new Map<number, { high: number; low: number }>();
+    for (const candle of display) {
+      const t = candleTime(candle.time) as number;
+      bars.set(t, { high: candle.high, low: candle.low });
+    }
+    const spots: FillSpot[] = [];
+    for (const mark of fillMarkList) {
+      const bar = bars.get(mark.time);
+      if (!bar) continue;
+      spots.push({ time: mark.time, side: mark.side, high: bar.high, low: bar.low });
+    }
+    return spots;
+  }, [fillMarkList, display]);
+  const fillSpotRef = useRef(fillSpots);
+  fillSpotRef.current = fillSpots;
+
+  useEffect(() => {
+    fillMarksRef.current?.setMarks(fillSpots);
+  }, [fillSpots]);
+
   useEffect(() => {
     if (!isPrice) return;
     if (!containerRef.current || !wrapRef.current) return;
@@ -634,6 +781,10 @@ export const ChartWidget = memo(function ChartWidget({
 
     chartRef.current = chart;
     seriesRef.current = series;
+    const fillMarksPrimitive = new FillMarksPrimitive();
+    series.attachPrimitive(fillMarksPrimitive);
+    fillMarksRef.current = fillMarksPrimitive;
+    fillMarksPrimitive.setMarks(fillSpotRef.current);
     volSeriesRef.current = vol;
     primedRef.current = false;
     lastMetaRef.current = null;
@@ -699,6 +850,17 @@ export const ChartWidget = memo(function ChartWidget({
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || !el) return;
       const pt = chartPoint(el, e);
+      const sizeHit = tradingLines.hitAt(pt.x, pt.y);
+      if (
+        sizeHit?.region === "size" &&
+        sizeHit.overlay.qtyEditable &&
+        !amend.isLocked(sizeHit.overlay.id)
+      ) {
+        sizeClickRef.current = sizeHit.overlay;
+        suppressClickRef.current = true;
+        return;
+      }
+      sizeClickRef.current = null;
       if (amend.pointerDown(pt)) {
         suppressClickRef.current = true;
         try {
@@ -719,16 +881,44 @@ export const ChartWidget = memo(function ChartWidget({
       const hover = place.hover(pt);
       ghostRef.current = hover ? axisGhost(Number(hover.price), hover.side) : null;
       const region = host.regionAt(pt);
+      const hit = tradingLines.hitAt(pt.x, pt.y);
       if (amend.preview()) el.style.cursor = "ns-resize";
-      else if (axisArmedRef.current && region === "axis") el.style.cursor = "ns-resize";
+      else if (
+        hit?.region === "size" &&
+        hit.overlay.qtyEditable &&
+        !amend.isLocked(hit.overlay.id)
+      ) {
+        el.style.cursor = "text";
+      } else if (axisArmedRef.current && region === "axis") el.style.cursor = "ns-resize";
       else el.style.cursor = "";
       paintLines();
     };
     const finishPointer = (e: PointerEvent) => {
       if (!el) return;
       const pt = chartPoint(el, e);
+      const pendingSize = sizeClickRef.current;
+      sizeClickRef.current = null;
       amend.pointerUp();
       place.pointerUp(pt);
+      if (
+        pendingSize &&
+        pendingSize.marketIndex != null &&
+        pendingSize.orderIndex != null &&
+        pendingSize.qtyLabel
+      ) {
+        const rect = tradingLines.qtyHitRect(pendingSize.id);
+        if (rect) {
+          setQtyEdit({
+            overlayId: pendingSize.id,
+            marketIndex: pendingSize.marketIndex,
+            orderIndex: pendingSize.orderIndex,
+            price: pendingSize.price,
+            color: pendingSize.color,
+            initial: pendingSize.qtyLabel,
+            rect,
+          });
+        }
+      }
       try {
         el.releasePointerCapture(e.pointerId);
       } catch {
@@ -737,6 +927,7 @@ export const ChartWidget = memo(function ChartWidget({
       paintLines();
     };
     const onPointerCancel = () => {
+      sizeClickRef.current = null;
       amend.pointerCancel();
       place.pointerCancel();
       ghostRef.current = null;
@@ -745,6 +936,8 @@ export const ChartWidget = memo(function ChartWidget({
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      setQtyEdit(null);
+      sizeClickRef.current = null;
       amend.pointerCancel();
       place.pointerCancel();
       ghostRef.current = null;
@@ -775,6 +968,7 @@ export const ChartWidget = memo(function ChartWidget({
         setHover((h) => (h == null || h.key !== key ? h : null));
         return;
       }
+      const barTime = typeof param.time === "number" ? param.time : null;
       const raw = param.seriesData.get(series);
       if (raw && "open" in raw && "close" in raw) {
         const rawVol = param.seriesData.get(vol);
@@ -791,8 +985,15 @@ export const ChartWidget = memo(function ChartWidget({
             : null;
         setHover((prev) => {
           if (!next) return prev?.key === key ? null : prev;
-          if (prev?.key === key && sameOhlc(prev.bar, next) && prev.oi === oi) return prev;
-          return { key, bar: next, oi };
+          if (
+            prev?.key === key &&
+            prev.time === barTime &&
+            sameOhlc(prev.bar, next) &&
+            prev.oi === oi
+          ) {
+            return prev;
+          }
+          return { key, bar: next, oi, time: barTime };
         });
       }
     };
@@ -829,6 +1030,7 @@ export const ChartWidget = memo(function ChartWidget({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      fillMarksRef.current = null;
       volSeriesRef.current = null;
       oiSeriesRef.current = null;
       tradingLinesRef.current = null;
@@ -969,6 +1171,7 @@ export const ChartWidget = memo(function ChartWidget({
       chart?.timeScale().scrollToRealTime();
       primedRef.current = true;
       lastMetaRef.current = nextMeta;
+      fillMarksRef.current?.setMarks(fillSpotRef.current);
       return;
     }
 
@@ -979,6 +1182,7 @@ export const ChartWidget = memo(function ChartWidget({
     series.update(last);
     if (volOn && lastVol) vol?.update(lastVol);
     lastMetaRef.current = nextMeta;
+    fillMarksRef.current?.setMarks(fillSpotRef.current);
   }, [display, tf, bar, volOn, mayRektOn, paintGen]);
 
   useEffect(() => {
@@ -1281,6 +1485,52 @@ export const ChartWidget = memo(function ChartWidget({
         {isPrice ? (
           <>
             <div ref={containerRef} className="absolute inset-0" />
+            {shownQtyEdit ? (
+              <div
+                className="absolute z-20"
+                style={{
+                  left: shownQtyEdit.rect.x,
+                  top: shownQtyEdit.rect.y,
+                  width: Math.max(shownQtyEdit.rect.w, 56),
+                  height: shownQtyEdit.rect.h,
+                }}
+              >
+                <OrderRemainingEditor
+                  align="left"
+                  initial={shownQtyEdit.initial}
+                  decimals={marketByIndex.get(shownQtyEdit.marketIndex)?.size_decimals ?? 4}
+                  style={{
+                    fontFamily: theme.fontMono,
+                    fontSize: theme.chartFontSize,
+                    lineHeight: `${shownQtyEdit.rect.h}px`,
+                    color: shownQtyEdit.color,
+                    background: "rgba(14, 17, 22, 0.96)",
+                    boxShadow: `inset 0 0 0 1px ${shownQtyEdit.color}`,
+                  }}
+                  onCancel={() => setQtyEdit(null)}
+                  onCommit={(size) => {
+                    const price = snapTick(shownQtyEdit.price, priceDecimals);
+                    if (
+                      price == null ||
+                      shownQtyEdit.marketIndex == null ||
+                      shownQtyEdit.orderIndex == null
+                    ) {
+                      setQtyEdit(null);
+                      return;
+                    }
+                    amendRef.current?.lock(shownQtyEdit.overlayId);
+                    setQtyEdit(null);
+                    onAmendRef.current?.({
+                      overlayId: shownQtyEdit.overlayId,
+                      marketIndex: shownQtyEdit.marketIndex,
+                      orderIndex: shownQtyEdit.orderIndex,
+                      price,
+                      size,
+                    });
+                  }}
+                />
+              </div>
+            ) : null}
             <div className="pointer-events-none absolute top-1 left-1.5 z-10 max-w-[calc(100%-4.5rem)] overflow-hidden rounded-sm bg-card/90 px-1 py-0.5">
               <OhlcReadout
                 bar={ohlc}
@@ -1288,6 +1538,7 @@ export const ChartWidget = memo(function ChartWidget({
                 showVolume={volOn}
                 showOi={showOi}
                 oi={oiRead}
+                fills={hoverFills}
               />
             </div>
             {children ? (

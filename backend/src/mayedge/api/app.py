@@ -15,6 +15,7 @@ from mayedge import desk, feed_health
 from mayedge.api.schemas import (
     AlgoStopRequest,
     AmendOrderRequest,
+    AutoKillRequest,
     CancelAllRequest,
     CancelOrderRequest,
     CancelSideRequest,
@@ -29,9 +30,11 @@ from mayedge.api.schemas import (
 from mayedge.api.spa import mount_spa
 from mayedge.api.token_icon import token_icon_response
 from mayedge.api.ws import BroadcastFanout, manager, send_json
+from mayedge.auto_kill import auto_kill
 from mayedge.config import settings
 from mayedge.kill import KillResult, kill
 from mayedge.lighter.account import account_service
+from mayedge.lighter.budget import budget
 from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
@@ -45,12 +48,20 @@ class _AllAlgos:
         await desk.stop_algo()
 
 
+async def _account_summary_for_kill():
+    try:
+        return await order_service.get_account_summary()
+    except Exception:
+        logger.warning("kill account summary REST failed; using cache", exc_info=True)
+        return account_service.cached_summary()
+
+
 async def run_kill(*, flatten: bool) -> KillResult:
     return await kill(
         flatten=flatten,
         algos=_AllAlgos(),
         orders=order_service,
-        get_account_summary=order_service.get_account_summary,
+        get_account_summary=_account_summary_for_kill,
     )
 
 
@@ -67,11 +78,15 @@ async def lifespan(app: FastAPI):
 
     desk.set_broadcast(on_desk_msg)
     feed_health.set_emitter(on_feed_health)
+    auto_kill.start(run_kill=run_kill, emit=fanout.push)
+    gateway.subscribe(auto_kill.on_gateway)
     await desk.start()
     await desk.restore()
     try:
         yield
     finally:
+        gateway.unsubscribe(auto_kill.on_gateway)
+        auto_kill.stop()
         feed_health.set_emitter(None)
         desk.set_broadcast(None)
         await fanout.stop()
@@ -100,6 +115,7 @@ def create_app() -> FastAPI:
         except VenueBlocked as e:
             raise HTTPException(e.status, str(e)) from e
         except ValueError as e:
+            logger.info("order rejected: %s", e)
             raise HTTPException(400, str(e)) from e
         except Exception as e:
             mapped = venue_client_error(e)
@@ -107,10 +123,10 @@ def create_app() -> FastAPI:
                 raise HTTPException(mapped[0], mapped[1]) from e
             logger.exception("trade failed")
             raise HTTPException(502, "Venue error — try again") from e
-        order_service.kick_refresh()
         return result
 
     async def _account_history(fn):
+        token = budget.enter_lane("read")
         try:
             return await fn()
         except VenueBlocked as e:
@@ -123,6 +139,8 @@ def create_app() -> FastAPI:
                 raise HTTPException(mapped[0], mapped[1]) from e
             logger.exception("account history failed")
             raise HTTPException(502, "Venue error — try again") from e
+        finally:
+            budget.leave_lane(token)
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -137,6 +155,10 @@ def create_app() -> FastAPI:
     async def get_alerts(limit: int = 200) -> list[dict[str, Any]]:
         cap = max(1, min(int(limit), 1000))
         return gateway.recent_alerts()[:cap]
+
+    @app.get("/api/alerts/board")
+    async def get_alert_board() -> list[dict[str, Any]]:
+        return gateway.recent_alert_board()
 
     @app.get("/api/alerts/timeframes")
     async def get_alert_timeframes() -> dict[str, Any]:
@@ -203,7 +225,8 @@ def create_app() -> FastAPI:
     @app.get("/api/candles/{symbol}")
     async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
         idx = gateway.resolve_market_index(symbol)
-        n = min(max(int(count), 1), 3600)
+        cap = 3600 if resolution == "1s" else 500
+        n = min(max(int(count), 1), cap)
         candles = await gateway.get_candles(idx, resolution, n)
         return [
             {
@@ -231,7 +254,11 @@ def create_app() -> FastAPI:
             out.pop("type", None)
             out.pop("venue", None)
             return out
-        summary = await order_service.get_account_summary()
+        token = budget.enter_lane("read")
+        try:
+            summary = await order_service.get_account_summary()
+        finally:
+            budget.leave_lane(token)
         return summary.to_public_dict()
 
     @app.get("/api/account/trades")
@@ -332,7 +359,12 @@ def create_app() -> FastAPI:
     async def amend_order(req: AmendOrderRequest) -> dict[str, Any]:
         _require_trading()
         return await _trade(
-            lambda: order_service.amend_ticket(req.market_index, req.order_index_int(), req.price),
+            lambda: order_service.amend_ticket(
+                req.market_index,
+                req.order_index_int(),
+                req.price,
+                size=req.size,
+            ),
         )
 
     @app.post("/api/orders/cancel-side")
@@ -411,6 +443,26 @@ def create_app() -> FastAPI:
         result = await run_kill(flatten=req.flatten)
         return {**result.as_dict(), "algos": desk.algo_book()}
 
+    @app.get("/api/kill/auto")
+    async def get_auto_kill() -> dict[str, Any]:
+        return auto_kill.view()
+
+    @app.put("/api/kill/auto")
+    async def put_auto_kill(body: AutoKillRequest) -> dict[str, Any]:
+        if body.armed:
+            _require_trading()
+        cached = account_service.cached_account_payload()
+        positions = (cached or {}).get("positions") or []
+        try:
+            return auto_kill.configure(
+                armed=body.armed,
+                loss_usd=body.loss_usd,
+                profit_usd=body.profit_usd,
+                current_positions=positions if body.armed else None,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
         await manager.connect(ws)
@@ -430,6 +482,7 @@ def create_app() -> FastAPI:
                 payload.pop("venue", None)
                 await send_json(ws, payload)
             await send_json(ws, desk.algo_book())
+            await send_json(ws, auto_kill.view())
             await send_json(ws, feed_health.snapshot())
             alerts = gateway.recent_alerts()
             if alerts:
@@ -449,12 +502,10 @@ def create_app() -> FastAPI:
                     continue
                 if kind != "subscribe_market":
                     continue
-                candles_task: asyncio.Task[Any] | None = None
                 try:
                     symbol = msg.get("symbol", settings.default_market_symbol)
                     idx = gateway.resolve_subscribe_market(symbol, msg.get("market_index"))
                     await gateway.set_active_market(idx)
-                    candles_task = asyncio.create_task(gateway.get_candles(idx))
                     try:
                         async with asyncio.timeout(3.0):
                             got_book = await gateway.wait_for_book(idx)
@@ -475,32 +526,9 @@ def create_app() -> FastAPI:
                     if trades:
                         trades.pop("venue", None)
                         await send_json(ws, trades)
-                    candles = await candles_task
-                    await send_json(
-                        ws,
-                        {
-                            "type": "candles",
-                            "market_index": idx,
-                            "candles": [
-                                {
-                                    "time": c.time,
-                                    "open": c.open,
-                                    "high": c.high,
-                                    "low": c.low,
-                                    "close": c.close,
-                                    "volume": c.volume,
-                                }
-                                for c in candles
-                            ],
-                        },
-                    )
                 except WebSocketDisconnect:
-                    if candles_task is not None and not candles_task.done():
-                        candles_task.cancel()
                     raise
                 except Exception:
-                    if candles_task is not None and not candles_task.done():
-                        candles_task.cancel()
                     logger.exception("subscribe_market failed")
         except WebSocketDisconnect:
             pass

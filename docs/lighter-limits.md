@@ -71,9 +71,10 @@ GTT limits: expiry between **5 minutes and 30 days** (ms timestamp). We use SDK 
 
 ## Transaction / API rate limits
 
-- **Standard REST:** 60 requests / rolling minute (unweighted); `sendTx` weight 6.
-- **All account types — default tx bucket:** 40 requests / minute (includes order create/cancel unless Plus/Premium sendTx tiers apply).
-- **429 / 23000:** backoff required; chase/ladder reuse rate-limit cooldown.
+- **Standard REST:** 60 requests / rolling minute. Not weighted. `sendTx` and `sendTxBatch` count in that same bucket, over HTTP or WebSocket.
+- **All account types — default tx bucket:** 40 requests / minute (includes order create/cancel).
+- **429 / 405:** 60s firewall cooldown. When REST is limited, the WebSocket is limited too.
+- Mayedge keeps one shared limiter under both caps. Algo sends stop before the bucket is full so a manual order still fits.
 
 We do **not** use `sendTxBatch` today — each child is one transaction.
 
@@ -85,7 +86,7 @@ We do **not** use `sendTxBatch` today — each child is one transaction.
 
 ## WebSocket (account / book)
 
-- 200 client messages/min (sendTx excluded from this cap).
+- WebSocket: 200 client messages/min per IP, shared by every connection (sendTx is not in this cap; on Standard it counts in the 60/min REST bucket).
 - Reconnect on deploy; chase/ladder wake on `account`, `order_book`, trades.
 
 ## COI bands (Mayedge)

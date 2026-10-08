@@ -49,6 +49,10 @@ def _chase_order_keys(orders: Any, cois: set[int] | None = None) -> list[tuple[i
 
 
 def _is_rate_limit(err: BaseException) -> bool:
+    from mayedge.lighter.budget import BudgetRefused
+
+    if isinstance(err, BudgetRefused):
+        return False
     return isinstance(err, VenueBlocked) or venue_client_error(err) is not None
 
 

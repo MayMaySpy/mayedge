@@ -335,7 +335,10 @@ class LadderBook:
         bid_s, ask_s = ex.best_bid_ask(market_index)
         px = Decimal(str(bid_s or ask_s or "0"))
         min_qty = maker_min_base(
-            meta.min_base_amount, meta.min_quote_amount, px if px > 0 else None
+            meta.min_base_amount,
+            meta.min_quote_amount,
+            px if px > 0 else None,
+            qty_step,
         )
         if min_qty <= 0:
             min_qty = qty_step

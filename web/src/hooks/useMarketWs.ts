@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { preferPerpMarket, sameMarketIndex } from "@/lib/algos";
 import { api, type AccountTrade, type Candle, type Market } from "@/lib/api";
 import { armFillToasts, consumeLiveFills } from "@/lib/fillNotice";
-import { notifyOrder } from "@/lib/notify";
+import { notifyOrder, notifyWarn } from "@/lib/notify";
 import {
   applyBookDelta,
   applyBookSnapshot,
@@ -16,10 +16,12 @@ import {
   prependTrades,
   resetLiveSession,
   seedAlerts,
+  setAlertBoard,
   seedLiquidations,
   setAccount,
   setAlgo,
   setBookSynced,
+  setAutoKill,
   setFeedHealth,
   setMinuteCandles,
   upsertMinuteCandle,
@@ -65,6 +67,7 @@ export function useMarketWs(symbol: string) {
   const marketsRef = useRef(state.markets);
   const marketIndexRef = useRef<number | null>(null);
   const resyncAtRef = useRef(0);
+  const autoKillFiredAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     marketsRef.current = state.markets;
@@ -161,6 +164,7 @@ export function useMarketWs(symbol: string) {
           .alerts({ limit: 200 })
           .then(seedAlerts)
           .catch(() => {});
+        api.alertBoard().then(setAlertBoard).catch(() => {});
       };
 
       ws.onmessage = (ev) => {
@@ -223,6 +227,9 @@ export function useMarketWs(symbol: string) {
           case "alerts":
             prependAlerts((msg.events as import("@/lib/api").AlertEvent[]) ?? []);
             break;
+          case "alert_board":
+            setAlertBoard((msg.rows as import("@/lib/api").AlertBoardRow[]) ?? []);
+            break;
           case "feed_health":
             setFeedHealth(msg);
             break;
@@ -274,6 +281,37 @@ export function useMarketWs(symbol: string) {
           case "algo":
             setAlgo(msg as unknown as import("@/lib/api").AlgoBook);
             break;
+          case "auto_kill": {
+            const firedAt =
+              msg.fired_at != null && msg.fired_at !== "" ? Number(msg.fired_at) : null;
+            setAutoKill({
+              armed: Boolean(msg.armed),
+              loss_usd: msg.loss_usd != null ? Number(msg.loss_usd) : null,
+              profit_usd: msg.profit_usd != null ? Number(msg.profit_usd) : null,
+              fired_at: firedAt,
+              fired_reason: msg.fired_reason != null ? String(msg.fired_reason) : null,
+              fired_upnl: msg.fired_upnl != null ? Number(msg.fired_upnl) : null,
+              last_kill_status:
+                msg.last_kill_status != null ? String(msg.last_kill_status) : null,
+            });
+            if (
+              firedAt != null &&
+              !Number.isNaN(firedAt) &&
+              firedAt !== autoKillFiredAtRef.current
+            ) {
+              autoKillFiredAtRef.current = firedAt;
+              const reason = String(msg.fired_reason ?? "threshold");
+              const upnl = msg.fired_upnl != null ? Number(msg.fired_upnl) : null;
+              const status = String(msg.last_kill_status ?? "unknown");
+              const upnlText =
+                upnl != null && !Number.isNaN(upnl) ? ` uPnL ${upnl.toFixed(2)}` : "";
+              notifyWarn(
+                `Auto kill (${reason})`,
+                `Flatten ${status}${upnlText}`
+              );
+            }
+            break;
+          }
         }
         } catch (err) {
           console.error("ws message", msg.type, err);

@@ -233,7 +233,12 @@ export function OrderTicket({
   const maxSize = Math.max(maxBuy, maxSell);
   const worst = spot;
   const isMaker = kind === "limit" && tif !== "ioc";
-  const minSz = makerMinSize(market.min_base_amount ?? 0, market.min_quote_amount ?? 0, limitPx);
+  const minSz = makerMinSize(
+    market.min_base_amount ?? 0,
+    market.min_quote_amount ?? 0,
+    limitPx,
+    decimals
+  );
   const sizeMin = minSizeHint(minSz, decimals, orderSizeNum);
   const otherUnitHint = sizeFieldOtherUnitHint({
     raw: size,

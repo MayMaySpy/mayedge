@@ -39,6 +39,7 @@ export const twapPlugin: AlgoPlugin<TwapParamsState> = {
     const s = state as TwapParamsState;
     const twapSec = twapDurationSeconds(s.twapHours, s.twapMinutes);
     if (twapSec == null) return "Running time 1m–30d";
+    if (!s.twapAdvanced && twapSec < 300) return "Running time 5m–30d";
     if (s.twapAdvanced) {
       const freq = twapFreqSeconds(s.twapFreq);
       if (freq == null || freq < 2 || freq > 3600) return "Slice 2s–1h";
@@ -59,6 +60,7 @@ export const twapPlugin: AlgoPlugin<TwapParamsState> = {
     const s = state as TwapParamsState;
     const twapSec = twapDurationSeconds(s.twapHours, s.twapMinutes);
     if (twapSec == null) throw new Error("Running time 1m–30d");
+    if (!s.twapAdvanced && twapSec < 300) throw new Error("Running time 5m–30d");
     if (s.twapAdvanced) {
       const freq = twapFreqSeconds(s.twapFreq);
       if (freq == null) throw new Error("Slice 2s–1h");

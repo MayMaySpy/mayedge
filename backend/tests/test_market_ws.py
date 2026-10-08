@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import unittest
 from unittest.mock import patch
 
 from mayedge.lighter.gateway import LighterGateway
-from mayedge.lighter.market_ws import connect_and_stream
+from mayedge.lighter.market_ws import _tone_conn, connect_and_stream
 from mayedge.lighter.models import MarketMeta
 
 
@@ -96,6 +97,56 @@ class TestConnectSubscribesActiveMarket(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertTrue(await asyncio.wait_for(task, 0.5))
+
+
+class _FakeToneWs:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+        self.inbox: asyncio.Queue[str] = asyncio.Queue()
+
+    async def send(self, raw: str) -> None:
+        self.sent.append(json.loads(raw))
+
+    async def recv(self) -> str:
+        return await self.inbox.get()
+
+    async def __aenter__(self) -> _FakeToneWs:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class TestToneConnReadsWhileSubscribing(unittest.IsolatedAsyncioTestCase):
+    async def test_candles_apply_before_subscriptions_finish(self) -> None:
+        gw = _gw()
+        fake = _FakeToneWs()
+        seen: list[tuple[int, str]] = []
+        gw.on_tone_candles = lambda mi, res, _bars: seen.append((mi, res))  # type: ignore[method-assign]
+        stalled = asyncio.Event()
+        calls = 0
+
+        async def pace() -> None:
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                await stalled.wait()
+
+        channels = ["candle/1/1m", "candle/120/1m", "candle/1/5m"]
+        with (
+            patch("mayedge.lighter.market_ws.websockets.connect", return_value=fake),
+            patch("mayedge.lighter.market_ws.send_pacer.wait", side_effect=pace),
+        ):
+            task = asyncio.create_task(_tone_conn(gw, gw._tone_epoch, channels))
+            await asyncio.sleep(0.02)
+            bar = {"t": 1_700_000_000, "o": 1, "h": 2, "l": 1, "c": 2, "v": 3}
+            await fake.inbox.put(json.dumps({"type": "update/candle", "channel": "candle/1/1m", "candles": [bar]}))
+            await asyncio.sleep(0.02)
+            self.assertEqual(seen, [(1, "1m")])
+            self.assertEqual([m["channel"] for m in fake.sent], ["candle/1/1m"])
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 if __name__ == "__main__":

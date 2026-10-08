@@ -659,14 +659,14 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
             boot.orders.modify_attempts[0]["order_index"], first["client_order_index"]
         )
         self.assertEqual(len(boot.orders.modifies), 0)
-        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertEqual(len(boot.orders.creates), 1)
         self.assertEqual(boot.orders.cancels, [])
         old = boot.job.state.ledger.find_clip(client_order_index=first["client_order_index"])
         assert old is not None
         self.assertEqual(old.status, "cancelled")
-        live = boot.job.state.ledger.working()
-        assert live is not None
-        self.assertNotEqual(live.client_order_index, first["client_order_index"])
+        self.assertEqual(old.filled, D("0"))
+        self.assertIsNone(boot.job.state.ledger.working())
+        self.assertEqual(boot.job.state.reason, "unproven_missing_clip")
 
     async def test_requote_cancel_path_does_not_invent_fill(self) -> None:
         boot = boot_job()
@@ -682,8 +682,9 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
         assert old is not None
         self.assertEqual(old.status, "cancelled")
         self.assertEqual(old.filled, D("0"))
-        self.assertEqual(len(boot.orders.creates), 2)
+        self.assertEqual(len(boot.orders.creates), 1)
         self.assertEqual(boot.orders.cancels, [])
+        self.assertEqual(boot.job.state.reason, "unproven_missing_clip")
 
     async def test_other_market_trade_ignored(self) -> None:
         boot = boot_job()

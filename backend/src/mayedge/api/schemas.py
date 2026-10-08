@@ -28,7 +28,7 @@ class TwapOrderRequest(BaseModel):
     market_index: int
     side: TradeSide
     size: str
-    duration_seconds: int = Field(ge=60, le=2_592_000)
+    duration_seconds: int = Field(ge=300, le=2_592_000)
     max_slippage: float = Field(default=0.01, gt=0, le=0.05)
     reduce_only: bool = False
 
@@ -60,6 +60,7 @@ class AmendOrderRequest(BaseModel):
     market_index: int
     order_index: int | str
     price: str
+    size: str | None = None
 
     def order_index_int(self) -> int:
         return int(self.order_index)
@@ -82,6 +83,12 @@ class LeverageRequest(BaseModel):
 
 class KillRequest(BaseModel):
     flatten: bool = False
+
+
+class AutoKillRequest(BaseModel):
+    armed: bool
+    loss_usd: float | None = Field(default=None, gt=0)
+    profit_usd: float | None = Field(default=None, gt=0)
 
 
 class AlgoStopRequest(BaseModel):

@@ -1,35 +1,58 @@
-# Alert detector thresholds.
-# sev2 / sev3 pairs: first value is "notice", second is "urgent".
-# Restart the backend after edits.
+# Relative outlier alert settings. Restart backend after edits.
+# Scores are roughly "standard deviations from this market's own normal".
 
-cooldown_s: 90
-# Level signals (premium, funding, dislocation) persist — longer mute.
-level_cooldown_s: 300
 min_severity: 2
 max_events_per_flush: 20
 warmup_s: 20
 
-# Delta % — relative moves. Usually leave these.
-oi:
-  pct_1m: [8, 20]
-  pct_5m: [15, 35]
-price:
-  pct_1m: [1.5, 4]
-  pct_5m: [3, 8]
+baseline:
+  bars_1m: 240
+  min_bars: 30
+  level_window_min: 1440
+  # Premium, dislocation, funding and OI stay silent until this many minutes of history exist.
+  level_min_samples: 30
 
-# Absolute / level — tune these to your book.
-volume:
-  usd_1m: [750000, 2500000]
-  usd_5m: [2000000, 8000000]
-premium:
-  pct: [0.5, 1.2]
-dislocation:
-  # Mark vs mid (not last). Quiet books skip this — last goes stale while mid walks.
-  bps: [50, 120]
-funding:
-  # Percent per hour (0.20 = 0.20%/hr), same units as Lighter's 1h print.
-  hourly_pct: [0.20, 0.60]
-liq_cluster:
-  count: [5, 12]
-  usd: [250000, 1000000]
-  window_s: 120
+liquidity:
+  # Thinner markets never alert and never reach the board.
+  min_24h_usd: 1000000
+  max_spread_bps: 40
+
+factors:
+  volume:
+    rvol: [4, 8]
+    min_usd_1m: 50000
+  price:
+    sigma: [4, 6]
+    # A move must also clear this many percent (1m, 5m). Stops 0.05% ticks on flat books.
+    min_pct: [0.3, 0.6]
+    sigma_floor_pct: 0.05
+  oi:
+    sigma: [4, 6]
+    min_usd: 250000
+    sigma_floor_pct: 0.3
+  premium:
+    sigma: [4, 6]
+    sigma_floor_pct: 0.05
+  dislocation:
+    sigma: [4, 6]
+    min_bps: 25
+    sigma_floor_bps: 10
+  funding:
+    sigma: [3, 5]
+    sigma_floor: 0.002
+  liq_cluster:
+    oi_bps: [20, 60]
+    min_usd: 100000
+    window_s: 120
+
+score:
+  sev2: 4
+  sev3: 7
+  exit: 2
+  cap: 12
+  board_min: 2.5
+
+episode:
+  quiet_s: 180
+  rearm_s: 600
+  max_new_per_min: 6

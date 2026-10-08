@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api, type AccountFunding, type Market } from "@/lib/api";
-import { cn, formatPct, formatSigned, formatSize } from "@/lib/utils";
+import { formatFundingPct } from "@/lib/marketPicker";
+import { cn, formatSigned, formatSize } from "@/lib/utils";
 
 function fundingTime(ts: number) {
   if (!ts) return "—";
@@ -107,7 +108,7 @@ export function FundingHistoryTab({
   }, [active, marketIndex, queryKey]);
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="min-h-0 flex-1">
       <ToggleGroup
         type="single"
         variant="seg"
@@ -158,7 +159,7 @@ export function FundingHistoryTab({
               {rows.map((f) => {
                 const change = parseFloat(f.change);
                 const rate = parseFloat(f.rate);
-                const ratePct = Number.isFinite(rate) ? rate * 100 : null;
+                const ratePct = Number.isFinite(rate) ? rate : null;
                 return (
                   <TableRow
                     key={`${f.funding_id}-${f.timestamp}`}
@@ -178,7 +179,7 @@ export function FundingHistoryTab({
                     </TableCell>
                     <TableCell className="text-right">{formatSize(f.position_size)}</TableCell>
                     <TableCell className="text-right text-muted-foreground">
-                      {ratePct != null ? formatPct(ratePct, 4) : "—"}
+                      {formatFundingPct(ratePct)}
                     </TableCell>
                     <TableCell className={cn("text-right", pnlClass(change))}>
                       {formatSigned(f.change, 4)}
@@ -189,7 +190,7 @@ export function FundingHistoryTab({
             </TableBody>
           </Table>
           {cursor && (
-            <div className="flex justify-center py-2">
+            <div className="flex justify-center pt-2 pb-3">
               <Button
                 variant="outline"
                 size="sm"

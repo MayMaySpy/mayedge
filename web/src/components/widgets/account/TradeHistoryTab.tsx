@@ -143,7 +143,7 @@ export function TradeHistoryTab({
   }, [rows, live, marketIndex]);
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="min-h-0 flex-1">
       <ToggleGroup
         type="single"
         variant="seg"
@@ -230,7 +230,7 @@ export function TradeHistoryTab({
             </TableBody>
           </Table>
           {cursor && (
-            <div className="flex justify-center py-2">
+            <div className="flex justify-center pt-2 pb-3">
               <Button
                 variant="outline"
                 size="sm"

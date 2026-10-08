@@ -35,6 +35,7 @@ from mayedge.algos.ladder.state import LadderBookView, LadderState
 from mayedge.algos.ladder.util import _ladder_order_keys
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.config import settings
+from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,16 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
 
     def _orders_cancel_keys(self, orders: Any) -> set[tuple[int, int]]:
         return set(_ladder_order_keys(orders, self._cois))
+
+    async def _sync_fills(self) -> None:
+        self._drain_trades()
+        live = list(self._state.ledger.live_clips())
+        if not live:
+            self._reconcile_master()
+            return
+        for clip in live:
+            await self._sync_clip(clip)
+        self._reconcile_master()
 
     def snapshot(self, s: LadderState | None = None) -> dict[str, Any]:
         st = s if s is not None else self._state
@@ -399,6 +410,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 self._publish()
 
     async def _run(self) -> None:
+        token = budget.enter_lane("algo")
         try:
             while not self._stop.is_set():
                 with contextlib.suppress(TimeoutError):
@@ -420,7 +432,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if _is_rate_limit(e) or _is_invalid_nonce(e):
+                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
                         self._handle_tx_err(e)
                         continue
                     logger.exception("ladder error")
@@ -435,6 +447,8 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                     break
         except asyncio.CancelledError:
             raise
+        finally:
+            budget.leave_lane(token)
 
     def _exec(self) -> ChaseExecution:
         return self._book.execution()

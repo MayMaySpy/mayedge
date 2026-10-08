@@ -7,6 +7,7 @@ import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
+import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -22,8 +23,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTradingReady } from "@/hooks/useTradingReady";
-import { trimQty } from "@/components/widgets/orderTicket/math";
-import { api, isLongPosition, type Market, type Position } from "@/lib/api";
+import { formatUsdNotional, trimQty } from "@/components/widgets/orderTicket/math";
+import { api, isLongPosition, type Market, type OpenOrder, type Position } from "@/lib/api";
 import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
 import { useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
@@ -37,7 +38,7 @@ import {
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatPrice, formatSigned, formatSize, formatUsdCompact } from "@/lib/utils";
+import { cn, formatPctAbs, formatPrice, formatSigned, formatSize } from "@/lib/utils";
 
 interface PositionsPanelProps {
   market: Market | null;
@@ -51,6 +52,12 @@ interface PositionsPanelProps {
 function n(value: string | undefined) {
   const x = parseFloat(value ?? "");
   return Number.isFinite(x) ? x : 0;
+}
+
+function orderQtyEditable(order: OpenOrder): boolean {
+  if (isAlgoClientOrder(order.client_order_index)) return false;
+  if (stopTakeKind(order.order_type)) return false;
+  return parseFloat(order.remaining) > 0;
 }
 
 function roePct(p: Position, pnl: number): number | null {
@@ -109,11 +116,6 @@ function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
   return "text-muted-foreground";
-}
-
-function formatNotional(value: number): string {
-  if (!(value > 0)) return "—";
-  return formatUsdCompact(value) || `$${value.toFixed(0)}`;
 }
 
 function SortHead({
@@ -201,7 +203,13 @@ export function PositionsPanel({
   const [historyKind, setHistoryKind] = useState<"trades" | "funding">("trades");
   const [orderScope, setOrderScope] = useState<"all" | "pair">("all");
   const [busy, setBusy] = useState<string | null>(null);
+  const [editingOrder, setEditingOrder] = useState<string | number | null>(null);
   const [posSort, setPosSort] = useState<PosSort>({ key: "notional", dir: "desc" });
+
+  const marketByIndex = useMemo(
+    () => new Map(markets.map((m) => [m.market_index, m])),
+    [markets]
+  );
 
   const cancelOrder = async (marketIndex: number, orderIndex: string | number) => {
     if (!tradingEnabled) {
@@ -213,6 +221,25 @@ export function PositionsPanel({
       notifyOk("Order cancelled");
     } catch (e) {
       notifyErr(e instanceof Error ? e.message : "Cancel failed");
+    }
+  };
+
+  const amendRemaining = async (order: OpenOrder, size: string) => {
+    if (!tradingEnabled) {
+      notifyErr("Trading not configured");
+      return;
+    }
+    const key = `amend-${order.order_index}`;
+    if (busy != null) return;
+    setBusy(key);
+    try {
+      await api.amendOrder(order.market_index, order.order_index, order.price, size);
+      notifyOk("Order amended");
+      setEditingOrder(null);
+    } catch (e) {
+      notifyErr(e instanceof Error ? e.message : "Amend failed");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -550,7 +577,7 @@ export function PositionsPanel({
                           {formatSize(Math.abs(n(p.size)))}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {formatNotional(notional)}
+                          {formatUsdNotional(notional) || "—"}
                         </TableCell>
                         <TableCell className="text-right">{formatPrice(p.entry_price)}</TableCell>
                         <TableCell className="text-right">
@@ -764,7 +791,34 @@ export function PositionsPanel({
                             : o.price
                         )}
                       </TableCell>
-                      <TableCell className="text-right">{formatSize(o.remaining)}</TableCell>
+                      <TableCell className="relative text-right">
+                        {orderQtyEditable(o) && tradingEnabled ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              "cursor-text font-mono tabular-nums underline decoration-dotted underline-offset-2 hover:decoration-solid",
+                              editingOrder === o.order_index && "invisible"
+                            )}
+                            disabled={busy != null}
+                            title="Edit remaining size"
+                            onClick={() => setEditingOrder(o.order_index)}
+                          >
+                            {formatSize(o.remaining)}
+                          </button>
+                        ) : (
+                          <span className="font-mono tabular-nums">{formatSize(o.remaining)}</span>
+                        )}
+                        {orderQtyEditable(o) && tradingEnabled && editingOrder === o.order_index ? (
+                          <OrderRemainingEditor
+                            initial={formatSize(o.remaining)}
+                            decimals={marketByIndex.get(o.market_index)?.size_decimals ?? 4}
+                            disabled={busy != null}
+                            className="absolute top-1/2 right-2 z-10 h-6 w-24 -translate-y-1/2 rounded-md border border-ring bg-popover px-1.5 text-foreground shadow-md focus-visible:border-ring focus-visible:ring-1"
+                            onCancel={() => setEditingOrder(null)}
+                            onCommit={(size) => void amendRemaining(o, size)}
+                          />
+                        ) : null}
+                      </TableCell>
                       <TableCell className="text-right">
                         {algoKind ? (
                           <span className="text-xs text-muted-foreground">algo</span>

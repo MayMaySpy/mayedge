@@ -12,7 +12,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { isLongPosition, type OpenOrder, type Position } from "@/lib/api";
-import { canonicalDecimal, decimalInput, parseDecimal } from "@/lib/numbers";
+import { canonicalDecimal, decimalInput, parseDecimal, stripFractionalZeros } from "@/lib/numbers";
 import {
   pnlAtTrigger,
   pnlFromRoe,
@@ -38,7 +38,7 @@ const SLIDER_TICKS = Array.from({ length: 17 }, (_, i) => i);
 function draftNum(n: number, maxDp: number): string {
   if (!Number.isFinite(n)) return "";
   const d = Math.max(0, Math.min(maxDp, 8));
-  return n.toFixed(d).replace(/\.?0+$/, "");
+  return stripFractionalZeros(n.toFixed(d));
 }
 
 function emptyForm(seed?: { tp?: string; sl?: string }) {

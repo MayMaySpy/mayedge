@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, Star } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,8 +28,19 @@ import { MarketPicker } from "@/components/widgets/MarketPicker";
 import type { Market } from "@/lib/api";
 import { preferPerpMarket, algoBlotter, algoIsWorking } from "@/lib/algos";
 import { api } from "@/lib/api";
+import { useFavorites } from "@/lib/favorites";
 import { pushRecent } from "@/lib/recents";
-import { useFeedHealth, useLiveAccount, useLiveAlgos, useLiveBbo, useLiveQuotes, overlayQuote, setAlgo } from "@/lib/liveData";
+import {
+  useAutoKill,
+  useFeedHealth,
+  useLiveAccount,
+  useLiveAlgos,
+  useLiveBbo,
+  useLiveQuotes,
+  overlayQuote,
+  setAlgo,
+} from "@/lib/liveData";
+import { AutoKillSection } from "@/components/widgets/AutoKillSection";
 import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
 import { formatFundingPct } from "@/lib/marketPicker";
 
@@ -106,6 +117,31 @@ function StatRule() {
   return <Separator orientation="vertical" className="h-4 self-center" />;
 }
 
+function HeaderFavorite({ symbol }: { symbol: string }) {
+  const [favorites, toggleFavorite] = useFavorites();
+  if (!symbol) return null;
+  const pinned = favorites.includes(symbol);
+  const label = pinned ? `Unpin ${symbol}` : `Pin ${symbol}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          aria-pressed={pinned}
+          className={cn("size-8", pinned && "text-warn hover:text-warn")}
+          onClick={() => toggleFavorite(symbol)}
+        >
+          <Star className={cn(pinned && "fill-warn")} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function fundingTooltip(rate: number | null, apr: number | null): string | undefined {
   if (rate == null) return undefined;
   const parts = [`${formatFundingPct(rate)} per hour`, `${formatFundingPct(rate * 8)} / 8h`];
@@ -139,6 +175,7 @@ export function Header({
   const bbo = useLiveBbo();
   const health = useFeedHealth();
   const algoBook = useLiveAlgos();
+  const autoKill = useAutoKill();
   const { working: workingAlgos } = algoBlotter(algoBook);
   const algosRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
   const bid = parseFloat(bbo.bid ?? "");
@@ -247,8 +284,9 @@ export function Header({
   return (
     <div className="shrink-0">
       <header className="grid h-11 grid-cols-[auto_1fr_auto] items-center gap-4 border-b-[0.5px] border-border bg-background px-3">
-        <div className="min-w-0 justify-self-start">
+        <div className="flex min-w-0 items-center justify-self-start">
           <MarketPicker markets={markets} symbol={symbol} onSymbolChange={onSymbolChange} />
+          <HeaderFavorite symbol={symbol} />
         </div>
 
         <div className="flex min-w-0 items-center justify-center gap-3 overflow-x-auto">
@@ -308,6 +346,25 @@ export function Header({
           )}
           <Badge variant="outline">{network}</Badge>
           {!tradingEnabled && <Badge variant="muted">Read-only</Badge>}
+          {tradingEnabled && autoKill.armed && (
+            <Badge
+              variant="warn"
+              className="cursor-pointer"
+              onClick={() => setKillOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setKillOpen(true);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              Auto kill
+              {autoKill.loss_usd != null ? ` -${autoKill.loss_usd}` : ""}
+              {autoKill.profit_usd != null ? ` / +${autoKill.profit_usd}` : ""}
+            </Badge>
+          )}
           {tradingEnabled && (
             <Button type="button" variant="danger" size="sm" className="h-7" onClick={() => setKillOpen(true)}>
               Kill
@@ -362,6 +419,7 @@ export function Header({
               Stop + flatten
             </Button>
           </DialogFooter>
+          <AutoKillSection tradingEnabled={tradingEnabled} />
         </DialogContent>
       </Dialog>
       <FavoritesBar markets={markets} symbol={symbol} onSymbolChange={onSymbolChange} />

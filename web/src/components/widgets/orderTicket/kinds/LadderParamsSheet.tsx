@@ -3,7 +3,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
-import { parseDecimal, decimalInput } from "@/lib/numbers";
+import { parseDecimal, decimalInput, stripFractionalZeros } from "@/lib/numbers";
 import { buildLadderPlan } from "@/lib/ladderPlan";
 import { makerMinSize } from "../math";
 import { TicketChips, TicketField } from "../ui";
@@ -32,7 +32,7 @@ function ladderPreview(state: LadderParamsState, sizeNum: number): string {
   const window = parseInt(state.window, 10);
   if (!(orders > 0) || !(window > 0) || !(sizeNum > 0)) return "";
   const per = sizeNum / orders;
-  const perStr = per >= 1 ? per.toFixed(2).replace(/\.?0+$/, "") : per.toPrecision(3);
+  const perStr = per >= 1 ? stripFractionalZeros(per.toFixed(2)) : per.toPrecision(3);
   const parts = [`${orders} orders`, `${window} live`, `${perStr}/order`];
   if (state.advanced) {
     const sizeVar = parseDecimal(state.sizeVarPct) ?? 0;
@@ -98,7 +98,12 @@ export function LadderParamsSheet({
   const tick = priceDecimals >= 0 ? 10 ** -priceDecimals : 0.01;
   const qtyStep = sizeDecimals >= 0 ? 10 ** -sizeDecimals : 0.01;
   const mid = bookMid ?? market.mid_price ?? market.mark_price ?? fromNum;
-  const minQty = makerMinSize(market.min_base_amount ?? 0, market.min_quote_amount ?? 0, mid);
+  const minQty = makerMinSize(
+    market.min_base_amount ?? 0,
+    market.min_quote_amount ?? 0,
+    mid,
+    sizeDecimals
+  );
   const sizeVar = state.advanced ? (parseDecimal(state.sizeVarPct) ?? 0) : 0;
   const priceVar = state.advanced ? (parseDecimal(state.priceVarPct) ?? 0) : 0;
   const sizeSkew =

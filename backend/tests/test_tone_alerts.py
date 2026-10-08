@@ -175,6 +175,16 @@ class ToneBookTest(unittest.TestCase):
         self.assertEqual(hits, [])
         self.assertEqual(book.missing([1]), [(1, "4h")])
 
+    def test_gaps_include_unseeded_and_stale_windows(self) -> None:
+        book = ToneBook(tones_fn=_tones("ucru"), min_bars=1, timeframes=("30m",))
+        bars = _flat(2)
+        now = bars[-1].time + 10
+        self.assertEqual(book.gaps([1], now=now), [(1, "30m")])
+        book.seed(1, "30m", bars, now=now)
+        self.assertEqual(book.gaps([1], now=now), [])
+        stale = bars[-1].time + 2 * 1800 + 1
+        self.assertEqual(book.gaps([1], now=stale), [(1, "30m")])
+
 
 class ToneTimeframeGatewayTest(unittest.TestCase):
     def test_set_persists_and_signals_resync(self) -> None:
