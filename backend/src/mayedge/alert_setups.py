@@ -12,6 +12,10 @@ SETUP_LABELS: dict[str, str] = {
     "long_flush": "Long flush",
     "pump": "Sharp move up",
     "dump": "Sharp move down",
+    "broad_up": "Broad move up",
+    "broad_down": "Broad move down",
+    "holds_up": "Holds up",
+    "lags": "Lags",
     "vol_surge": "Volume surge",
     "absorption": "Absorption",
     "crowded_longs": "Crowded longs",
@@ -61,6 +65,14 @@ def classify_setup(factors: list[FactorView], context: PriceContext | None = Non
     disloc = by_kind.get("dislocation")
 
     px_dir = price.direction if price else (context.direction if context else "flat")
+    broad = by_kind.get("broad")
+
+    if broad:
+        if broad.direction == "up" or (broad.direction == "flat" and broad.value > 0):
+            return "broad_up"
+        if broad.direction == "down" or broad.value < 0:
+            return "broad_down"
+        return "mixed"
 
     if liq:
         if px_dir == "down" or liq.direction == "down":
@@ -68,6 +80,11 @@ def classify_setup(factors: list[FactorView], context: PriceContext | None = Non
         if px_dir == "up" or liq.direction == "up":
             return "short_squeeze"
         return "liq_cascade"
+
+    if price and price.direction == "up" and price.value < 0:
+        return "holds_up"
+    if price and price.direction == "down" and price.value > 0:
+        return "lags"
 
     if price and oi:
         if px_dir == "up":
@@ -100,7 +117,7 @@ def classify_setup(factors: list[FactorView], context: PriceContext | None = Non
 
 
 def setup_direction(factors: list[FactorView], context: PriceContext | None) -> str:
-    for kind in ("price", "liq_cluster"):
+    for kind in ("price", "liq_cluster", "broad"):
         for f in factors:
             if f.kind == kind and f.direction in ("up", "down"):
                 return f.direction
@@ -128,7 +145,17 @@ def format_factor(f: dict[str, Any]) -> str:
     if kind == "volume":
         return f"Vol {value:.1f}×"
     if kind == "price":
-        return f"Px {value:+.2f}%"
+        text = f"Px {value:+.2f}%"
+        excess = f.get("excess")
+        if excess is not None:
+            text += f" · ex {float(excess):+.2f}%"
+        return text
+    if kind == "broad":
+        side = str(f.get("direction") or "")
+        breadth = str(f.get("window") or "")
+        tail = f"{breadth} {side}".strip()
+        board = f"Board {value:+.1f}%"
+        return f"{board} · {tail}" if tail else board
     if kind == "oi":
         return f"OI {value:+.1f}%"
     if kind == "premium":

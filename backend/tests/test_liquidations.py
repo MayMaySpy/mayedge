@@ -89,7 +89,9 @@ class LiquidationGroupTests(unittest.TestCase):
         self.feed = LiquidationFeed(self.out.append, persist=False)
         self.eth = MarketMeta(1, "ETH", 2, 4, 0.001, 10.0, market_type="perp")
 
-    def _fill(self, trade_id: int, *, ask_id: int, size: str = "0.1", **extra: object) -> dict[str, Any]:
+    def _fill(
+        self, trade_id: int, *, ask_id: int, size: str = "0.1", **extra: object
+    ) -> dict[str, Any]:
         row: dict[str, Any] = {
             "trade_id": trade_id,
             "price": "100",
@@ -141,8 +143,7 @@ class LiquidationGroupTests(unittest.TestCase):
 
     def test_buy_taker_groups_on_bid_id(self) -> None:
         fills = [
-            self._fill(10 + i, ask_id=800 + i, bid_id=777, is_maker_ask=True)
-            for i in range(3)
+            self._fill(10 + i, ask_id=800 + i, bid_id=777, is_maker_ask=True) for i in range(3)
         ]
         self.feed.ingest(1, fills, get_market=lambda _i: self.eth)
         rows = self.feed.recent()
@@ -185,10 +186,18 @@ class LiquidationSummaryTests(unittest.TestCase):
         now = 1_700_000_000_000
         store.insert_liquidations(
             [
-                _row(trade_id=1, symbol="ETH", market_index=1, side="sell", usd_amount="4000", ts=now),
-                _row(trade_id=2, symbol="ETH", market_index=1, side="sell", usd_amount="2000", ts=now),
-                _row(trade_id=3, symbol="ETH", market_index=1, side="buy", usd_amount="1000", ts=now),
-                _row(trade_id=4, symbol="BTC", market_index=2, side="buy", usd_amount="5000", ts=now),
+                _row(
+                    trade_id=1, symbol="ETH", market_index=1, side="sell", usd_amount="4000", ts=now
+                ),
+                _row(
+                    trade_id=2, symbol="ETH", market_index=1, side="sell", usd_amount="2000", ts=now
+                ),
+                _row(
+                    trade_id=3, symbol="ETH", market_index=1, side="buy", usd_amount="1000", ts=now
+                ),
+                _row(
+                    trade_id=4, symbol="BTC", market_index=2, side="buy", usd_amount="5000", ts=now
+                ),
             ]
         )
         rows = store.summarize_liquidations(since_ms=now - 60_000)
@@ -237,10 +246,18 @@ class LiquidationSummaryTests(unittest.TestCase):
     def test_summary_window_is_hours_back_from_now(self) -> None:
         from mayedge.persist_liq import liquidation_summary_since_ms
 
-        self.assertEqual(liquidation_summary_since_ms(24, now_ms=1_700_000_000_000), 1_699_913_600_000)
-        self.assertEqual(liquidation_summary_since_ms(1, now_ms=1_700_000_000_000), 1_699_996_400_000)
-        self.assertEqual(liquidation_summary_since_ms(168, now_ms=1_700_000_000_000), 1_699_395_200_000)
-        self.assertEqual(liquidation_summary_since_ms(720, now_ms=1_700_000_000_000), 1_697_408_000_000)
+        self.assertEqual(
+            liquidation_summary_since_ms(24, now_ms=1_700_000_000_000), 1_699_913_600_000
+        )
+        self.assertEqual(
+            liquidation_summary_since_ms(1, now_ms=1_700_000_000_000), 1_699_996_400_000
+        )
+        self.assertEqual(
+            liquidation_summary_since_ms(168, now_ms=1_700_000_000_000), 1_699_395_200_000
+        )
+        self.assertEqual(
+            liquidation_summary_since_ms(720, now_ms=1_700_000_000_000), 1_697_408_000_000
+        )
         with self.assertRaises(ValueError):
             liquidation_summary_since_ms(2, now_ms=1_700_000_000_000)
 
@@ -260,14 +277,12 @@ class LiquidationSummaryTests(unittest.TestCase):
             conn.commit()
             sides = {
                 int(r["trade_id"]): r["side"]
-                for r in conn.execute(
-                    "SELECT trade_id, side FROM liquidations ORDER BY trade_id"
-                )
+                for r in conn.execute("SELECT trade_id, side FROM liquidations ORDER BY trade_id")
             }
             version = store._meta_int(conn, "schema_version")
         self.assertEqual(sides[1], "sell")
         self.assertEqual(sides[2], "buy")
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 7)
 
         with store._lock:
             conn = store._connect()
@@ -275,9 +290,7 @@ class LiquidationSummaryTests(unittest.TestCase):
             conn.commit()
             sides_again = {
                 int(r["trade_id"]): r["side"]
-                for r in conn.execute(
-                    "SELECT trade_id, side FROM liquidations ORDER BY trade_id"
-                )
+                for r in conn.execute("SELECT trade_id, side FROM liquidations ORDER BY trade_id")
             }
         self.assertEqual(sides_again[1], "sell")
         self.assertEqual(sides_again[2], "buy")
@@ -379,4 +392,3 @@ class LiquidationFoldTests(unittest.TestCase):
 
 def _by_symbol(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(r["symbol"]): r for r in rows}
-

@@ -21,11 +21,15 @@ factors:
   volume:
     rvol: [4, 8]
     min_usd_1m: 50000
+    # Volume confirms. Capped below urgent so a tape print alone stays notable.
+    score_cap: 6
   price:
     sigma: [4, 6]
     # A move must also clear this many percent (1m, 5m). Stops 0.05% ticks on flat books.
     min_pct: [0.3, 0.6]
     sigma_floor_pct: 0.05
+    # Recent residual RMS, excluding the newest 5 bars, can raise the noise floor.
+    recent_bars: 30
   oi:
     sigma: [4, 6]
     min_usd: 250000
@@ -56,3 +60,14 @@ episode:
   quiet_s: 180
   rearm_s: 600
   max_new_per_min: 6
+
+# A move shared by the board. Below min_markets the excess is the raw move.
+broad:
+  min_markets: 15
+  move_pct: 0.3
+  breadth: 0.6
+  beta_max: 3
+
+outcomes:
+  horizons_min: [5, 15]
+  retention_days: 30

@@ -160,6 +160,11 @@ def create_app() -> FastAPI:
     async def get_alert_board() -> list[dict[str, Any]]:
         return gateway.recent_alert_board()
 
+    @app.get("/api/alerts/stats")
+    async def get_alert_stats(hours: int = 24) -> dict[str, Any]:
+        span = max(1, min(int(hours), 24 * 30))
+        return gateway.alert_stats(span)
+
     @app.get("/api/alerts/timeframes")
     async def get_alert_timeframes() -> dict[str, Any]:
         return gateway.tone_timeframes_view()

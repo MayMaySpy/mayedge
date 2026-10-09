@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import statistics
 import time
 from collections import deque
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from mayedge.alert_outcomes import OutcomeBook
 from mayedge.alert_setups import (
     FactorView,
     PriceContext,
@@ -18,7 +20,14 @@ from mayedge.alert_setups import (
     classify_setup,
     setup_direction,
 )
-from mayedge.alert_stats import LevelBook, MinuteBook, rvol_score, z_score
+from mayedge.alert_stats import (
+    LevelBook,
+    MinuteBook,
+    market_beta,
+    noise_sigma,
+    rvol_score,
+    z_score,
+)
 from mayedge.config import settings
 from mayedge.lighter.models import Candle, MarketMeta, to_float
 
@@ -27,6 +36,12 @@ logger = logging.getLogger(__name__)
 _RING = 500
 _SNAPSHOT_MAX = 400
 _BOARD_ROWS = 10
+_MINUTES_PER_DAY = 1440
+_STALE_S = 90.0
+_EXCLUDE_RECENT = 5
+# One row for a move shared by the whole board. The symbol opens BTC.
+BROAD_INDEX = -1
+BROAD_SYMBOL = "BTC"
 
 
 @dataclass(frozen=True)
@@ -74,6 +89,14 @@ class AlertSettings:
     episode_quiet_s: float = 180.0
     episode_rearm_s: float = 600.0
     max_new_per_min: int = 6
+    vol_score_cap: float = 6.0
+    price_recent_bars: int = 30
+    broad_min_markets: int = 15
+    broad_move_pct: float = 0.3
+    broad_breadth: float = 0.6
+    broad_beta_max: float = 3.0
+    outcome_horizons: tuple[int, ...] = (5, 15)
+    outcome_retention_days: int = 30
 
 
 def _pair(raw: Any, default: SevPair) -> SevPair:
@@ -95,6 +118,21 @@ def _f(raw: Any, default: float) -> float:
         return default
 
 
+def _ints(raw: Any, default: tuple[int, ...]) -> tuple[int, ...]:
+    if isinstance(raw, (list, tuple)) and raw:
+        out: list[int] = []
+        for item in raw:
+            try:
+                n = int(item)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                out.append(n)
+        if out:
+            return tuple(out)
+    return default
+
+
 def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
     d = data or {}
     base = AlertSettings()
@@ -110,6 +148,8 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
     liq_f = factors.get("liq_cluster") or {}
     score = d.get("score") or {}
     episode = d.get("episode") or {}
+    broad = d.get("broad") or {}
+    outcomes = d.get("outcomes") or {}
     price_min = _pair(price.get("min_pct"), SevPair(base.price_min_pct_1m, base.price_min_pct_5m))
     return AlertSettings(
         min_severity=max(1, min(3, int(_f(d.get("min_severity"), base.min_severity)))),
@@ -150,6 +190,14 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
         episode_quiet_s=_f(episode.get("quiet_s"), base.episode_quiet_s),
         episode_rearm_s=_f(episode.get("rearm_s"), base.episode_rearm_s),
         max_new_per_min=int(_f(episode.get("max_new_per_min"), base.max_new_per_min)),
+        vol_score_cap=_f(vol.get("score_cap"), base.vol_score_cap),
+        price_recent_bars=int(_f(price.get("recent_bars"), base.price_recent_bars)),
+        broad_min_markets=int(_f(broad.get("min_markets"), base.broad_min_markets)),
+        broad_move_pct=_f(broad.get("move_pct"), base.broad_move_pct),
+        broad_breadth=_f(broad.get("breadth"), base.broad_breadth),
+        broad_beta_max=_f(broad.get("beta_max"), base.broad_beta_max),
+        outcome_horizons=_ints(outcomes.get("horizons_min"), base.outcome_horizons),
+        outcome_retention_days=int(_f(outcomes.get("retention_days"), base.outcome_retention_days)),
     )
 
 
@@ -197,6 +245,7 @@ class Factor:
     unit: str
     score: float
     window: str = ""
+    excess: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         row: dict[str, Any] = {
@@ -208,6 +257,8 @@ class Factor:
         }
         if self.window:
             row["window"] = self.window
+        if self.excess is not None:
+            row["excess"] = round(self.excess, 2)
         return row
 
 
@@ -309,8 +360,25 @@ def composite_score(factors: list[Factor]) -> float:
     return total
 
 
-def severity_from_score(score: float, factor_count: int, cfg: AlertSettings) -> int:
-    if score >= cfg.score_sev3 or (score >= 5.0 and factor_count >= 2):
+def confirming_count(factors: list[Factor]) -> int:
+    """Volume confirms a move. It does not, by itself, make one urgent."""
+    return sum(1 for f in factors if f.kind != "volume")
+
+
+def _breadth(factors: list[Factor]) -> list[int] | None:
+    for factor in factors:
+        if factor.kind != "broad" or "/" not in factor.window:
+            continue
+        left, right = factor.window.split("/", 1)
+        try:
+            return [int(left), int(right)]
+        except ValueError:
+            return None
+    return None
+
+
+def severity_from_score(score: float, confirming: int, cfg: AlertSettings) -> int:
+    if score >= cfg.score_sev3 or (score >= 5.0 and confirming >= 2):
         return 3
     if score >= cfg.score_sev2:
         return 2
@@ -425,7 +493,7 @@ class EpisodeBook:
         ep.peak_score = max(ep.peak_score, ep.score)
         ep.setup = classify_setup(views, context)
         ep.direction = setup_direction(views, context)
-        ep.severity = severity_from_score(ep.score, len(ep.factors), self._cfg)
+        ep.severity = severity_from_score(ep.score, confirming_count(ep.factors), self._cfg)
 
     def _update_board(
         self,
@@ -441,17 +509,21 @@ class EpisodeBook:
             self._board.pop(market_index, None)
             return
         views = _views(factors)
-        self._board[market_index] = {
+        row: dict[str, Any] = {
             "market_index": market_index,
             "symbol": symbol,
             "score": round(score, 2),
-            "severity": severity_from_score(score, len(factors), self._cfg),
+            "severity": severity_from_score(score, confirming_count(factors), self._cfg),
             "setup": classify_setup(views, context),
             "direction": setup_direction(views, context),
             "factors": [f.as_dict() for f in sorted(factors, key=lambda x: -x.score)[:4]],
             "move_pct": round(context.move_pct, 2) if context else None,
             "ts": int(now * 1000),
         }
+        breadth = _breadth(factors)
+        if breadth is not None:
+            row["breadth"] = breadth
+        self._board[market_index] = row
 
     def _can_open(self, market_index: int, score: float, now: float) -> bool:
         closed = self._closed_peak.get(market_index)
@@ -518,7 +590,17 @@ class ExploitDetector:
             min_samples=self._thr.level_min_samples,
         )
         self._episodes = EpisodeBook(self._thr)
+        self._outcomes = OutcomeBook(
+            horizons=self._thr.outcome_horizons,
+            retention_days=self._thr.outcome_retention_days,
+        )
         self._symbols: dict[int, str] = {}
+        self._noise_cache: dict[int, tuple[tuple[int, int], float, float]] = {}
+        self._broad_minute = -1
+        self._broad_markets = -1
+        self._broad_cache: dict[int, float] | None = None
+        self._rvol_cache: tuple[float, float] | None = None
+        self._moves_cache: dict[float, tuple[float, list[float]]] = {}
 
     def recent(self) -> list[dict[str, Any]]:
         return list(self._ring)
@@ -526,14 +608,20 @@ class ExploitDetector:
     def board(self) -> list[dict[str, Any]]:
         return self._episodes.board_rows()
 
+    def outcome_stats(self, *, hours: int) -> dict[str, Any]:
+        since = int((time.time() - hours * 3600) * 1000)
+        return {"hours": hours, "setups": self._outcomes.stats(since_ms=since)}
+
     def minute_book(self) -> MinuteBook:
         return self._minute
 
     def seed_minute_bars(self, market_index: int, bars: list[Candle]) -> None:
         self._minute.seed(market_index, bars)
+        self._resolve_outcomes(market_index, time.time())
 
     def on_minute_bars(self, market_index: int, bars: list[Candle]) -> None:
         self._minute.observe(market_index, bars)
+        self._resolve_outcomes(market_index, time.time())
 
     def _snapshot_from_meta(self, meta: MarketMeta) -> MarketSnapshot | None:
         mark = to_float(meta.mark_price)
@@ -591,6 +679,7 @@ class ExploitDetector:
             self._emit(events)
 
     def flush(self) -> None:
+        self._consider_broad(time.time())
         if not self._pending:
             return
         pending = self._pending
@@ -640,6 +729,7 @@ class ExploitDetector:
             context=context,
         )
         if ev:
+            self._track_new_episode(ev, snap.ts)
             self._queue([ev])
 
     def on_liquidations(self, items: list[dict[str, Any]]) -> None:
@@ -669,7 +759,9 @@ class ExploitDetector:
                 window = deque(item for item in window if item[3] != key)
                 window.append((ts, usd, side, key))
             cutoff = now - window_s
-            window = deque(sorted((item for item in window if item[0] >= cutoff), key=lambda r: r[0]))
+            window = deque(
+                sorted((item for item in window if item[0] >= cutoff), key=lambda r: r[0])
+            )
             self._liq_window[mi] = window
             if not window:
                 continue
@@ -690,12 +782,15 @@ class ExploitDetector:
                 direction="down" if sells >= len(window) / 2 else "up",
                 value=total_usd,
                 unit="usd",
-                score=min(oi_bps / self._thr.liq_oi_bps.sev2 * self._thr.score_sev2, self._thr.score_cap),
+                score=min(
+                    oi_bps / self._thr.liq_oi_bps.sev2 * self._thr.score_sev2, self._thr.score_cap
+                ),
             )
             ev = self._episodes.ingest(
                 mi, symbol, [factor], now, liquidity_ok=self._liquidity_ok(snap)
             )
             if ev:
+                self._track_new_episode(ev, now)
                 self._queue([ev])
         self.flush()
 
@@ -711,6 +806,201 @@ class ExploitDetector:
         spread = _spread_bps(snap.bid, snap.ask, snap.mid or snap.last)
         return spread is None or spread <= self._thr.max_spread_bps
 
+    def _resolve_outcomes(self, market_index: int, now: float) -> None:
+        if not self._outcomes.awaiting(market_index):
+            return
+        self._outcomes.resolve(
+            market_index,
+            self._minute.bars(market_index),
+            self._broad_series(now),
+            now=now,
+        )
+
+    def _track_new_episode(self, ev: ExploitEvent, now: float) -> None:
+        if ev.started_at != ev.ts or ev.direction not in ("up", "down"):
+            return
+        if ev.market_index == BROAD_INDEX:
+            minute = int(now // 60) * 60
+            self._outcomes.open(
+                episode_id=ev.id,
+                market_index=BROAD_INDEX,
+                symbol=ev.symbol,
+                setup=ev.setup or "",
+                direction=ev.direction,
+                entry_bar=minute - 60,
+                entry_close=100.0,
+                beta=0.0,
+                opened_at=ev.started_at or int(now * 1000),
+            )
+            return
+        entry = self._entry_bar(ev.market_index, now)
+        if entry is None:
+            return
+        beta, _sigma = self._noise(ev.market_index, now)
+        self._outcomes.open(
+            episode_id=ev.id,
+            market_index=ev.market_index,
+            symbol=ev.symbol,
+            setup=ev.setup or "",
+            direction=ev.direction,
+            entry_bar=entry[0],
+            entry_close=entry[1],
+            beta=beta,
+            opened_at=ev.started_at or int(now * 1000),
+        )
+
+    def _entry_bar(self, market_index: int, now: float) -> tuple[int, float] | None:
+        minute = int(now // 60) * 60
+        closed = [
+            bar for bar in self._minute.bars(market_index) if bar.time < minute and bar.close > 0
+        ]
+        if not closed:
+            return None
+        bar = closed[-1]
+        return bar.time, bar.close
+
+    def _consider_broad(self, now: float) -> None:
+        moves = self._live_moves(300.0, now)
+        n = len(moves)
+        thr = self._thr
+        if n < thr.broad_min_markets:
+            return
+        move = statistics.median(moves)
+        if abs(move) < thr.price_min_pct_5m:
+            return
+        series = self._broad_series(now)
+        ordered = [series[t] for t in sorted(series)]
+        if len(ordered) < thr.min_bars:
+            return
+        sigma = noise_sigma(
+            ordered,
+            recent_bars=thr.price_recent_bars,
+            exclude_recent=_EXCLUDE_RECENT,
+            floor=thr.price_sigma_floor_pct,
+        )
+        z = z_score(move, 0.0, sigma * math.sqrt(5))
+        if abs(z) < thr.price_sigma.sev2:
+            return
+        direction = _direction_from_delta(move)
+        if direction == "up":
+            same = sum(1 for item in moves if item > thr.broad_move_pct)
+        else:
+            same = sum(1 for item in moves if item < -thr.broad_move_pct)
+        if same / n < thr.broad_breadth:
+            return
+        factor = Factor(
+            "broad",
+            direction,
+            move,
+            "pct",
+            min(abs(z), thr.score_cap),
+            window=f"{same}/{n}",
+        )
+        ev = self._episodes.ingest(
+            BROAD_INDEX,
+            BROAD_SYMBOL,
+            [factor],
+            now,
+            liquidity_ok=True,
+            context=PriceContext(move_pct=move, move_sigma=abs(z)),
+        )
+        if ev:
+            self._track_new_episode(ev, now)
+            self._queue([ev])
+
+    def _broad_series(self, now: float) -> dict[int, float]:
+        minute = int(now // 60)
+        markets = self._minute.market_count()
+        if (
+            self._broad_cache is not None
+            and self._broad_minute == minute
+            and self._broad_markets == markets
+        ):
+            return self._broad_cache
+        series = self._minute.broad_returns(min_markets=self._thr.broad_min_markets)
+        self._broad_minute = minute
+        self._broad_markets = markets
+        self._broad_cache = series
+        return series
+
+    def _noise(self, market_index: int, now: float) -> tuple[float, float]:
+        minute = int(now // 60)
+        series = self._broad_series(now)
+        key = (minute, len(series))
+        hit = self._noise_cache.get(market_index)
+        if hit is not None and hit[0] == key:
+            return hit[1], hit[2]
+        rets = self._minute.closed_return_map(market_index)
+        beta = market_beta(
+            rets,
+            series,
+            min_samples=self._thr.min_bars,
+            beta_max=self._thr.broad_beta_max,
+        )
+        ordered = sorted(rets)
+        if series:
+            residuals = [rets[t] - beta * series[t] for t in ordered if t in series]
+        else:
+            residuals = [rets[t] for t in ordered]
+        sigma = noise_sigma(
+            residuals,
+            recent_bars=self._thr.price_recent_bars,
+            exclude_recent=_EXCLUDE_RECENT,
+            floor=self._thr.price_sigma_floor_pct,
+        )
+        self._noise_cache[market_index] = (key, beta, sigma)
+        return beta, sigma
+
+    def _broad_move(self, age_s: float, now: float) -> float:
+        moves = self._live_moves(age_s, now)
+        if len(moves) < self._thr.broad_min_markets:
+            return 0.0
+        return float(statistics.median(moves))
+
+    def _live_moves(self, age_s: float, now: float) -> list[float]:
+        hit = self._moves_cache.get(age_s)
+        if hit is not None and now - hit[0] < 1.0:
+            return hit[1]
+        moves: list[float] = []
+        for series in self._snapshots.values():
+            if not series:
+                continue
+            snap = series[-1]
+            if now - snap.ts > _STALE_S or not self._liquidity_ok(snap):
+                continue
+            base = self._find_baseline(series, age_s)
+            if base is None:
+                continue
+            pct = _pct_change(snap.last, base.last)
+            if pct is not None:
+                moves.append(pct)
+        self._moves_cache[age_s] = (now, moves)
+        return moves
+
+    def _board_rvol(self, now: float) -> float:
+        cached = self._rvol_cache
+        if cached is not None and now - cached[0] < 1.0:
+            return cached[1]
+        rvols: list[float] = []
+        for market_index, series in self._snapshots.items():
+            if not series:
+                continue
+            snap = series[-1]
+            if now - snap.ts > _STALE_S or not self._liquidity_ok(snap):
+                continue
+            metrics = self._minute.metrics(
+                market_index, volume_floor=max(snap.vol_quote, 0.0) / _MINUTES_PER_DAY
+            )
+            if metrics is None or metrics.rvol_1m <= 0:
+                continue
+            rvols.append(metrics.rvol_1m)
+        if len(rvols) < self._thr.broad_min_markets:
+            return 1.0
+        med = float(statistics.median(rvols))
+        value = med if med > 1.0 else 1.0
+        self._rvol_cache = (now, value)
+        return value
+
     def _sigma_factor(
         self,
         kind: str,
@@ -721,11 +1011,12 @@ class ExploitDetector:
         value: float,
         unit: str,
         window: str = "",
+        excess: float | None = None,
     ) -> Factor | None:
         if z is None or abs(z) < pair.sev2:
             return None
         score = min(abs(z), self._thr.score_cap)
-        return Factor(kind, direction, value, unit, score, window=window)
+        return Factor(kind, direction, value, unit, score, window=window, excess=excess)
 
     def _scan_factors(
         self, meta: MarketMeta, snap: MarketSnapshot
@@ -751,18 +1042,34 @@ class ExploitDetector:
             mi, ts=snap.ts, premium=premium, disloc_bps=disloc_bps, funding=snap.funding, oi=snap.oi
         )
 
-        minute = self._minute.metrics(mi)
+        minute = self._minute.metrics(mi, volume_floor=max(snap.vol_quote, 0.0) / _MINUTES_PER_DAY)
         context: PriceContext | None = None
+        beta, noise = self._noise(mi, snap.ts)
+        broad_by_label = {
+            "1m": self._broad_move(60.0, snap.ts),
+            "5m": self._broad_move(300.0, snap.ts),
+        }
+        board_rvol = self._board_rvol(snap.ts)
 
         if minute is not None:
             for label, rvol, vol_usd in (
                 ("1m", minute.rvol_1m, minute.vol_quote_1m),
                 ("5m", minute.rvol_5m, minute.vol_quote_5m),
             ):
-                score = rvol_score(rvol)
+                adjusted = rvol / board_rvol if board_rvol > 1.0 else rvol
+                score = rvol_score(adjusted)
                 if vol_usd < thr.vol_min_usd_1m or score < rvol_score(thr.vol_rvol.sev2):
                     continue
-                out.append(Factor("volume", "up", rvol, "x", min(score, thr.score_cap), window=label))
+                out.append(
+                    Factor(
+                        "volume",
+                        "up",
+                        adjusted,
+                        "x",
+                        min(score, thr.vol_score_cap, thr.score_cap),
+                        window=label,
+                    )
+                )
 
         for age, label, min_pct in (
             (60.0, "1m", thr.price_min_pct_1m),
@@ -774,19 +1081,22 @@ class ExploitDetector:
             if minute is not None:
                 px_pct = _pct_change(snap.last, base.last)
                 if px_pct is not None:
-                    sigma = minute.sigma_1m_pct * (math.sqrt(5) if label == "5m" else 1.0)
-                    z = z_score(px_pct, 0.0, sigma)
+                    scale = math.sqrt(5) if label == "5m" else 1.0
+                    raw_z = z_score(px_pct, 0.0, minute.sigma_1m_pct * scale)
                     if label == "5m":
-                        context = PriceContext(move_pct=px_pct, move_sigma=abs(z))
-                    if abs(px_pct) >= min_pct:
+                        context = PriceContext(move_pct=px_pct, move_sigma=abs(raw_z))
+                    excess = px_pct - beta * broad_by_label[label]
+                    if abs(px_pct) >= min_pct and abs(excess) >= min_pct:
+                        shown = excess if abs(excess - px_pct) >= 0.05 else None
                         factor = self._sigma_factor(
                             "price",
-                            z,
+                            z_score(excess, 0.0, noise * scale),
                             thr.price_sigma,
-                            direction=_direction_from_delta(px_pct),
+                            direction=_direction_from_delta(excess),
                             value=px_pct,
                             unit="pct",
                             window=label,
+                            excess=shown,
                         )
                         if factor:
                             out.append(factor)

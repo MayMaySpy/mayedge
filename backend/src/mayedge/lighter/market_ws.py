@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,28 @@ _PACE_PER_MIN = 150
 _PING_EVERY = 25.0
 _SILENCE_S = 45.0
 _TONE_CONN_CAP = 450
+# Channel index only — `"trade/1"` must not match `"trade/12"`.
+_TRADE_CHANNEL_STR = re.compile(r'"channel"\s*:\s*"trade(?:_fe)?(?:@[A-Za-z0-9]+)?[:/](\d+)')
+_TRADE_CHANNEL_BYTES = re.compile(_TRADE_CHANNEL_STR.pattern.encode())
+
+
+def skip_idle_trade(raw: str | bytes, focus: int | None) -> bool:
+    """Drop a non-focused trade frame before ``json.loads``.
+
+    Liquidations and deleverages stay, and so does the market on screen.
+    Books, stats, and candles do not match the trade channel.
+    """
+    if isinstance(raw, str):
+        if "liquidation" in raw or "deleverage" in raw:
+            return False
+        match = _TRADE_CHANNEL_STR.search(raw)
+    else:
+        if b"liquidation" in raw or b"deleverage" in raw:
+            return False
+        match = _TRADE_CHANNEL_BYTES.search(raw)
+    if match is None:
+        return False
+    return int(match.group(1)) != focus
 
 
 class SendPacer:
@@ -115,6 +138,8 @@ async def connect_and_stream(gw: LighterGateway) -> None:
             async for raw in ws:
                 gw._last_msg_at = time.monotonic()
                 feed_health.touch_market_msg()
+                if skip_idle_trade(raw, gw._current_market_index):
+                    continue
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:

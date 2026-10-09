@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from mayedge.lighter.channels import parse_channel_market, split_ws_type
 from mayedge.lighter.gateway import LighterGateway
 from mayedge.lighter.liquidations import LiquidationFeed
-from mayedge.lighter.market_ws import handle_candle, handle_trades, handle_ws_message
+from mayedge.lighter.market_ws import (
+    handle_candle,
+    handle_trades,
+    handle_ws_message,
+    skip_idle_trade,
+)
 from mayedge.lighter.models import Trade
 
 
@@ -227,6 +233,50 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tx_hash", row)
         self.assertNotIn("ask_account_id", row)
         self.assertNotIn("bid_account_id", row)
+
+
+class TestSkipIdleTrade(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.out: list[dict] = []
+        gw = LighterGateway.__new__(LighterGateway)
+        gw._current_market_index = 120
+        gw._recent_trades = {}
+        gw._candles_1s = {}
+        gw._max_1s = 3600
+        gw._markets = {}
+        gw._liqs = LiquidationFeed(self.out.append, persist=False)
+        gw.broadcast = lambda message: self.out.append(message)
+        self.gw = gw
+
+    def test_non_focused_trade_is_not_parsed(self) -> None:
+        raw = '{"type":"update/trade","channel":"trade/1","trades":[{"price":"999","size":"1"}]}'
+        self.assertTrue(skip_idle_trade(raw, 120))
+        self.assertTrue(skip_idle_trade(raw.encode(), 120))
+        self.assertTrue(skip_idle_trade('{"channel":"trade/12","trades":[]}', 1))
+        self.assertFalse(skip_idle_trade('{"channel": "trade_fe/120","trades":[]}', 120))
+        self.assertFalse(skip_idle_trade('{"channel":"order_book/1"}', 120))
+        self.assertFalse(
+            skip_idle_trade('{"channel":"market_stats/all","last_trade_price":"1"}', 120)
+        )
+
+    async def test_liquidation_frame_still_ingests(self) -> None:
+        raw = (
+            '{"type":"update/trade","channel":"trade/1","liquidation_trades":[{'
+            '"trade_id":99,"price":"10","size":"2","usd_amount":"20",'
+            '"timestamp":1700000000000,"type":"liquidation"}]}'
+        )
+        self.assertFalse(skip_idle_trade(raw, 120))
+        self.assertFalse(
+            skip_idle_trade(
+                '{"channel":"trade:1","trades":[{"type":"deleverage","trade_id":7,'
+                '"price":"1","size":"1","timestamp":1700000000000}]}',
+                120,
+            )
+        )
+        await handle_ws_message(self.gw, json.loads(raw))
+        rows = self.gw._liqs.recent()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["trade_id"], "1:liquidation:t99")
 
 
 class TestHandleCandle(unittest.IsolatedAsyncioTestCase):

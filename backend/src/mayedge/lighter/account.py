@@ -74,6 +74,7 @@ class AccountService:
         self._orders_hydrated = False
         self._limits_at = 0.0
         self._asset_meta_at = 0.0
+        self._held_marks: tuple[Any, ...] | None = None
 
     def orders_hydrated(self) -> bool:
         return self._orders_hydrated
@@ -495,12 +496,36 @@ class AccountService:
     def _apply_positions(self, raw: Any, *, snapshot: bool) -> None:
         self._summary.positions = merge_positions(self._summary.positions, raw, snapshot=snapshot)
 
+    def _held_mark_key(self) -> tuple[Any, ...]:
+        """Marks and asset indexes ``_emit_account`` would write from the latest stats."""
+        marks: list[tuple[int, float | None]] = []
+        for pos in self._summary.positions:
+            meta = gateway.get_market_by_index(pos.market_index)
+            raw = (meta.mark_price or meta.last_trade_price) if meta else None
+            mark = to_float(raw)
+            marks.append((pos.market_index, mark if mark > 0 else None))
+        live = self._live_asset_meta()
+        indexes: list[tuple[str, float]] = []
+        for row in asset_rows(self._assets):
+            if asset_holding_qty(row) == 0:
+                continue
+            sym = str(row.get("symbol") or "").upper()
+            if not sym:
+                continue
+            indexes.append((sym, to_float((live.get(sym) or {}).get("index_price"))))
+        indexes.sort()
+        return (tuple(marks), tuple(indexes))
+
     def touch_marks(self) -> None:
         """Re-mark Positions and Asset index from latest market stats and push to the desk."""
         if not self._summary.positions and not any(
             asset_holding_qty(row) != 0 for row in asset_rows(self._assets)
         ):
             return
+        key = self._held_mark_key()
+        if key == self._held_marks:
+            return
+        self._held_marks = key
         self._publish()
 
     def handle_account_ws(self, msg: dict[str, Any]) -> None:

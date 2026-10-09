@@ -38,7 +38,7 @@ def z_score(value: float, center: float, sigma: float) -> float:
 @dataclass
 class MinuteMetrics:
     bar_count: int
-    median_vol_quote: float
+    baseline_vol_quote: float
     rvol_1m: float
     rvol_5m: float
     vol_quote_1m: float
@@ -69,6 +69,12 @@ class MinuteBook:
     def bar_count(self, market_index: int) -> int:
         return len(self._bars.get(market_index, ()))
 
+    def market_count(self) -> int:
+        return len(self._bars)
+
+    def bars(self, market_index: int) -> list[Candle]:
+        return list(self._bars.get(market_index, ()))
+
     def seed(self, market_index: int, bars: list[Candle]) -> None:
         live = list(self._bars.get(market_index, ()))
         by_time = {bar.time: bar for bar in bars}
@@ -97,17 +103,19 @@ class MinuteBook:
     def _quote_vol(bar: Candle) -> float:
         return max(0.0, bar.volume) * max(bar.close, bar.open, 1e-12)
 
-    def metrics(self, market_index: int) -> MinuteMetrics | None:
+    def metrics(self, market_index: int, *, volume_floor: float = 0.0) -> MinuteMetrics | None:
         dq = self._bars.get(market_index)
         if not dq or len(dq) < self._min_bars:
             return None
         bars = list(dq)
         closed = bars[:-1]
-        med = _median([self._quote_vol(b) for b in closed])
+        vols = [self._quote_vol(b) for b in closed]
+        mean = sum(vols) / len(vols) if vols else 0.0
+        baseline = max(mean, volume_floor, 0.0)
         vol_1m = self._quote_vol(bars[-1])
         tail5 = bars[-5:]
         vol_5m = sum(self._quote_vol(b) for b in tail5)
-        expected_5m = med * len(tail5)
+        expected_5m = baseline * len(tail5)
 
         rets = [
             (cur.close - prev.close) / prev.close * 100.0
@@ -120,14 +128,39 @@ class MinuteBook:
             move_5m = (bars[-1].close - bars[-6].close) / bars[-6].close * 100.0
         return MinuteMetrics(
             bar_count=len(bars),
-            median_vol_quote=med,
-            rvol_1m=vol_1m / med if med > 0 else 0.0,
+            baseline_vol_quote=baseline,
+            rvol_1m=vol_1m / baseline if baseline > 0 else 0.0,
             rvol_5m=vol_5m / expected_5m if expected_5m > 0 else 0.0,
             vol_quote_1m=vol_1m,
             vol_quote_5m=vol_5m,
             sigma_1m_pct=sigma,
             move_5m_pct=move_5m,
         )
+
+    def closed_return_map(self, market_index: int) -> dict[int, float]:
+        """Close-to-close percent returns of closed bars, keyed by bar open time.
+
+        The newest bar is treated as still forming and dropped.
+        """
+        bars = self.bars(market_index)
+        if len(bars) < 3:
+            return {}
+        out: dict[int, float] = {}
+        for prev, cur in pairwise(bars[:-1]):
+            if prev.close <= 0 or cur.close <= 0:
+                continue
+            out[cur.time] = (cur.close - prev.close) / prev.close * 100.0
+        return out
+
+    def broad_returns(self, *, min_markets: int) -> dict[int, float]:
+        """Median 1m return across markets, for minutes with enough names."""
+        bucket: dict[int, list[float]] = {}
+        for market_index in self._bars:
+            for minute, ret in self.closed_return_map(market_index).items():
+                bucket.setdefault(minute, []).append(ret)
+        return {
+            minute: _median(vals) for minute, vals in bucket.items() if len(vals) >= min_markets
+        }
 
 
 @dataclass
@@ -215,3 +248,58 @@ def rvol_score(rvol: float) -> float:
     if rvol <= 1.0:
         return 0.0
     return 2.0 * math.log2(rvol)
+
+
+def market_beta(
+    market: dict[int, float],
+    broad: dict[int, float],
+    *,
+    min_samples: int,
+    beta_max: float,
+) -> float:
+    """``cov / var`` of aligned 1m returns, clipped to ``[0, beta_max]``.
+
+    Too few overlapping minutes, or a flat Broad series, scores as 0: the
+    market is treated as moving on its own.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for minute, y in market.items():
+        x = broad.get(minute)
+        if x is None:
+            continue
+        xs.append(x)
+        ys.append(y)
+    if len(xs) < min_samples:
+        return 0.0
+    mean_x = sum(xs) / len(xs)
+    var = sum((x - mean_x) ** 2 for x in xs)
+    if var <= 1e-18:
+        return 0.0
+    mean_y = sum(ys) / len(ys)
+    cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True))
+    return min(beta_max, max(0.0, cov / var))
+
+
+def noise_sigma(
+    values: list[float],
+    *,
+    recent_bars: int,
+    exclude_recent: int,
+    floor: float,
+) -> float:
+    """The larger of the full-window robust sigma and the recent RMS.
+
+    The newest ``exclude_recent`` points are left out of the RMS so the move
+    being scored does not widen its own baseline.
+    """
+    if len(values) < 5:
+        return floor
+    robust = robust_sigma(values, _median(values), floor)
+    if len(values) <= exclude_recent + 5:
+        return robust
+    window = values[: len(values) - exclude_recent][-recent_bars:]
+    if len(window) < 5:
+        return robust
+    rms = math.sqrt(sum(v * v for v in window) / len(window))
+    return max(robust, rms)

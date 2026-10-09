@@ -85,6 +85,34 @@ describe("alertFormat", () => {
     expect(boardLine(withPrice).detail).toBe("Vol 33.5× · Px -1.60%");
   });
 
+  it("shows the excess next to the raw move", () => {
+    expect(factorSummary([{ kind: "price", value: 2, unit: "pct", excess: 3.9 }])).toBe(
+      "Px +2.00% · ex +3.90%"
+    );
+  });
+
+  it("names a broad move Market", () => {
+    const line = eventLine(
+      signal("b", -1, 0, {
+        symbol: "BTC",
+        setup: "broad_down",
+        direction: "down",
+        factors: [
+          { kind: "broad", value: -1.8, unit: "pct", direction: "down", window: "41/58" },
+        ],
+      })
+    );
+    expect(line.name).toBe("Market");
+    expect(line.mutable).toBe(false);
+    expect(line.label).toBe("Broad down");
+    expect(line.detail).toBe("Board -1.8% · 41/58 down");
+  });
+
+  it("names holds up and lags", () => {
+    expect(setupShort("holds_up")).toBe("Holds up");
+    expect(setupShort("lags")).toBe("Lags");
+  });
+
   it("writes a short toast", () => {
     expect(toastCopy(signal("a", 1, 0), "ETH")).toEqual({
       title: "▼ ETH · Long flush",

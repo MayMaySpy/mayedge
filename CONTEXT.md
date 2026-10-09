@@ -30,6 +30,20 @@ _Avoid_: RSI, ratio, beta, vs BTC price, Strength (unqualified)
 Operator-pinned Markets on the header strip. Independent of Watchlist.
 _Avoid_: Watchlist, stars, bookmarks
 
+### Alerts
+
+**Broad move**:
+The median move across liquid perps, in percent. One row when that move is shared by the board.
+_Avoid_: Relative Strength, BTC, the market (unqualified)
+
+**Excess move**:
+A Market's move minus its beta times the Broad move. The part the rest of the board does not explain.
+_Avoid_: alpha, Relative Strength, residual (unqualified)
+
+**Follow-through**:
+The signed Excess move at +5m and +15m, in the alert's direction. Positive means the move continued.
+_Avoid_: hit rate (unqualified), PnL, return
+
 ### Chart views
 
 **Scan**:

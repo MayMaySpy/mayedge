@@ -8,7 +8,9 @@ _UP = PriceContext(move_pct=1.2, move_sigma=3.0)
 _FLAT = PriceContext(move_pct=0.02, move_sigma=0.2)
 
 
-def _f(kind: str, direction: str, value: float = 1.0, score: float = 5.0) -> FactorView:
+def _f(kind: str, direction: str, value: float | None = None, score: float = 5.0) -> FactorView:
+    if value is None:
+        value = -1.0 if direction == "down" else 1.0
     return FactorView(kind, direction, value, score)
 
 
@@ -21,6 +23,10 @@ class ClassifySetupTest(unittest.TestCase):
             ([_f("price", "down"), _f("oi", "down")], None, "long_flush"),
             ([_f("price", "up")], None, "pump"),
             ([_f("price", "down")], None, "dump"),
+            ([_f("price", "up", -0.7)], None, "holds_up"),
+            ([_f("price", "down", 0.8)], None, "lags"),
+            ([_f("broad", "down", -1.8)], None, "broad_down"),
+            ([_f("broad", "up", 1.2)], None, "broad_up"),
             ([_f("liq_cluster", "down")], None, "long_flush"),
             ([_f("liq_cluster", "up")], None, "short_squeeze"),
             ([_f("volume", "up")], _FLAT, "absorption"),
@@ -44,6 +50,17 @@ class ClassifySetupTest(unittest.TestCase):
             ],
         )
         self.assertEqual(note, "Long flush · Px -1.60% · Vol 6.8× · Liqs $1.2M")
+
+    def test_broad_note_names_the_board(self) -> None:
+        note = build_note(
+            "broad_down",
+            [{"kind": "broad", "value": -1.8, "direction": "down", "window": "41/58"}],
+        )
+        self.assertEqual(note, "Broad move down · Board -1.8% · 41/58 down")
+
+    def test_price_note_includes_the_excess_move(self) -> None:
+        note = build_note("holds_up", [{"kind": "price", "value": -0.7, "excess": 2.3}])
+        self.assertEqual(note, "Holds up · Px -0.70% · ex +2.30%")
 
 
 if __name__ == "__main__":

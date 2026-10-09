@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import unittest
 
-from mayedge.alert_stats import LevelBook, MinuteBook, robust_sigma, rvol_score
+from mayedge.alert_stats import (
+    LevelBook,
+    MinuteBook,
+    market_beta,
+    noise_sigma,
+    robust_sigma,
+    rvol_score,
+)
 from mayedge.lighter.models import Candle
 
 
 def _bar(i: int, close: float, vol: float) -> Candle:
-    return Candle(time=1_700_000_000 + i * 60, open=close, high=close, low=close, close=close, volume=vol)
+    return Candle(
+        time=1_700_000_000 + i * 60, open=close, high=close, low=close, close=close, volume=vol
+    )
 
 
 class RobustSigmaTest(unittest.TestCase):
@@ -50,6 +59,46 @@ class MinuteBookTest(unittest.TestCase):
         book.observe(1, [_bar(50, 101, 5)])
         book.seed(1, [_bar(i, 100, 10) for i in range(40)])
         self.assertEqual(book.bar_count(1), 41)
+
+
+class BroadStatsTest(unittest.TestCase):
+    def test_beta_of_a_market_that_moves_with_the_board_is_one(self) -> None:
+        series = {i: 1.0 if i % 2 == 0 else -1.0 for i in range(40)}
+        self.assertAlmostEqual(market_beta(series, series, min_samples=30, beta_max=3), 1.0)
+
+    def test_beta_clips_inverse_markets_to_zero_and_fast_markets_to_three(self) -> None:
+        broad = {i: 1.0 if i % 2 == 0 else -1.0 for i in range(40)}
+        inverse = {i: -broad[i] for i in broad}
+        fast = {i: 5.0 * broad[i] for i in broad}
+        self.assertEqual(market_beta(inverse, broad, min_samples=30, beta_max=3), 0.0)
+        self.assertEqual(market_beta(fast, broad, min_samples=30, beta_max=3), 3.0)
+
+    def test_recent_rms_beats_a_calm_median(self) -> None:
+        calm = [0.05 if i % 2 else -0.05 for i in range(40)]
+        wild = [2.0 if i % 2 else -2.0 for i in range(30)]
+        sigma = noise_sigma(calm + wild + [0.01] * 5, recent_bars=30, exclude_recent=5, floor=0.05)
+        self.assertGreater(sigma, 1.5)
+
+    def test_mean_volume_is_floored_by_the_day(self) -> None:
+        book = MinuteBook(min_bars=30)
+        book.seed(1, [_bar(i, 100, 0.01) for i in range(40)])
+        book.observe(1, [_bar(40, 100, 500)])
+        metrics = book.metrics(1, volume_floor=10_000_000 / 1440)
+        assert metrics is not None
+        self.assertGreater(metrics.rvol_1m, 5)
+        self.assertLess(metrics.rvol_1m, 20)
+
+    def test_broad_return_is_the_median_once_enough_markets_exist(self) -> None:
+        book = MinuteBook(min_bars=2)
+        # Drop the last bar as forming. The remaining step is +2, +4 and +6 percent.
+        for market_index, step in ((1, 102.0), (2, 104.0), (3, 106.0)):
+            book.seed(
+                market_index,
+                [_bar(0, 100, 1), _bar(1, step, 1), _bar(2, step, 1), _bar(3, step, 1)],
+            )
+        series = book.broad_returns(min_markets=3)
+        self.assertAlmostEqual(series[1_700_000_000 + 60], 4.0)
+        self.assertEqual(book.broad_returns(min_markets=4), {})
 
 
 class LevelBookTest(unittest.TestCase):

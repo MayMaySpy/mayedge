@@ -62,7 +62,7 @@ import {
   setMinuteCandles,
   useLiveCandles1s,
   useLiveMinuteCandles,
-  useLiveQuotes,
+  useLiveOpenInterest,
   useLiveTopOfBook,
   useLiveAccountTrades,
 } from "@/lib/liveData";
@@ -164,6 +164,31 @@ function axisGhost(price: number, side: "buy" | "sell"): ChartOverlay {
     side,
     interactive: false,
   };
+}
+
+const TONE_STAMP_MS = 500;
+
+function toneColors(bar: CandlestickData): Pick<CandlestickData, "color" | "borderColor" | "wickColor"> | null {
+  if (!bar.color) return null;
+  return { color: bar.color, borderColor: bar.borderColor, wickColor: bar.wickColor };
+}
+
+/** Reuse a recent full stamp while the forming bar's price updates. */
+function reuseToneStamp(
+  prev: CandlestickData[] | null,
+  rawBars: CandlestickData[],
+  stampedAt: number,
+  now: number
+): CandlestickData[] | null {
+  if (!prev || prev.length === 0 || now - stampedAt >= TONE_STAMP_MS) return null;
+  if (prev.length !== rawBars.length || prev[0].time !== rawBars[0].time) return null;
+  const lastPrev = prev[prev.length - 1];
+  const lastRaw = rawBars[rawBars.length - 1];
+  if (lastPrev.time !== lastRaw.time) return null;
+  const next = prev.slice();
+  const paint = toneColors(lastPrev);
+  next[next.length - 1] = paint ? { ...lastRaw, ...paint } : lastRaw;
+  return next;
 }
 
 function stampMayRekt(bars: CandlestickData[], source: Candle[]): CandlestickData[] {
@@ -435,7 +460,6 @@ export const ChartWidget = memo(function ChartWidget({
   const fromSeconds = candleSource(bar) === "1s";
   const candles1s = useLiveCandles1s(isPrice && fromSeconds);
   const minuteCandles = useLiveMinuteCandles();
-  const quotes = useLiveQuotes();
   const top = useLiveTopOfBook();
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -465,6 +489,8 @@ export const ChartWidget = memo(function ChartWidget({
   const axisArmedRef = useRef(axisArmed);
   const volOnRef = useRef(volOn);
   const primedRef = useRef(false);
+  const toneBarsRef = useRef<CandlestickData[] | null>(null);
+  const toneStampAt = useRef(0);
   const lastMetaRef = useRef<{ first: number; time: number; len: number } | null>(null);
   const [paintGen, setPaintGen] = useState(0);
   const seriesKey = `${symbol}:${tf}`;
@@ -483,11 +509,11 @@ export const ChartWidget = memo(function ChartWidget({
       null
     );
   }, [markets, symbol]);
+  const quotedOi = useLiveOpenInterest(chartMarket?.market_index);
   const liveOi = useMemo(() => {
-    if (!chartMarket) return null;
-    const oi = quotes[chartMarket.market_index]?.open_interest ?? chartMarket.open_interest;
+    const oi = quotedOi ?? chartMarket?.open_interest ?? null;
     return oi != null && Number.isFinite(oi) && oi > 0 ? oi : null;
-  }, [chartMarket, quotes]);
+  }, [chartMarket, quotedOi]);
   const fillMarkList = useMemo(() => {
     if (!isPrice || !chartMarket) return EMPTY_FILLS;
     const rest = fillPage?.key === chartMarket.market_index ? fillPage.rows : [];
@@ -1093,6 +1119,8 @@ export const ChartWidget = memo(function ChartWidget({
     // over a 1d/4h range lock the main thread.
     seriesRef.current?.setData([]);
     volSeriesRef.current?.setData([]);
+    toneBarsRef.current = null;
+    toneStampAt.current = 0;
     chartRef.current?.timeScale().applyOptions({
       secondsVisible: showsSeconds(bar),
       rightOffset: RIGHT_OFFSET,
@@ -1127,6 +1155,8 @@ export const ChartWidget = memo(function ChartWidget({
   }, [volOn]);
 
   useEffect(() => {
+    toneBarsRef.current = null;
+    toneStampAt.current = 0;
     primedRef.current = false;
   }, [mayRektOn]);
 
@@ -1145,7 +1175,19 @@ export const ChartWidget = memo(function ChartWidget({
     }
 
     const { candles: rawBars, volume } = toSeriesData(display);
-    const bars = mayRektOn ? stampMayRekt(rawBars, display) : rawBars;
+    let bars = rawBars;
+    if (mayRektOn) {
+      const now = performance.now();
+      const reused = reuseToneStamp(toneBarsRef.current, rawBars, toneStampAt.current, now);
+      if (reused) {
+        bars = reused;
+        toneBarsRef.current = reused;
+      } else {
+        bars = stampMayRekt(rawBars, display);
+        toneBarsRef.current = bars;
+        toneStampAt.current = now;
+      }
+    }
     if (bars.length === 0) {
       series.setData([]);
       vol?.setData([]);

@@ -676,6 +676,9 @@ class LighterGateway:
     def recent_alert_board(self) -> list[dict[str, Any]]:
         return self._alerts.board()
 
+    def alert_stats(self, hours: int = 24) -> dict[str, Any]:
+        return self._alerts.outcome_stats(hours=hours)
+
     def _prune_trade_buffers(self, keep: int | None = None) -> None:
         keep_idx = keep if keep is not None else self._current_market_index
         for mi in list(self._recent_trades):
@@ -845,7 +848,14 @@ class LighterGateway:
                 rows = self._alerts.board()
                 sig = str(
                     [
-                        (r.get("market_index"), r.get("score"), r.get("setup"), r.get("direction"), r.get("move_pct"))
+                        (
+                            r.get("market_index"),
+                            r.get("score"),
+                            r.get("setup"),
+                            r.get("direction"),
+                            r.get("move_pct"),
+                            r.get("breadth"),
+                        )
                         for r in rows
                     ]
                 )

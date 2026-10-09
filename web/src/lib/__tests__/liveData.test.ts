@@ -4,6 +4,7 @@ import {
   applyBookDelta,
   applyBookSnapshot,
   applyMarketQuotes,
+  liveOpenInterest,
   clearBook,
   clearMarketQuotes,
   clearMinuteCandles,
@@ -255,6 +256,17 @@ describe("applyMarketQuotes", () => {
       [{ market_index: 1, mark_price: 100 }],
       [{ market_index: 2, mark_price: 50 }],
     ]);
+  });
+
+  it("reads one market's open interest", () => {
+    applyMarketQuotes([
+      { market_index: 1, open_interest: 50 },
+      { market_index: 2, open_interest: 80 },
+    ]);
+    expect(liveOpenInterest(1)).toBe(50);
+    expect(liveOpenInterest(2)).toBe(80);
+    expect(liveOpenInterest(3)).toBeNull();
+    expect(liveOpenInterest(null)).toBeNull();
   });
 });
 

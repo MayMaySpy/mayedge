@@ -9,7 +9,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { api } from "@/lib/api";
+import { api, type AlertStats } from "@/lib/api";
 import {
   boardLine,
   directionArrow,
@@ -18,6 +18,7 @@ import {
   eventMs,
   formatClock,
   recentEvents,
+  setupShort,
   severityBorder,
   severityText,
   toastCopy,
@@ -43,6 +44,11 @@ const LIVE_ROWS = 5;
 const TOAST_SEV = 3;
 const TOAST_MAX = 2;
 const TOAST_MAX_AGE_MS = 8_000;
+
+function hitPct(rate: number | null): string {
+  if (rate == null) return "—";
+  return `${Math.round(rate * 100)}%`;
+}
 
 const SEV_CHOICES = [
   { value: 1, label: "All" },
@@ -130,23 +136,25 @@ function AlertLineRow({
       <span className="flex min-w-0 items-baseline gap-1.5">
         <span className={cn("shrink-0 font-semibold", directionClass(line.direction))}>
           {arrow && <span className="mr-0.5 text-xs">{arrow}</span>}
-          {pairLabel(line.symbol)}
+          {line.name}
         </span>
         <span className="truncate text-muted-foreground">{line.label}</span>
       </span>
       <span className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-label={`Mute ${pairLabel(line.symbol)}`}
-          title={`Mute ${pairLabel(line.symbol)}`}
-          className="hidden text-muted-foreground group-focus-within:inline-flex group-hover:inline-flex hover:text-foreground"
-          onClick={(e) => {
-            e.stopPropagation();
-            onMute(line.symbol);
-          }}
-        >
-          <BellOff className="size-3" />
-        </button>
+        {line.mutable && (
+          <button
+            type="button"
+            aria-label={`Mute ${line.name}`}
+            title={`Mute ${line.name}`}
+            className="hidden text-muted-foreground group-focus-within:inline-flex group-hover:inline-flex hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              onMute(line.symbol);
+            }}
+          >
+            <BellOff className="size-3" />
+          </button>
+        )}
         {line.score != null && (
           <span className={cn("font-mono tabular-nums", severityText(line.severity))}>
             {line.score.toFixed(1)}
@@ -182,6 +190,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
   const [toneTfs, setToneTfs] = useState<readonly string[]>(DEFAULT_TONE_TIMEFRAMES);
   const [toneCap, setToneCap] = useState(TONE_TIMEFRAME_CAP);
   const [toneChoices, setToneChoices] = useState<readonly string[]>(TONE_TIMEFRAME_CHOICES);
+  const [stats, setStats] = useState<AlertStats | null>(null);
   const seenToastRef = useRef<Set<string>>(new Set());
   const mountedAtRef = useRef(0);
 
@@ -204,6 +213,24 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
     const shown = all.filter((e) => e.severity >= minSev && isShown(e.symbol));
     return recentEvents(shown, liveMarkets, boardAt).slice(0, MAX_ROWS);
   }, [all, live, minSev, isShown]);
+
+  useEffect(() => {
+    let cancel = false;
+    const load = () => {
+      api
+        .alertStats()
+        .then((row) => {
+          if (!cancel) setStats(row);
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = window.setInterval(load, 60_000);
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     let cancel = false;
@@ -353,6 +380,37 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
                   })}
                 </div>
               </Field>
+              {stats && (
+                <Field>
+                  <FieldLabel>Follow-through (24h)</FieldLabel>
+                  {stats.setups.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No resolved alerts yet.</p>
+                  ) : (
+                    <div className="flex flex-col gap-0.5 font-mono text-sm">
+                      <div className="grid grid-cols-[minmax(0,1fr)_1.25rem_2rem_2rem] gap-x-1 text-muted-foreground">
+                        <span />
+                        <span className="text-right">n</span>
+                        <span className="text-right">5m</span>
+                        <span className="text-right">15m</span>
+                      </div>
+                      {stats.setups.slice(0, 8).map((row) => (
+                        <div
+                          key={row.setup}
+                          title={`5m excess ${row.avg_ex_5m.toFixed(2)}%${
+                            row.avg_ex_15m == null ? "" : ` · 15m ${row.avg_ex_15m.toFixed(2)}%`
+                          }`}
+                          className="grid grid-cols-[minmax(0,1fr)_1.25rem_2rem_2rem] gap-x-1"
+                        >
+                          <span className="truncate">{setupShort(row.setup)}</span>
+                          <span className="text-right text-muted-foreground">{row.n}</span>
+                          <span className="text-right">{hitPct(row.hit_5m)}</span>
+                          <span className="text-right">{hitPct(row.hit_15m)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Field>
+              )}
             </FieldGroup>
           </FilterPopover>
         }

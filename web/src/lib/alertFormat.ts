@@ -1,5 +1,6 @@
 import type { AlertBoardRow, AlertEvent, AlertFactorRow, AlertKind } from "@/lib/api";
 import { formatUsdCompact } from "@/lib/utils";
+import { pairLabel } from "@/lib/venuePair";
 
 const SETUP: Record<string, { short: string; long: string }> = {
   breakout_longs: { short: "Breakout", long: "Breakout: longs opening" },
@@ -8,6 +9,10 @@ const SETUP: Record<string, { short: string; long: string }> = {
   long_flush: { short: "Long flush", long: "Long flush: longs exiting" },
   pump: { short: "Sharp up", long: "Sharp move up" },
   dump: { short: "Sharp down", long: "Sharp move down" },
+  broad_up: { short: "Broad up", long: "Broad move up" },
+  broad_down: { short: "Broad down", long: "Broad move down" },
+  holds_up: { short: "Holds up", long: "Holds up: stronger than the market" },
+  lags: { short: "Lags", long: "Lags: weaker than the market" },
   vol_surge: { short: "Vol surge", long: "Volume surge" },
   absorption: { short: "Absorption", long: "Absorption: heavy volume, price flat" },
   crowded_longs: { short: "Crowded longs", long: "Crowded longs: premium or funding stretched" },
@@ -44,8 +49,16 @@ function signed(v: number, digits: number): string {
 export function factorText(f: AlertFactorRow): string {
   const v = f.value;
   switch (f.kind) {
-    case "price":
-      return `Px ${signed(v, 2)}%`;
+    case "price": {
+      const px = `Px ${signed(v, 2)}%`;
+      return f.excess == null ? px : `${px} · ex ${signed(f.excess, 2)}%`;
+    }
+    case "broad": {
+      const side = f.direction === "up" || f.direction === "down" ? f.direction : "";
+      const tail = [f.window, side].filter(Boolean).join(" ");
+      const board = `Board ${signed(v, 1)}%`;
+      return tail ? `${board} · ${tail}` : board;
+    }
     case "volume":
       return `Vol ${v.toFixed(1)}×`;
     case "oi":
@@ -112,9 +125,17 @@ export function formatClock(ms: number): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+export function alertName(symbol: string, marketIndex?: number): string {
+  if (marketIndex === -1) return "Market";
+  return pairLabel(symbol);
+}
+
 export type AlertLine = {
   key: string;
   symbol: string;
+  name: string;
+  /** Broad move uses BTC only so a click opens that chart. Muting it would hide BTC. */
+  mutable: boolean;
   direction: string;
   severity: number;
   label: string;
@@ -126,11 +147,14 @@ export type AlertLine = {
 
 export function eventLine(ev: AlertEvent): AlertLine {
   const atMs = alertStartMs(ev);
+  const name = alertName(ev.symbol, ev.market_index);
   if (ev.kind === "signal") {
     const factors = ev.factors ?? [];
     return {
       key: ev.id,
       symbol: ev.symbol,
+      name,
+      mutable: ev.market_index !== -1,
       direction: ev.direction,
       severity: ev.severity,
       label: setupShort(ev.setup),
@@ -138,7 +162,7 @@ export function eventLine(ev: AlertEvent): AlertLine {
       score: ev.score ?? null,
       atMs,
       tooltip: [
-        `${ev.symbol} · ${setupLong(ev.setup)}`,
+        `${name} · ${setupLong(ev.setup)}`,
         ...factors.map(factorDetail),
         `Started ${new Date(atMs).toLocaleTimeString()}`,
       ].join("\n"),
@@ -148,6 +172,8 @@ export function eventLine(ev: AlertEvent): AlertLine {
   return {
     key: ev.id,
     symbol: ev.symbol,
+    name,
+    mutable: ev.market_index !== -1,
     direction: ev.direction,
     severity: ev.severity,
     label,
@@ -160,21 +186,23 @@ export function eventLine(ev: AlertEvent): AlertLine {
 
 export function boardLine(row: AlertBoardRow): AlertLine {
   const parts = [factorSummary(row.factors)];
-  if (row.move_pct != null && !row.factors.some((f) => f.kind === "price")) {
+  const priced = row.factors.some((f) => f.kind === "price" || f.kind === "broad");
+  if (row.move_pct != null && !priced) {
     parts.push(`5m ${signed(row.move_pct, 2)}%`);
   }
+  const name = alertName(row.symbol, row.market_index);
   return {
     key: `live-${row.market_index}`,
     symbol: row.symbol,
+    name,
+    mutable: row.market_index !== -1,
     direction: row.direction,
     severity: row.severity ?? 1,
     label: setupShort(row.setup),
     detail: parts.filter(Boolean).join(" · "),
     score: row.score,
     atMs: null,
-    tooltip: [`${row.symbol} · ${setupLong(row.setup)}`, ...row.factors.map(factorDetail)].join(
-      "\n"
-    ),
+    tooltip: [`${name} · ${setupLong(row.setup)}`, ...row.factors.map(factorDetail)].join("\n"),
   };
 }
 

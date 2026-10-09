@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import type {
   Account,
   AccountTrade,
@@ -349,6 +349,26 @@ export function subscribeQuoteDelta(onRows: (rows: MarketQuote[]) => void) {
 
 export function useLiveQuotes() {
   return useSyncExternalStore(subscribeMarketQuotes, getMarketQuotes, getMarketQuotes);
+}
+
+/** One market's open interest. Other markets' quotes do not render the subscriber. */
+export function liveOpenInterest(marketIndex: number | null | undefined): number | null {
+  if (marketIndex == null) return null;
+  const oi = quotes[marketIndex]?.open_interest;
+  return oi != null && Number.isFinite(oi) ? oi : null;
+}
+
+export function useLiveOpenInterest(marketIndex: number | null | undefined): number | null {
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      subscribeQuoteDelta((rows) => {
+        if (marketIndex == null) return;
+        if (rows.some((row) => row.market_index === marketIndex)) onChange();
+      }),
+    [marketIndex]
+  );
+  const get = useCallback(() => liveOpenInterest(marketIndex), [marketIndex]);
+  return useSyncExternalStore(subscribe, get, get);
 }
 
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from mayedge.lighter.account import AccountService
 from mayedge.lighter.equity import portfolio_margin_usd, trade_available_usd
-from mayedge.lighter.models import AccountSummary
+from mayedge.lighter.models import AccountSummary, Position
 from mayedge.lighter.parse import merge_account_assets, public_assets
 
 
@@ -425,6 +425,56 @@ class TouchMarksAssetsTests(TestCase):
         self.assertEqual(len(acc), 1)
         self.assertAlmostEqual(float(acc[0]["assets"][0]["index_price"]), 2464.57)
         self.assertAlmostEqual(float(acc[0]["assets"][0]["usd"]), 2464.57)
+
+    def test_touch_marks_skips_when_the_held_index_is_unchanged(self) -> None:
+        svc = AccountService()
+        svc._assets = [{"symbol": "ETH", "balance": "0", "margin_balance": "1.0"}]
+        svc._asset_meta = {"ETH": {"index_price": 2000.0, "loan_to_value": 0.7}}
+        gw = MagicMock()
+        gw.get_market_by_index.return_value = None
+        mkt = MagicMock()
+        mkt.index_price = 2464.57
+        gw.get_market.return_value = mkt
+        captured: list[dict] = []
+        gw.broadcast.side_effect = captured.append
+        with patch("mayedge.lighter.account.gateway", gw):
+            svc.touch_marks()
+            captured.clear()
+            svc.touch_marks()
+        self.assertEqual(captured, [])
+
+    def test_touch_marks_republishes_when_a_held_mark_moves(self) -> None:
+        svc = AccountService()
+        svc._summary.positions = [
+            Position(
+                market_index=1,
+                symbol="ETH",
+                size="1",
+                entry_price="100",
+                mark_price="100",
+                unrealized_pnl="0",
+                leverage=5,
+                margin_mode="cross",
+            )
+        ]
+        gw = MagicMock()
+        mkt = MagicMock()
+        mkt.mark_price = 100.0
+        mkt.last_trade_price = None
+        gw.get_market_by_index.return_value = mkt
+        gw.get_market.return_value = None
+        captured: list[dict] = []
+        gw.broadcast.side_effect = captured.append
+        with patch("mayedge.lighter.account.gateway", gw):
+            svc.touch_marks()
+            captured.clear()
+            svc.touch_marks()
+            self.assertEqual(captured, [])
+            mkt.mark_price = 101.0
+            svc.touch_marks()
+        acc = [m for m in captured if m.get("type") == "account"]
+        self.assertEqual(len(acc), 1)
+        self.assertEqual(acc[0]["positions"][0]["mark_price"], "101.0")
 
     def test_touch_marks_stays_quiet_without_positions_or_holdings(self) -> None:
         svc = AccountService()

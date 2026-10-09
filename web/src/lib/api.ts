@@ -305,6 +305,8 @@ export interface AlertFactorRow {
   unit: string;
   score?: number;
   window?: string;
+  /** Move left after subtracting beta times the Broad move. */
+  excess?: number;
 }
 
 export interface AlertBoardRow {
@@ -317,7 +319,23 @@ export interface AlertBoardRow {
   factors: AlertFactorRow[];
   /** 5m price move, sent even when price itself is not a factor. */
   move_pct?: number | null;
+  /** Names moving with the Broad move, and names in the sample. */
+  breadth?: [number, number];
   ts: number;
+}
+
+export interface AlertSetupStats {
+  setup: string;
+  n: number;
+  hit_5m: number;
+  hit_15m: number | null;
+  avg_ex_5m: number;
+  avg_ex_15m: number | null;
+}
+
+export interface AlertStats {
+  hours: number;
+  setups: AlertSetupStats[];
 }
 
 export interface ToneTimeframes {
@@ -390,6 +408,7 @@ export const api = {
     return request<AlertEvent[]>(`/alerts${qs ? `?${qs}` : ""}`);
   },
   alertBoard: () => request<AlertBoardRow[]>("/alerts/board"),
+  alertStats: (hours = 24) => request<AlertStats>(`/alerts/stats?hours=${hours}`),
   toneTimeframes: () => request<ToneTimeframes>("/alerts/timeframes"),
   setToneTimeframes: (timeframes: string[]) =>
     request<ToneTimeframes>("/alerts/timeframes", {

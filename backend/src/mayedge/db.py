@@ -132,6 +132,22 @@ CREATE TABLE IF NOT EXISTS oi_days (
     oi_close REAL NOT NULL,
     PRIMARY KEY (day_index, market_index)
 );
+
+CREATE TABLE IF NOT EXISTS alert_outcomes (
+    episode_id TEXT NOT NULL,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    setup TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    horizon_min INTEGER NOT NULL,
+    opened_at INTEGER NOT NULL,
+    raw_pct REAL NOT NULL,
+    excess_pct REAL NOT NULL,
+    hit INTEGER NOT NULL,
+    PRIMARY KEY (episode_id, horizon_min)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_outcomes_opened ON alert_outcomes(opened_at);
 """
 
 _LIQ_TABLE = """
@@ -165,7 +181,7 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
 
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _meta_int(
@@ -274,8 +290,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
             );
             """
         )
+    if version < 7:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS alert_outcomes (
+                episode_id TEXT NOT NULL,
+                market_index INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                setup TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                horizon_min INTEGER NOT NULL,
+                opened_at INTEGER NOT NULL,
+                raw_pct REAL NOT NULL,
+                excess_pct REAL NOT NULL,
+                hit INTEGER NOT NULL,
+                PRIMARY KEY (episode_id, horizon_min)
+            );
+            CREATE INDEX IF NOT EXISTS idx_alert_outcomes_opened ON alert_outcomes(opened_at);
+            """
+        )
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
+
 
 def _connect() -> sqlite3.Connection:
     global _conn
