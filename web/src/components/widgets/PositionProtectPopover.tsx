@@ -140,6 +140,8 @@ export function PositionProtectPopover({
     try {
       await onPlace(body);
       setOpen(false);
+    } catch {
+      // The caller has already reported it. Stay open so the entry is not lost.
     } finally {
       setSending(false);
     }
