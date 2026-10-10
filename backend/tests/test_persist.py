@@ -88,3 +88,64 @@ class PersistNoVenueTests(unittest.TestCase):
         self.assertEqual(rows[0]["algo_id"], "CH-0001")
         history = store.load_history(10, algo_type="chase-iceberg")
         self.assertEqual(history, [])
+
+    def _run(self, **over: object) -> dict[str, object]:
+        return {
+            "algo_id": "CH-0001",
+            "status": "running",
+            "market_index": 1,
+            "symbol": "ETH",
+            "side": "buy",
+            "qty": "10",
+            "remaining": "10",
+            "filled": "0",
+            "created_at": 1,
+            **over,
+        }
+
+    def _write(self, snap: dict[str, object], *, archived: bool = False) -> None:
+        store.upsert_run(
+            snap,
+            next_clip=1,
+            next_fill=1,
+            trade_ids=set(),
+            trade_qty_by_clip={},
+            clips=[],
+            fills=[],
+            archived=archived,
+        )
+
+    def _updated_at(self) -> int:
+        with store._lock:
+            row = store._connect().execute("SELECT updated_at FROM algo_runs").fetchone()
+        return int(row["updated_at"])
+
+    def test_an_unchanged_run_is_not_written_again(self) -> None:
+        with patch("mayedge.persist_algo.time.time", return_value=1000.0):
+            self._write(self._run())
+        with patch("mayedge.persist_algo.time.time", return_value=2000.0):
+            self._write(self._run())
+        self.assertEqual(self._updated_at(), 1_000_000)
+
+    def test_a_changed_run_is_written(self) -> None:
+        with patch("mayedge.persist_algo.time.time", return_value=1000.0):
+            self._write(self._run())
+        with patch("mayedge.persist_algo.time.time", return_value=2000.0):
+            self._write(self._run(remaining="9", filled="1"))
+        self.assertEqual(self._updated_at(), 2_000_000)
+        self.assertEqual(store.load_active_runs()[0]["remaining"], "9")
+
+    def test_archiving_an_unchanged_run_is_written(self) -> None:
+        self._write(self._run(status="stopped"))
+        self._write(self._run(status="stopped"), archived=True)
+        self.assertEqual(len(store.load_history(10)), 1)
+        with store._lock:
+            row = store._connect().execute("SELECT archived FROM algo_runs").fetchone()
+        self.assertEqual(row["archived"], 1)
+
+    def test_a_reopened_database_is_written_even_if_unchanged(self) -> None:
+        self._write(self._run())
+        store.close_db()
+        Path(settings.db_path).unlink()
+        self._write(self._run())
+        self.assertEqual(len(store.load_active_runs()), 1)

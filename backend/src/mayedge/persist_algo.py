@@ -14,6 +14,11 @@ from mayedge.numbers import fmt_decimal
 
 logger = logging.getLogger(__name__)
 
+# What each live run last wrote, on which connection. Books publish on every book
+# tick; a run that has not changed since its last write is not written again.
+_written: dict[str, tuple[Any, ...]] = {}
+_written_conn: sqlite3.Connection | None = None
+
 
 def upsert_run(
     snapshot: dict[str, Any],
@@ -30,8 +35,40 @@ def upsert_run(
     if not algo_id:
         return
     updated_at = int(time.time() * 1000)
+    run_row = (
+        algo_id,
+        snapshot.get("venue") or "lighter",
+        snapshot.get("algo_type") or snapshot.get("id") or "chase-iceberg",
+        json.dumps(snapshot.get("params_json") or {}),
+        snapshot.get("status") or "stopped",
+        int(snapshot.get("market_index") or 0),
+        snapshot.get("symbol") or "",
+        1 if snapshot.get("reduce_only") else 0,
+        snapshot.get("side"),
+        snapshot.get("qty"),
+        snapshot.get("display_qty"),
+        snapshot.get("offset_bps"),
+        snapshot.get("price_floor"),
+        snapshot.get("price_ceiling"),
+        snapshot.get("remaining"),
+        snapshot.get("filled"),
+        snapshot.get("quote_action"),
+        snapshot.get("reason"),
+        snapshot.get("rest_price"),
+        snapshot.get("rest_qty"),
+        snapshot.get("error"),
+        int(snapshot.get("created_at") or 0),
+    )
+    tail_row = (1 if archived else 0, next_clip, next_fill, json.dumps(trade_qty_by_clip))
+    state = (run_row, tail_row, repr(clips), repr(fills), frozenset(trade_ids))
+    global _written_conn
     with _lock:
         conn = _connect()
+        if conn is not _written_conn:
+            _written.clear()
+            _written_conn = conn
+        if _written.get(algo_id) == state:
+            return
         conn.execute(
             """
             INSERT INTO algo_runs(
@@ -75,35 +112,7 @@ def upsert_run(
                 next_fill=excluded.next_fill,
                 trade_qty_by_clip=excluded.trade_qty_by_clip
             """,
-            (
-                algo_id,
-                snapshot.get("venue") or "lighter",
-                snapshot.get("algo_type") or snapshot.get("id") or "chase-iceberg",
-                json.dumps(snapshot.get("params_json") or {}),
-                snapshot.get("status") or "stopped",
-                int(snapshot.get("market_index") or 0),
-                snapshot.get("symbol") or "",
-                1 if snapshot.get("reduce_only") else 0,
-                snapshot.get("side"),
-                snapshot.get("qty"),
-                snapshot.get("display_qty"),
-                snapshot.get("offset_bps"),
-                snapshot.get("price_floor"),
-                snapshot.get("price_ceiling"),
-                snapshot.get("remaining"),
-                snapshot.get("filled"),
-                snapshot.get("quote_action"),
-                snapshot.get("reason"),
-                snapshot.get("rest_price"),
-                snapshot.get("rest_qty"),
-                snapshot.get("error"),
-                int(snapshot.get("created_at") or 0),
-                updated_at,
-                1 if archived else 0,
-                next_clip,
-                next_fill,
-                json.dumps(trade_qty_by_clip),
-            ),
+            (*run_row, updated_at, *tail_row),
         )
         conn.execute("DELETE FROM algo_clips WHERE algo_id = ?", (algo_id,))
         conn.execute("DELETE FROM algo_fills WHERE algo_id = ?", (algo_id,))
@@ -158,6 +167,11 @@ def upsert_run(
                 (algo_id, int(tid)),
             )
         conn.commit()
+        # An archived run is terminal and will not be written again.
+        if archived:
+            _written.pop(algo_id, None)
+        else:
+            _written[algo_id] = state
 
 
 def _row_to_run(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
