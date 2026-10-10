@@ -279,6 +279,21 @@ const emptyQuotes: Record<number, MarketQuote> = {};
 let quotes: Record<number, MarketQuote> = emptyQuotes;
 const quoteDeltaListeners = new Set<(rows: MarketQuote[]) => void>();
 
+/** The socket's markets are a snapshot from when it connected, so a polled row wins. */
+export function mergeMarkets(snapshot: readonly Market[], polled: readonly Market[]): Market[] {
+  const byIndex = new Map<number, Market>();
+  for (const m of snapshot) {
+    if (m?.market_index == null) continue;
+    byIndex.set(m.market_index, m);
+  }
+  for (const m of polled) {
+    if (m?.market_index == null) continue;
+    const prev = byIndex.get(m.market_index);
+    byIndex.set(m.market_index, prev ? { ...prev, ...m } : m);
+  }
+  return [...byIndex.values()];
+}
+
 export function overlayQuote(m: Market, q?: MarketQuote | null): Market {
   if (!q) return m;
   return {

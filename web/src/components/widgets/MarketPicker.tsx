@@ -9,6 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { uniqueSymbolMarkets } from "@/lib/algos";
 import type { Market } from "@/lib/api";
 import { useFavorites } from "@/lib/favorites";
+import { overlayQuote, useLiveQuotes } from "@/lib/liveData";
 import {
   filterPickerMarkets,
   formatFundingPct,
@@ -97,8 +98,10 @@ export const MarketPicker = memo(function MarketPicker({
     }
   };
 
+  const quotes = useLiveQuotes();
   const universe = useMemo(() => uniqueSymbolMarkets(markets), [markets]);
-  const current = universe.find((m) => m.symbol === symbol) ?? null;
+  const selected = universe.find((m) => m.symbol === symbol) ?? null;
+  const current = selected ? overlayQuote(selected, quotes[selected.market_index]) : null;
   const change = current?.change_24h;
 
   const rows = useMemo(() => {

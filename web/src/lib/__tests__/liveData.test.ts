@@ -16,6 +16,7 @@ import {
   getMinuteCandles,
   getTopOfBook,
   isBookSynced,
+  mergeMarkets,
   overlayQuote,
   prependTrades,
   rollLiveCandles,
@@ -156,6 +157,26 @@ describe("overlayQuote", () => {
 
   it("keeps snapshot fields when the quote omits them", () => {
     expect(overlayQuote(m, { market_index: 1, mark_price: 2000 }).open_interest).toBe(1e6);
+  });
+});
+
+describe("mergeMarkets", () => {
+  const row = (market_index: number, symbol: string, change_24h: number) =>
+    ({ market_index, symbol, price_decimals: 5, size_decimals: 1, change_24h }) as Market;
+
+  it("lets a polled row replace the snapshot the socket connected with", () => {
+    const merged = mergeMarkets([row(104, "STRK", -1.38)], [row(104, "STRK", 17.45)]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].change_24h).toBe(17.45);
+  });
+
+  it("keeps a market only one side has", () => {
+    const merged = mergeMarkets([row(1, "BTC", 0.3)], [row(104, "STRK", 17.45)]);
+    expect(merged.map((m) => m.symbol)).toEqual(["BTC", "STRK"]);
+  });
+
+  it("shows the snapshot until the first poll lands", () => {
+    expect(mergeMarkets([row(104, "STRK", -1.38)], [])[0].change_24h).toBe(-1.38);
   });
 });
 

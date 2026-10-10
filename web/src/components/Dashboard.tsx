@@ -21,6 +21,7 @@ import { useMarketWs } from "@/hooks/useMarketWs";
 import { useDeskRoute } from "@/lib/deskRoute";
 import { useDeskWatchBridge } from "@/lib/deskBridge";
 import {
+  mergeMarkets,
   setAlgo,
   useLiveAccount,
   useLiveAlgos,
@@ -352,19 +353,10 @@ export function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  const markets = useMemo(() => {
-    const byIndex = new Map<number, Market>();
-    for (const m of restMarkets) {
-      if (m?.market_index == null) continue;
-      byIndex.set(m.market_index, m);
-    }
-    for (const m of ws.markets) {
-      if (m?.market_index == null) continue;
-      const prev = byIndex.get(m.market_index);
-      byIndex.set(m.market_index, prev ? { ...prev, ...m } : m);
-    }
-    return [...byIndex.values()];
-  }, [ws.markets, restMarkets]);
+  const markets = useMemo(
+    () => mergeMarkets(ws.markets, restMarkets),
+    [ws.markets, restMarkets]
+  );
 
   useDeskWatchBridge({ markets, symbol, onSymbol: setSymbol });
 
