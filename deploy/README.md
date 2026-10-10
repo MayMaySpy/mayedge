@@ -32,6 +32,8 @@ On another tailnet device, use the **Serve HTTPS URL**, not `http://100.x:14200`
 
 The UI, `/api`, and `/ws` are the same origin. The browser opens `wss://<magicdns>/ws` when you load the Serve URL over HTTPS. No extra CORS or proxy.
 
+The desk answers only to loopback names and `*.ts.net`. To reach it under another host name, add it to `ALLOWED_HOSTS` in `backend/.env` (JSON list), or every request gets `400 Host not allowed`.
+
 ## Once on the VPS
 
 1. Docker Engine + Compose plugin.

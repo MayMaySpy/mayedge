@@ -4,7 +4,7 @@ Personal perp trading desk — Python backend + React frontend. Lighter only.
 
 ![Mayedge desk](docs/ui.png)
 
-Personal software, not a product. There is no login: anyone who can reach the HTTP port can trade. Not financial advice.
+Personal software, not a product. There is no login: anyone who can reach the HTTP port can trade. The desk only answers to its own page: other sites open in your browser are refused by Host and Origin. Not financial advice.
 
 ## Features
 

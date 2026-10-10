@@ -39,6 +39,8 @@ class Settings(BaseSettings):
         "http://localhost:14200",
         "http://127.0.0.1:14200",
     ]
+    # Host names the desk answers to. "*.ts.net" is the Tailscale Serve name.
+    allowed_hosts: list[str] = ["localhost", "127.0.0.1", "[::1]", "*.ts.net"]
 
     @property
     def base_url(self) -> str:

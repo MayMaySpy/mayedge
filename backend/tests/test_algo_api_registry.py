@@ -15,7 +15,7 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_unknown_algo_type_404(self, *_mocks) -> None:
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             res = await client.post("/api/algos/unknown-algo/start", json={"market_index": 1})
         self.assertEqual(res.status_code, 404)
 
@@ -42,7 +42,7 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
             "price_floor": "90",
             "price_ceiling": "110",
         }
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             res = await client.post("/api/algos/chase-iceberg/start", json=body)
         self.assertEqual(res.status_code, 200)
         get_book.assert_called_with("chase-iceberg")
@@ -61,7 +61,7 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
         get_book.return_value = book
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             res = await client.post(
                 "/api/algos/chase-iceberg/start",
                 json={"market_index": 1, "side": "buy", "qty": "1", "display_qty": "0.1"},
@@ -79,7 +79,7 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
         get_book.return_value = book
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             res = await client.get("/api/algos/chase-iceberg")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["id"], "chase-iceberg")

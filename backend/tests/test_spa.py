@@ -25,7 +25,7 @@ class SpaMountTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(settings, "web_root", str(root)):
                 app = create_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(transport=transport, base_url="http://localhost") as client:
                 home = await client.get("/")
                 nested = await client.get("/some/client/route")
                 asset = await client.get("/assets/app.js")

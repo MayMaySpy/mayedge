@@ -244,7 +244,7 @@ class ToneTimeframeApiTest(unittest.IsolatedAsyncioTestCase):
     async def test_get_defaults_and_put_rejects_a_third(self, *_mocks: object) -> None:
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             got = await client.get("/api/alerts/timeframes")
             self.assertEqual(got.status_code, 200)
             body = got.json()

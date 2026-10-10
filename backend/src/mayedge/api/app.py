@@ -6,12 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from mayedge import db as store
 from mayedge import desk, feed_health
+from mayedge.api.guard import BrowserGuard
 from mayedge.api.schemas import (
     AlgoStopRequest,
     AmendOrderRequest,
@@ -114,6 +115,22 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last, so it runs first.
+    app.add_middleware(
+        BrowserGuard,
+        allowed_hosts=settings.allowed_hosts,
+        allowed_origins=settings.cors_origins,
+    )
+
+    @app.exception_handler(VenueBlocked)
+    async def _venue_blocked(_request: Request, exc: VenueBlocked) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+    def _market_index(symbol: str) -> int:
+        try:
+            return gateway.resolve_market_index(symbol)
+        except ValueError as e:
+            raise HTTPException(404, "Market not found") from e
 
     def _require_trading() -> None:
         if not order_service.enabled:
@@ -240,7 +257,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/candles/{symbol}")
     async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
-        idx = gateway.resolve_market_index(symbol)
+        idx = _market_index(symbol)
         cap = 3600 if resolution == "1s" else 500
         n = min(max(int(count), 1), cap)
         candles = await gateway.get_candles(idx, resolution, n)
@@ -258,7 +275,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/markets/{symbol}/activate")
     async def activate_market(symbol: str) -> dict[str, str]:
-        idx = gateway.resolve_market_index(symbol)
+        idx = _market_index(symbol)
         await gateway.set_active_market(idx)
         return {"status": "ok", "market_index": str(idx)}
 
