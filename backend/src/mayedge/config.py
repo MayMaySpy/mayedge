@@ -20,7 +20,13 @@ NETWORK_WS = {
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # An empty value in .env means "not set", so the example file boots as shipped.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
 
     lighter_network: LighterNetwork = LighterNetwork.TESTNET
     lighter_account_index: int | None = None

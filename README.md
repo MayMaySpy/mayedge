@@ -37,7 +37,7 @@ make check
 
 Compose publishes `127.0.0.1:14200` (not `0.0.0.0`). Do not Funnel. Do not expose `:14200` on the public NIC.
 
-**Local dev:** `uv run mayedge` binds `127.0.0.1:8000`; Vite proxies `/api` and `/ws`. Or `make up` for the same Docker image as production.
+**Local dev:** `uv run mayedge` binds `127.0.0.1:8000`. Vite proxies `/api` and `/ws` to the Docker port `:14200` unless `MAYEDGE_BACKEND` says otherwise. Or `make up` for the same Docker image as production.
 
 ## Quick start (local dev)
 
@@ -58,8 +58,10 @@ API runs at `http://127.0.0.1:8000`. Public market data works without credential
 ```bash
 cd web
 npm install
-npm run dev
+MAYEDGE_BACKEND=http://127.0.0.1:8000 npm run dev
 ```
+
+Drop `MAYEDGE_BACKEND` when the backend is the Docker one from `make up` (`:14200`).
 
 Open `http://localhost:5173`.
 

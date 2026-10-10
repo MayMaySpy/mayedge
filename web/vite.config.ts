@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+// Docker publishes the desk on :14200. `uv run mayedge` binds :8000 — point here with
+// MAYEDGE_BACKEND=http://127.0.0.1:8000 npm run dev
+const backend = process.env.MAYEDGE_BACKEND || "http://127.0.0.1:14200";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -16,9 +19,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:14200",
+      "/api": backend,
       "/ws": {
-        target: "http://127.0.0.1:14200",
+        target: backend,
         changeOrigin: true,
         ws: true,
         rewriteWsOrigin: true,

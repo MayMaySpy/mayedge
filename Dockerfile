@@ -15,11 +15,15 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv \
     && mkdir -p /app/data
 
+# Install exactly what uv.lock pins, the same set CI tests against.
 COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+RUN uv sync --frozen --no-dev --no-install-project --no-cache
+
 COPY backend/src ./src
 COPY backend/config ./config
+RUN uv sync --frozen --no-dev --no-editable --no-cache
 
-RUN uv pip install --system --no-cache .
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY --from=web /web/dist /app/web
 
