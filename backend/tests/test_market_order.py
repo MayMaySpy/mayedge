@@ -234,6 +234,106 @@ class OrderCapRejectTests(IsolatedAsyncioTestCase):
         self.assertEqual(str(ctx.exception), "Per-market order cap reached")
 
 
+class NotionalCapPricingTests(IsolatedAsyncioTestCase):
+    def _svc(self) -> OrderService:
+        svc = OrderService()
+        signer = MagicMock()
+        signer.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL = 0
+        signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1
+        signer.ORDER_TIME_IN_FORCE_POST_ONLY = 2
+        signer.ORDER_TYPE_LIMIT = 0
+        signer.DEFAULT_28_DAY_ORDER_EXPIRY = 0
+        ok = (None, SimpleNamespace(code=200, tx_hash="0xok"), None)
+        signer.create_order = AsyncMock(return_value=ok)
+        signer.modify_order = AsyncMock(return_value=ok)
+        svc._signer = signer
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+        return svc
+
+    async def test_sell_priced_under_the_market_is_capped_at_the_market(self) -> None:
+        svc = self._svc()
+        with (
+            patch.object(settings, "max_order_notional", 500.0),
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            # 10 ETH at a typo'd $10 is $100 on paper and $1,000 at the $100 market.
+            await svc.create_limit_order(1, "sell", "10", "10")
+        self.assertIn("exceeds limit", str(ctx.exception))
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.create_order.assert_not_called()
+
+    async def test_buy_resting_under_the_market_is_capped_at_its_limit(self) -> None:
+        svc = self._svc()
+        with (
+            patch.object(settings, "max_order_notional", 500.0),
+            patch.object(svc, "_market_meta", return_value=_eth()),
+        ):
+            out = await svc.create_limit_order(1, "buy", "10", "10")
+        self.assertEqual(out["tx_hash"], "0xok")
+
+    async def test_sell_above_the_market_is_capped_at_its_limit(self) -> None:
+        svc = self._svc()
+        with (
+            patch.object(settings, "max_order_notional", 500.0),
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            self.assertRaises(ValueError),
+        ):
+            await svc.create_limit_order(1, "sell", "4", "150")
+
+    async def test_amending_a_sell_ticket_under_the_market_is_capped(self) -> None:
+        from mayedge.lighter.models import OpenOrder
+
+        svc = self._svc()
+        live = OpenOrder(
+            order_index=77,
+            client_order_index=1_000_000_009,
+            market_index=1,
+            symbol="ETH",
+            side="sell",
+            price="120",
+            size="10",
+            remaining="10",
+            order_type="limit",
+            reduce_only=False,
+        )
+        with (
+            patch.object(settings, "max_order_notional", 500.0),
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order", return_value=live
+            ),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            await svc.amend_ticket(1, 77, "10")
+        self.assertIn("exceeds limit", str(ctx.exception))
+
+
+class TimeInForceTests(IsolatedAsyncioTestCase):
+    async def test_unknown_time_in_force_is_refused_not_rested(self) -> None:
+        svc = OrderService()
+        svc._signer = MagicMock()
+        svc._signer.create_order = AsyncMock()
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            await svc.create_limit_order(1, "buy", "1", "100", time_in_force="ioc ")
+        self.assertIn("time_in_force", str(ctx.exception))
+        svc._signer.create_order.assert_not_called()
+
+    def test_request_schema_refuses_an_unknown_time_in_force(self) -> None:
+        from pydantic import ValidationError
+
+        from mayedge.api.schemas import LimitOrderRequest
+
+        base = {"market_index": 1, "side": "buy", "size": "1", "price": "100"}
+        self.assertEqual(LimitOrderRequest(**base).time_in_force, "gtt")
+        with self.assertRaises(ValidationError):
+            LimitOrderRequest.model_validate({**base, "time_in_force": "gtc"})
+
+
 class AccountRestCooldownTests(IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         from mayedge.lighter.budget import budget

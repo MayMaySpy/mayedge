@@ -283,6 +283,42 @@ describe("ticketBlockReason", () => {
     expect(ticketBlockReason({ ...base, sizeNum: 0 })).toBe("Enter size");
   });
 
+  it("blocks a usd-sized sell priced far under the bid", () => {
+    // $1,000 at a typo'd $10 is 100 ETH, which sells for $10,000 at the $100 bid.
+    const typo = {
+      ...base,
+      kind: "limit" as const,
+      sizeUnit: "usd" as const,
+      sizeRaw: "1000",
+      sizeNum: 100,
+      maxSize: 1000,
+      workingPrice: 10,
+      price: "10",
+      sellBid: 100,
+    };
+    expect(ticketBlockReason(typo)).toBe("Price far below bid — size in ETH");
+    // The Buy button never passes a bid: a low buy just rests.
+    expect(ticketBlockReason({ ...typo, sellBid: undefined })).toBeNull();
+    // Sized in ETH, the price does not change what is sold.
+    expect(ticketBlockReason({ ...typo, sizeUnit: "base", sizeRaw: "1", sizeNum: 1 })).toBeNull();
+  });
+
+  it("lets a usd-sized sell cross the bid by a little", () => {
+    expect(
+      ticketBlockReason({
+        ...base,
+        kind: "limit",
+        sizeUnit: "usd",
+        sizeRaw: "1000",
+        sizeNum: 10.1,
+        maxSize: 1000,
+        workingPrice: 99,
+        price: "99",
+        sellBid: 100,
+      })
+    ).toBeNull();
+  });
+
   it("blocks over max", () => {
     expect(ticketBlockReason({ ...base, sizeNum: 20 })).toMatch(/^Max /);
   });

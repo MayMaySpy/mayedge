@@ -219,3 +219,90 @@ class StopTakeOrderTests(IsolatedAsyncioTestCase):
         signer.cancel_order.assert_awaited()
         signer.modify_order.assert_not_called()
         signer.create_sl_limit_order.assert_awaited()
+
+
+    def _live_stop(self) -> OpenOrder:
+        return OpenOrder(
+            order_index=77,
+            client_order_index=9,
+            market_index=1,
+            symbol="ETH",
+            side="sell",
+            price="89.10",
+            size="1",
+            remaining="1",
+            order_type="stop-loss",
+            reduce_only=True,
+            trigger_price="90",
+        )
+
+    async def test_the_old_stop_is_pulled_only_after_the_new_one_is_placed(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        sent: list[str] = []
+        ok = (None, SimpleNamespace(code=200, tx_hash="0xok"), None)
+
+        async def create(**_kwargs):
+            sent.append("create")
+            return ok
+
+        async def cancel(**_kwargs):
+            sent.append("cancel")
+            return ok
+
+        signer.create_sl_limit_order = AsyncMock(side_effect=create)
+        signer.cancel_order = AsyncMock(side_effect=cancel)
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[self._live_stop()],
+            ),
+        ):
+            await svc.create_sl_tp(
+                1, "sell", "1", sl={"kind": "limit", "trigger": "85", "price": "84.5"}
+            )
+        self.assertEqual(sent, ["create", "cancel"])
+
+    async def test_a_refused_replacement_leaves_the_old_stop_live(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.create_sl_limit_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=21719, message="pending cap"), None)
+        )
+        signer.cancel_order = AsyncMock()
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[self._live_stop()],
+            ),
+            self.assertRaises(ValueError),
+        ):
+            await svc.create_sl_tp(
+                1, "sell", "1", sl={"kind": "limit", "trigger": "85", "price": "84.5"}
+            )
+        signer.cancel_order.assert_not_called()
+
+    async def test_a_stale_stop_that_will_not_cancel_is_reported(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.cancel_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=21701, message="order not found"), None)
+        )
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[self._live_stop()],
+            ),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            await svc.create_sl_tp(
+                1, "sell", "1", sl={"kind": "limit", "trigger": "85", "price": "84.5"}
+            )
+        self.assertIn("still live", str(ctx.exception))
+        signer.create_sl_limit_order.assert_awaited_once()

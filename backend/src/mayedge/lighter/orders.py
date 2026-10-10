@@ -28,6 +28,8 @@ from mayedge.numbers import check_notional, fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
+TIME_IN_FORCE = ("gtt", "ioc", "post_only")
+
 
 def protect_role_kind(order_type: str) -> tuple[str, str] | None:
     """``(sl|tp, market|limit)`` for a Stop or Take Profit. None for a Ticket."""
@@ -118,7 +120,7 @@ class OrderService:
 
     @staticmethod
     def _is_maker_tif(time_in_force: str) -> bool:
-        return time_in_force.lower() in {"gtt", "post_only", "gtc"}
+        return time_in_force.lower() in {"gtt", "post_only"}
 
     @staticmethod
     def _is_ask(side: str) -> bool:
@@ -126,29 +128,40 @@ class OrderService:
             raise ValueError("side must be buy or sell")
         return side == "sell"
 
-    def _check_notional(self, meta, size_int: int, price_int: int | None = None) -> None:
+    def _check_notional(
+        self,
+        meta,
+        size_int: int,
+        price_int: int | None = None,
+        *,
+        is_ask: bool | None = None,
+    ) -> None:
         qty = from_scaled(size_int, meta.size_decimals)
+        ref = Decimal(str(meta.last_trade_price or meta.mark_price or 0))
         if price_int is not None:
             px = from_scaled(price_int, meta.price_decimals)
+            # A sell priced under the market fills near the market, not at its limit.
+            if is_ask:
+                px = max(px, ref)
         else:
-            px = Decimal(str(meta.last_trade_price or meta.mark_price or 0))
+            px = ref
         check_notional(qty, px, settings.max_order_notional)
 
     def _raise_order_err(self, err: Any, meta) -> None:
         text = str(err)
-        if "21706" in text or "invalid order base or quote amount" in text.lower():
+        if has_code(text, "21706") or "invalid order base or quote amount" in text.lower():
             raise ValueError(
                 f"Min {meta.min_base_amount} {meta.symbol} or ${meta.min_quote_amount}"
             )
-        if "21717" in text:
+        if has_code(text, "21717"):
             raise ValueError("Account order cap reached")
-        if "21718" in text:
+        if has_code(text, "21718"):
             raise ValueError("Per-market order cap reached")
-        if "21711" in text:
+        if has_code(text, "21711"):
             raise ValueError("Order expiry must be between 5 minutes and 30 days")
-        if "21719" in text or "21720" in text:
+        if has_code(text, "21719") or has_code(text, "21720"):
             raise ValueError("Pending order cap reached")
-        if "21728" in text:
+        if has_code(text, "21728"):
             raise ValueError("Duplicate client order id")
         mapped = venue_client_error(err)
         if mapped:
@@ -344,21 +357,24 @@ class OrderService:
         reduce_only: bool = False,
         client_order_index: int | None = None,
     ) -> dict[str, Any]:
+        # An unknown time in force is refused, never rested as GTT.
+        tif_key = time_in_force.lower()
+        if tif_key not in TIME_IN_FORCE:
+            raise ValueError("time_in_force must be gtt, ioc, or post_only")
         meta = self._market_meta(market_index)
         base_amount = self._scale_size(size, meta.size_decimals)
         price_int = self._scale_price(price, meta.price_decimals)
-        if self._is_maker_tif(time_in_force):
+        if self._is_maker_tif(tif_key):
             self._check_maker_size(meta, base_amount, price_int)
-        self._check_notional(meta, base_amount, price_int)
         is_ask = self._is_ask(side)
+        self._check_notional(meta, base_amount, price_int, is_ask=is_ask)
         coi = client_order_index or self._next_client_order_index()
 
-        tif_map = {
+        tif = {
             "ioc": self.signer.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
             "gtt": self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
             "post_only": self.signer.ORDER_TIME_IN_FORCE_POST_ONLY,
-        }
-        tif = tif_map.get(time_in_force.lower(), self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME)
+        }[tif_key]
 
         _tx, resp, err = await self._retry_nonce(
             lambda: self.signer.create_order(
@@ -559,6 +575,9 @@ class OrderService:
                 continue
             existing[parsed[0]].append(order)
         to_create: list[tuple[str, str, CreateOrderTxReq, int]] = []
+        # Orders the new ones replace. Pulled last, so a refused create or amend
+        # leaves the Position with the protection it already had.
+        replaced: list[Any] = []
         amended: dict[str, Any] | None = None
         for role, kind, req, coi in built:
             same = [
@@ -566,13 +585,9 @@ class OrderService:
                 for order in existing[role]
                 if protect_role_kind(order.order_type) == (role, kind)
             ]
-            other = [order for order in existing[role] if order not in same]
-            for order in other:
-                await self.cancel_order(order.market_index, order.order_index)
+            replaced.extend(order for order in existing[role] if order not in same)
             target = same[0] if same and (req.BaseAmount > 0 or _position_tied(same[0].remaining)) else None
-            extras = same[1:] if target is not None else same
-            for order in extras:
-                await self.cancel_order(order.market_index, order.order_index)
+            replaced.extend(same[1:] if target is not None else same)
             if target is None:
                 to_create.append((role, kind, req, coi))
                 continue
@@ -580,23 +595,36 @@ class OrderService:
         if not to_create:
             if amended is None:
                 raise ValueError("Set a stop or take profit")
-            return amended
-        if len(to_create) == 1:
+            out = amended
+        elif len(to_create) == 1:
             role, kind, req, coi = to_create[0]
             tx_hash = await self._send_sl_tp_leg(role, kind, req, meta)
-            return {"tx_hash": tx_hash, "client_order_index": coi}
-        orders = [row[2] for row in to_create]
-        _tx, resp, err = await self._retry_nonce(
-            lambda: self.signer.create_grouped_orders(
-                grouping_type=self.signer.GROUPING_TYPE_ONE_CANCELS_THE_OTHER,
-                orders=orders,
+            out = {"tx_hash": tx_hash, "client_order_index": coi}
+        else:
+            orders = [row[2] for row in to_create]
+            _tx, resp, err = await self._retry_nonce(
+                lambda: self.signer.create_grouped_orders(
+                    grouping_type=self.signer.GROUPING_TYPE_ONE_CANCELS_THE_OTHER,
+                    orders=orders,
+                )
             )
-        )
-        tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
-        return {
-            "tx_hash": tx_hash,
-            "client_order_index": to_create[0][3],
-        }
+            tx_hash = self._created_tx_hash(resp, err, meta, action="Order")
+            out = {"tx_hash": tx_hash, "client_order_index": to_create[0][3]}
+        await self._cancel_replaced(replaced)
+        return out
+
+    async def _cancel_replaced(self, orders: list[Any]) -> None:
+        left = 0
+        reason = ""
+        for order in orders:
+            try:
+                await self.cancel_order(order.market_index, order.order_index)
+            except Exception as e:
+                left += 1
+                reason = reason or str(e)
+                logger.warning("replaced order %s not cancelled: %s", order.order_index, e)
+        if left:
+            raise ValueError(f"Placed, but {left} replaced order(s) are still live: {reason}")
 
     async def _modify_conditional(self, order_index: int, req: CreateOrderTxReq) -> dict[str, Any]:
         meta = self._market_meta(req.MarketIndex)
@@ -622,22 +650,25 @@ class OrderService:
         *,
         size: str | None = None,
         trigger: str | None = None,
+        side: str | None = None,
     ) -> dict[str, Any]:
         """Amend a live order. order_index may be exchange index or client_order_index.
 
         ``trigger`` is the Stop or Take Profit trigger. Omit it to leave the trigger.
         ``size`` None leaves size unchanged (including a position-tied close).
+        ``side`` lets the notional cap price a sell that would cross at the market.
         """
         meta = self._market_meta(market_index)
         price_int = self._scale_price(price, meta.price_decimals)
         trigger_int = (
             0 if trigger is None else self._scale_price(trigger, meta.price_decimals)
         )
+        is_ask = None if side is None else self._is_ask(side)
         if size is not None:
             base_amount = self._scale_size(size, meta.size_decimals)
             if trigger is None:
                 self._check_maker_size(meta, base_amount, price_int)
-                self._check_notional(meta, base_amount, price_int)
+                self._check_notional(meta, base_amount, price_int, is_ask=is_ask)
             elif base_amount > 0:
                 self._check_notional(meta, base_amount, price_int)
         else:
@@ -713,6 +744,7 @@ class OrderService:
             order_index,
             price,
             size=amend_size,
+            side=live.side if live.side in ("buy", "sell") else None,
         )
 
     async def cancel_tickets(

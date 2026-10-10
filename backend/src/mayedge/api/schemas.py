@@ -20,7 +20,7 @@ class LimitOrderRequest(BaseModel):
     side: TradeSide
     size: str
     price: str
-    time_in_force: str = "gtt"
+    time_in_force: Literal["gtt", "ioc", "post_only"] = "gtt"
     reduce_only: bool = False
 
 

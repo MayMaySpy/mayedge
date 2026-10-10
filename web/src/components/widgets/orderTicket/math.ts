@@ -330,6 +330,24 @@ function formatMaxMinSize(
   return `${prefix} ${trimQty(base, decimals)} ${symbol}`;
 }
 
+/** A USD-sized sell this far under the bid is sized at a price it will not trade at. */
+export const USD_SELL_THROUGH_BID = 0.05;
+
+/**
+ * True when a USD-sized limit sell is priced well under the bid. Size is USD over
+ * the limit price, so a price typed too low sells that many times the USD typed.
+ */
+export function usdSellSizedBelowBid(opts: {
+  kind: OrderKind;
+  sizeUnit: SizeUnit;
+  priceNum: number;
+  bid: number | null;
+}): boolean {
+  if (opts.kind !== "limit" || opts.sizeUnit !== "usd") return false;
+  if (!(opts.priceNum > 0) || opts.bid == null || !(opts.bid > 0)) return false;
+  return opts.priceNum < opts.bid * (1 - USD_SELL_THROUGH_BID);
+}
+
 export function ticketBlockReason(opts: {
   tradingEnabled: boolean;
   feedReady: boolean;
@@ -346,6 +364,8 @@ export function ticketBlockReason(opts: {
   isMaker: boolean;
   minSz: number;
   algoBlocked?: string | null;
+  /** Set on the Sell button only: the live Best Bid. */
+  sellBid?: number | null;
 }): string | null {
   const unit = opts.sizeUnit ?? "base";
   const px = opts.workingPrice ?? null;
@@ -359,6 +379,16 @@ export function ticketBlockReason(opts: {
     return formatMaxMinSize(opts.maxSize, unit, opts.symbol, opts.decimals, px, "Max");
   }
   if (opts.kind === "limit" && !opts.price) return "Enter price";
+  if (
+    usdSellSizedBelowBid({
+      kind: opts.kind,
+      sizeUnit: unit,
+      priceNum: parseDecimal(opts.price) ?? 0,
+      bid: opts.sellBid ?? null,
+    })
+  ) {
+    return "Price far below bid — size in " + opts.symbol;
+  }
   if (opts.isMaker && opts.minSz > 0 && opts.sizeNum + 1e-9 < opts.minSz) {
     return formatMaxMinSize(opts.minSz, unit, opts.symbol, opts.decimals, px, "Min");
   }

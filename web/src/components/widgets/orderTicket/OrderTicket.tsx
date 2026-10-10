@@ -298,7 +298,11 @@ export function OrderTicket({
   };
   const sharedBlocked = ticketBlockReason(blockOpts);
   const buyBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxBuy });
-  const sellBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxSell });
+  const sellBlocked = ticketBlockReason({
+    ...blockOpts,
+    maxSize: maxSell,
+    sellBid: bid > 0 ? bid : null,
+  });
   const actionBlocked = singleAction
     ? ticketBlockReason({ ...blockOpts, maxSize })
     : null;
