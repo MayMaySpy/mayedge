@@ -252,7 +252,17 @@ export function Header({
       if (res.status === "killed") {
         notifyOk(flatten ? "Kill: algos stopped, orders cancelled, flatten sent" : "Kill: algos stopped, orders cancelled");
       } else {
-        notifyWarn("Kill partial", "Check positions and open orders");
+        const failed = [
+          res.algo_error ? "algo stop" : null,
+          res.cancel_ok === false ? "cancel-all" : null,
+          res.flatten?.some((leg) => !leg.ok) ? "flatten" : null,
+        ].filter(Boolean);
+        notifyWarn(
+          "Kill partial",
+          failed.length
+            ? `Failed: ${failed.join(", ")}. Check positions and open orders`
+            : "Check positions and open orders"
+        );
       }
       setKillOpen(false);
     } catch (e) {

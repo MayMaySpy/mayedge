@@ -32,9 +32,9 @@ from mayedge.api.token_icon import token_icon_response
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.auto_kill import auto_kill
 from mayedge.config import settings
-from mayedge.kill import KillResult, kill
+from mayedge.kill import FLATTEN_SLIPPAGE, KillResult, kill
 from mayedge.lighter.account import account_service
-from mayedge.lighter.budget import budget
+from mayedge.lighter.budget import KILL_LANE, budget
 from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
@@ -56,13 +56,24 @@ async def _account_summary_for_kill():
         return account_service.cached_summary()
 
 
-async def run_kill(*, flatten: bool) -> KillResult:
-    return await kill(
-        flatten=flatten,
-        algos=_AllAlgos(),
-        orders=order_service,
-        get_account_summary=_account_summary_for_kill,
-    )
+def _cached_positions() -> list[Any]:
+    cached = account_service.cached_account_payload()
+    return list((cached or {}).get("positions") or [])
+
+
+async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> KillResult:
+    # Kill is sent even when the local budget is full or cooling.
+    token = budget.enter_lane(KILL_LANE)
+    try:
+        return await kill(
+            flatten=flatten,
+            algos=_AllAlgos(),
+            orders=order_service,
+            get_account_summary=_account_summary_for_kill,
+            slippage=slippage,
+        )
+    finally:
+        budget.leave_lane(token)
 
 
 @asynccontextmanager
@@ -78,7 +89,7 @@ async def lifespan(app: FastAPI):
 
     desk.set_broadcast(on_desk_msg)
     feed_health.set_emitter(on_feed_health)
-    auto_kill.start(run_kill=run_kill, emit=fanout.push)
+    auto_kill.start(run_kill=run_kill, emit=fanout.push, positions=_cached_positions)
     gateway.subscribe(auto_kill.on_gateway)
     await desk.start()
     await desk.restore()

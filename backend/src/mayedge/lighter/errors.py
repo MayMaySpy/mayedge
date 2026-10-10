@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 WAF_MSG = "Lighter blocked this IP (WAF captcha). Wait a minute — too many REST calls."
@@ -14,6 +15,22 @@ class VenueBlocked(Exception):
         self.status = status
 
 
+def has_code(text: Any, code: str) -> bool:
+    """True when ``code`` stands alone in ``text``, not inside a longer number.
+
+    ``429`` matches ``(429)`` and ``code=429``. It does not match ``64290.5``,
+    ``0.0429``, or an order index that happens to contain those digits.
+    """
+    return re.search(rf"(?<![\d.]){re.escape(code)}(?!\d|\.\d)", str(text or "")) is not None
+
+
+def has_code_prefix(text: Any, prefix: str) -> bool:
+    """True when a code of ``prefix`` plus one digit stands alone in ``text``."""
+    return (
+        re.search(rf"(?<![\d.]){re.escape(prefix)}\d(?!\d|\.\d)", str(text or "")) is not None
+    )
+
+
 def venue_client_error(err: Any) -> tuple[int, str] | None:
     """Map Lighter/CloudFront failures to an HTTP status + short message."""
     text = str(err or "")
@@ -22,9 +39,24 @@ def venue_client_error(err: Any) -> tuple[int, str] | None:
         "x-amzn-waf-action" in low
         or "human verification" in low
         or "captcha" in low
-        or ("405" in text and "not allowed" in low)
+        or (has_code(text, "405") and "not allowed" in low)
     ):
         return 429, WAF_MSG
-    if "429" in text or "23000" in text or "too many requests" in low or "rate limit" in low or "ratelimit" in low:
+    if (
+        has_code(text, "429")
+        or has_code(text, "23000")
+        or "too many requests" in low
+        or "rate limit" in low
+        or "ratelimit" in low
+    ):
         return 429, RATE_MSG
     return None
+
+
+def http_block(status: int, body: str) -> tuple[int, str] | None:
+    """Classify a raw HTTP response. A 200 is never a block, whatever its body holds."""
+    if status == 200:
+        return None
+    if status == 429:
+        return 429, RATE_MSG
+    return venue_client_error(f"({status}) {body}")

@@ -16,7 +16,7 @@ from mayedge.lighter.coi import (
     is_algo_client_order,
     next_manual_client_order_index,
 )
-from mayedge.lighter.errors import VenueBlocked, venue_client_error
+from mayedge.lighter.errors import VenueBlocked, has_code, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import (
     from_scaled,
@@ -224,7 +224,7 @@ class OrderService:
     @staticmethod
     def _is_invalid_nonce(err: Any) -> bool:
         text = str(err or "").lower()
-        return "21104" in text or "invalid nonce" in text
+        return has_code(text, "21104") or "invalid nonce" in text
 
     def _nonce_stale(self, ret: Any, err: Any) -> bool:
         if self._is_invalid_nonce(err):

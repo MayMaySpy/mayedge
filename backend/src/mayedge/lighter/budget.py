@@ -2,6 +2,7 @@
 
 Class ceilings leave room for manual orders when algos and chart reads are busy.
 A venue 429/405 cools every caller for 60s. Local refusal does not.
+Kill is never refused here: it is sent whatever the window or cooldown says.
 """
 
 from __future__ import annotations
@@ -19,11 +20,17 @@ WINDOW_S = 60.0
 CAP = 54
 TX_CAP = 38
 COOLDOWN_S = 60.0
+KILL_LANE = "kill"
 CEILING = {
+    KILL_LANE: CAP,
     "critical": CAP,
     "algo": 44,
     "read": 40,
     "background": 25,
+}
+# sendTx ceilings. Algos stop short of TX_CAP so a manual order still fits.
+TX_CEILING = {
+    "algo": 30,
 }
 
 _lane: ContextVar[str] = ContextVar("lighter_budget_lane", default="critical")
@@ -66,13 +73,18 @@ class RestBudget:
         return max(1, int(WINDOW_S - (now - self._hits[0][0])))
 
     def _fits(self, lane: str, n: int, *, tx: bool, now: float) -> bool:
+        if lane == KILL_LANE:
+            self._prune(now)
+            return True
         if now < self._cool_until:
             return False
         self._prune(now)
         if len(self._hits) + n > CEILING[lane]:
             return False
-        if tx and sum(1 for _at, is_tx in self._hits if is_tx) + n > TX_CAP:
-            return False
+        if tx:
+            sent = sum(1 for _at, is_tx in self._hits if is_tx)
+            if sent + n > TX_CEILING.get(lane, TX_CAP):
+                return False
         return True
 
     def _grant(self, lane: str, n: int, *, tx: bool) -> bool:

@@ -4,9 +4,17 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from mayedge.algos.chase.util import _is_would_cross
 from mayedge.config import settings
 from mayedge.lighter.account import AccountService
-from mayedge.lighter.errors import VenueBlocked, venue_client_error
+from mayedge.lighter.errors import (
+    RATE_MSG,
+    WAF_MSG,
+    VenueBlocked,
+    has_code,
+    http_block,
+    venue_client_error,
+)
 from mayedge.lighter.models import MarketMeta, parse_to_int
 from mayedge.lighter.orders import OrderService
 
@@ -67,6 +75,38 @@ class VenueClientErrorTests(TestCase):
 
     def test_plain_error_is_none(self) -> None:
         self.assertIsNone(venue_client_error("invalid nonce"))
+
+    def test_status_and_venue_codes_are_rate_limits(self) -> None:
+        for text in (
+            "(429)\nReason: Too Many Requests",
+            'HTTP response body: {"code":23000,"message":"Too Many Requests!"}',
+            "code=23000 message='ratelimit'",
+            "Order failed (429)",
+        ):
+            self.assertEqual(venue_client_error(text), (429, RATE_MSG), text)
+
+    def test_digits_inside_a_number_are_not_a_rate_limit(self) -> None:
+        for text in (
+            "order price 64290.5 is too far from mark",
+            "order 281474976429001 not found",
+            "invalid order base or quote amount (min 0.23000)",
+            "funding change 0.00429 at 1759429200",
+        ):
+            self.assertIsNone(venue_client_error(text), text)
+
+    def test_a_200_body_is_never_a_block(self) -> None:
+        body = '{"code":200,"position_fundings":[{"timestamp":1759429200,"change":"0.429"}]}'
+        self.assertIsNone(http_block(200, body))
+        self.assertEqual(http_block(429, ""), (429, RATE_MSG))
+        self.assertEqual(http_block(405, "<title>405 Not Allowed</title>"), (429, WAF_MSG))
+        self.assertIsNone(http_block(400, '{"code":20001,"message":"invalid param 4290"}'))
+
+    def test_code_checks_ignore_longer_numbers(self) -> None:
+        self.assertTrue(has_code("code=21706 invalid order base or quote amount", "21706"))
+        self.assertFalse(has_code("order 8000021706 rejected", "21706"))
+        self.assertFalse(_is_would_cross(RuntimeError("order 82170 rejected at 121705.5")))
+        self.assertTrue(_is_would_cross(RuntimeError("code=21702 would cross")))
+        self.assertTrue(_is_would_cross(RuntimeError("rejected (21702)")))
 
 
 class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):

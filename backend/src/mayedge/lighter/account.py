@@ -22,7 +22,7 @@ from mayedge.lighter.equity import (
     portfolio_margin_usd,
     trade_available_usd,
 )
-from mayedge.lighter.errors import VenueBlocked, venue_client_error
+from mayedge.lighter.errors import VenueBlocked, http_block, venue_client_error
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
@@ -731,8 +731,9 @@ class AccountService:
             self._note_rest_error(e, "account funding fetch failed")
             raise
         text = resp.text
-        mapped = venue_client_error(f"{resp.status_code} {text}")
+        mapped = http_block(resp.status_code, text)
         if mapped:
+            budget.note_blocked()
             raise VenueBlocked(*mapped)
         try:
             payload = resp.json()

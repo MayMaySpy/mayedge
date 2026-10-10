@@ -125,6 +125,71 @@ class AutoKillClassTests(unittest.IsolatedAsyncioTestCase):
             on_disk = json.loads(path.read_text())
             self.assertFalse(on_disk["config"]["armed"])
 
+    async def _fire(self, ak: AutoKill) -> None:
+        import asyncio
+
+        ak.configure(armed=True, loss_usd=100, profit_usd=None, current_positions=[])
+        ak.on_gateway(
+            {
+                "type": "account",
+                "positions": [{"size": "2", "entry_price": "100", "mark_price": "40"}],
+            }
+        )
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if not ak._firing:
+                return
+        self.fail("auto kill never finished")
+
+    async def test_retries_with_wider_slippage_until_flat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch("mayedge.auto_kill.RECHECK_S", 0):
+            ak = AutoKill(Path(tmp) / "auto_kill.json")
+            leg = {"market_index": 1, "symbol": "BTC", "ok": True, "error": None}
+            run_kill = AsyncMock(
+                return_value=KillResult(
+                    status="killed", cancel_ok=True, cancel_error=None, flatten=[leg]
+                )
+            )
+            # The first IOC does not fill; the second one does.
+            books = [[{"size": "2"}], [{"size": "0"}]]
+            ak.start(run_kill=run_kill, emit=lambda _: None, positions=lambda: books.pop(0))
+            await self._fire(ak)
+
+            self.assertEqual(
+                [c.kwargs["slippage"] for c in run_kill.await_args_list], [0.01, 0.02]
+            )
+            self.assertEqual(ak.view()["last_kill_status"], "killed")
+            self.assertFalse(ak.view()["armed"])
+
+    async def test_retries_when_the_venue_refuses_then_reports_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch("mayedge.auto_kill.RECHECK_S", 0):
+            ak = AutoKill(Path(tmp) / "auto_kill.json")
+            run_kill = AsyncMock(side_effect=RuntimeError("venue down"))
+            ak.start(run_kill=run_kill, emit=lambda _: None, positions=lambda: [{"size": "2"}])
+            await self._fire(ak)
+
+            self.assertEqual(
+                [c.kwargs["slippage"] for c in run_kill.await_args_list], [0.01, 0.02, 0.05]
+            )
+            view = ak.view()
+            self.assertEqual(view["last_kill_status"], "partial")
+            self.assertEqual(view["fired_reason"], "loss")
+            self.assertIsNotNone(view["fired_at"])
+
+    async def test_stops_after_one_kill_when_nothing_is_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch("mayedge.auto_kill.RECHECK_S", 0):
+            ak = AutoKill(Path(tmp) / "auto_kill.json")
+            run_kill = AsyncMock(
+                return_value=KillResult(
+                    status="killed", cancel_ok=True, cancel_error=None, flatten=[]
+                )
+            )
+            # A stale feed still shows the Position; the venue said there was none.
+            ak.start(run_kill=run_kill, emit=lambda _: None, positions=lambda: [{"size": "2"}])
+            await self._fire(ak)
+            run_kill.assert_awaited_once()
+            self.assertEqual(ak.view()["last_kill_status"], "killed")
+
     def test_arm_rejects_already_breached(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ak = AutoKill(Path(tmp) / "auto_kill.json")
@@ -153,7 +218,7 @@ class AutoKillEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         app = create_app()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             res = await client.get("/api/kill/auto")
             self.assertEqual(res.status_code, 200)
 
@@ -161,7 +226,7 @@ class AutoKillEndpointTests(unittest.IsolatedAsyncioTestCase):
             order_svc.enabled = True
             app = create_app()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(transport=transport, base_url="http://localhost") as client:
                 res = await client.put(
                     "/api/kill/auto",
                     json={"armed": True, "loss_usd": 500, "profit_usd": None},

@@ -18,6 +18,12 @@ from mayedge.lighter.models import Position, to_float
 logger = logging.getLogger(__name__)
 
 RunKillFn = Callable[..., Any]
+PositionsFn = Callable[[], list[Any]]
+
+# One flatten per step. A later step runs only while a Position is still open.
+FLATTEN_SLIPPAGE_STEPS = (0.01, 0.02, 0.05)
+# Wait for the account feed to show the fills before judging a flatten.
+RECHECK_S = 3.0
 
 
 def auto_kill_path() -> Path:
@@ -54,6 +60,11 @@ def _position_upnl(pos: Position | dict[str, Any]) -> float:
     if mark > 0 and entry > 0 and size != 0:
         return (mark - entry) * size
     return fallback
+
+
+def _position_open(pos: Position | dict[str, Any]) -> bool:
+    raw = pos.get("size", "0") if isinstance(pos, dict) else pos.size
+    return to_float(raw) != 0
 
 
 def live_upnl(positions: list[Position] | list[dict[str, Any]]) -> float:
@@ -133,6 +144,7 @@ class AutoKill:
         self._state = load_auto_kill(path)
         self._run_kill: RunKillFn | None = None
         self._emit: Callable[[dict[str, Any]], None] | None = None
+        self._positions: PositionsFn | None = None
         self._firing = False
         self._live_upnl_fn: Callable[[list[Any]], float] = live_upnl
 
@@ -144,14 +156,17 @@ class AutoKill:
         *,
         run_kill: RunKillFn,
         emit: Callable[[dict[str, Any]], None],
+        positions: PositionsFn | None = None,
     ) -> None:
         self._run_kill = run_kill
         self._emit = emit
+        self._positions = positions
         self._broadcast()
 
     def stop(self) -> None:
         self._run_kill = None
         self._emit = None
+        self._positions = None
 
     def view(self) -> dict[str, Any]:
         cfg = self._state.config
@@ -216,25 +231,61 @@ class AutoKill:
             return
         loop.create_task(self._fire(reason=reason, upnl=upnl))
 
-    async def _fire(self, *, reason: str, upnl: float) -> None:
-        self._state.config.armed = False
-        save_auto_kill(self._state, self._path)
-        self._broadcast()
-        kill_status = "error"
+    def _still_open(self) -> bool:
+        """True while the account feed shows a Position. Unknown counts as flat."""
+        if self._positions is None:
+            return False
         try:
-            if self._run_kill is None:
-                raise RuntimeError("auto_kill not started")
-            result: KillResult = await self._run_kill(flatten=True)
-            kill_status = result.status
+            return any(_position_open(p) for p in self._positions() or [])
         except Exception:
-            logger.exception("auto_kill run_kill failed")
-        self._state.fired_at = int(time.time() * 1000)
+            logger.exception("auto_kill position check failed")
+            return False
+
+    def _record(self, *, reason: str, upnl: float, status: str) -> None:
+        if self._state.fired_at is None:
+            self._state.fired_at = int(time.time() * 1000)
         self._state.fired_reason = reason
         self._state.fired_upnl = upnl
-        self._state.last_kill_status = kill_status
+        self._state.last_kill_status = status
         save_auto_kill(self._state, self._path)
         self._broadcast()
-        self._firing = False
+
+    async def _fire(self, *, reason: str, upnl: float) -> None:
+        self._state.config.armed = False
+        self._state.fired_at = None
+        save_auto_kill(self._state, self._path)
+        self._broadcast()
+        try:
+            last = len(FLATTEN_SLIPPAGE_STEPS) - 1
+            for step, slippage in enumerate(FLATTEN_SLIPPAGE_STEPS):
+                status = "error"
+                nothing_to_flatten = False
+                try:
+                    if self._run_kill is None:
+                        raise RuntimeError("auto_kill not started")
+                    result: KillResult = await self._run_kill(flatten=True, slippage=slippage)
+                    status = result.status
+                    nothing_to_flatten = status == "killed" and not result.flatten
+                except Exception:
+                    logger.exception("auto_kill run_kill failed")
+                self._record(reason=reason, upnl=upnl, status=status)
+                if nothing_to_flatten:
+                    return
+                await asyncio.sleep(RECHECK_S)
+                if status == "killed" and not self._still_open():
+                    return
+                if step == last:
+                    break
+                logger.warning(
+                    "auto_kill flatten %s; retrying at %.0f%% slippage",
+                    status,
+                    FLATTEN_SLIPPAGE_STEPS[step + 1] * 100,
+                )
+            # Every step is spent and a Position is still open, or the venue kept refusing.
+            self._record(reason=reason, upnl=upnl, status="partial")
+            logger.error("auto_kill could not flatten after %d tries", last + 1)
+        finally:
+            self._firing = False
 
 
 auto_kill = AutoKill()

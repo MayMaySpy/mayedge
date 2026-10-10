@@ -144,8 +144,16 @@ def algo_book() -> dict[str, Any]:
 
 
 async def stop_algo(algo_id: str | None = None) -> dict[str, Any]:
+    """Stop on every book. One book failing does not spare the others."""
+    failed: Exception | None = None
     for book in books:
-        await book.stop(algo_id)
+        try:
+            await book.stop(algo_id)
+        except Exception as e:
+            logger.exception("stop failed on %s book", getattr(book, "algo_type", "?"))
+            failed = failed or e
+    if failed is not None:
+        raise failed
     return algo_book()
 
 

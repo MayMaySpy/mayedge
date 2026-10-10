@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from mayedge.algos.chase.job import ChaseIcebergRunner
 from mayedge.algos.ladder.job import LadderRunner
 from mayedge.api.schemas import TwapOrderRequest
-from mayedge.lighter.budget import CAP, TX_CAP, BudgetRefused, budget
+from mayedge.lighter.budget import CAP, KILL_LANE, TX_CAP, TX_CEILING, BudgetRefused, budget
 from mayedge.lighter.gateway import LighterGateway
 from mayedge.lighter.market_ws import SendPacer, handle_ws_message
 from mayedge.lighter.models import MarketMeta
@@ -253,3 +253,46 @@ class ToneWsTests(IsolatedAsyncioTestCase):
                 "candle/2/4h",
             ],
         )
+
+
+class KillHeadroomTests(IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        budget.reset()
+
+    def tearDown(self) -> None:
+        budget.reset()
+
+    def test_algos_leave_transactions_for_a_manual_order(self) -> None:
+        sent = 0
+        while budget.try_acquire(lane="algo", tx=True):
+            sent += 1
+        self.assertEqual(sent, TX_CEILING["algo"])
+        self.assertLess(sent, TX_CAP)
+        self.assertTrue(budget.try_acquire(lane="critical", tx=True))
+
+    def test_kill_is_sent_through_a_full_window(self) -> None:
+        while budget.try_acquire(lane="critical", tx=True):
+            pass
+        self.assertFalse(budget.try_acquire(lane="critical", tx=True))
+        self.assertTrue(budget.try_acquire(lane=KILL_LANE, tx=True))
+
+    def test_kill_is_sent_through_the_venue_cooldown(self) -> None:
+        budget.note_blocked()
+        self.assertFalse(budget.try_acquire(lane="critical", tx=True))
+        self.assertTrue(budget.try_acquire(lane=KILL_LANE, tx=True))
+
+    async def test_run_kill_sends_in_the_kill_lane(self) -> None:
+        from mayedge.api import app as api_app
+        from mayedge.kill import KillResult
+        from mayedge.lighter.budget import _lane
+
+        seen: list[str] = []
+
+        async def fake_kill(**_kwargs):
+            seen.append(_lane.get())
+            return KillResult(status="killed", cancel_ok=True, cancel_error=None, flatten=[])
+
+        with patch.object(api_app, "kill", fake_kill):
+            await api_app.run_kill(flatten=False)
+        self.assertEqual(seen, [KILL_LANE])
+        self.assertEqual(_lane.get(), "critical")

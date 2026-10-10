@@ -63,8 +63,8 @@ export function AutoKillSection({ tradingEnabled }: AutoKillSectionProps) {
     <div className="space-y-3">
       <Separator />
       <p className="text-sm text-muted-foreground">
-        When total uPnL crosses a USD threshold, stop algos, cancel orders, and flatten once. Then
-        disarm.
+        When total uPnL crosses a USD threshold, disarm, stop algos, cancel orders, and flatten.
+        The flatten is retried at wider slippage while a Position stays open.
       </p>
       <FieldGroup>
         <div className="grid grid-cols-2 gap-3">

@@ -7,7 +7,12 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END
-from mayedge.lighter.errors import VenueBlocked, venue_client_error
+from mayedge.lighter.errors import (
+    VenueBlocked,
+    has_code,
+    has_code_prefix,
+    venue_client_error,
+)
 from mayedge.numbers import fmt_decimal
 
 
@@ -58,22 +63,22 @@ def _is_rate_limit(err: BaseException) -> bool:
 
 def _is_order_not_found(err: BaseException) -> bool:
     text = str(err).lower()
-    return "order not found" in text or "21701" in text
+    return "order not found" in text or has_code(text, "21701")
 
 
 def _is_min_size(err: BaseException) -> bool:
     text = str(err).lower()
-    return "21706" in text or "min " in text or "base or quote amount" in text
+    return has_code(text, "21706") or "min " in text or "base or quote amount" in text
 
 
 def _is_would_cross(err: BaseException) -> bool:
     """Post-only would-cross (2170). Do not match 21701 / 21706."""
     text = str(err).lower()
-    if "21701" in text or "21706" in text:
+    if has_code(text, "21701") or has_code(text, "21706"):
         return False
-    return "post" in text or "cross" in text or "2170" in text
+    return "post" in text or "cross" in text or has_code_prefix(text, "2170")
 
 
 def _is_invalid_nonce(err: BaseException | str | None) -> bool:
     text = str(err or "").lower()
-    return "21104" in text or "invalid nonce" in text
+    return has_code(text, "21104") or "invalid nonce" in text

@@ -500,6 +500,7 @@ export const api = {
       status: string;
       cancel_ok?: boolean;
       cancel_error?: string | null;
+      algo_error?: string | null;
       flatten?: Array<{ market_index?: number; symbol?: string; ok?: boolean; error?: string | null }>;
       algos?: AlgoBook;
     }>("/kill", { method: "POST", body: JSON.stringify({ flatten }) }),

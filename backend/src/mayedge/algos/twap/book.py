@@ -328,8 +328,15 @@ class AdvancedTwapBook:
             if job:
                 await job.stop()
             return
+        failed: Exception | None = None
         for job in list(self._jobs.values()):
-            await job.stop()
+            try:
+                await job.stop()
+            except Exception as e:
+                logger.exception("stop failed for %s", job.algo_id)
+                failed = failed or e
+        if failed is not None:
+            raise failed
 
     async def pause(self, algo_id: str) -> None:
         job = self._jobs.get(algo_id)

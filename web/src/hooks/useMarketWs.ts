@@ -67,7 +67,7 @@ export function useMarketWs(symbol: string) {
   const marketsRef = useRef(state.markets);
   const marketIndexRef = useRef<number | null>(null);
   const resyncAtRef = useRef(0);
-  const autoKillFiredAtRef = useRef<number | null>(null);
+  const autoKillNoticeRef = useRef<string | null>(null);
 
   useEffect(() => {
     marketsRef.current = state.markets;
@@ -294,15 +294,17 @@ export function useMarketWs(symbol: string) {
               last_kill_status:
                 msg.last_kill_status != null ? String(msg.last_kill_status) : null,
             });
+            // A flatten that is retried reports again when its outcome changes.
+            const status = String(msg.last_kill_status ?? "unknown");
+            const noticeKey = `${firedAt}:${status}`;
             if (
               firedAt != null &&
               !Number.isNaN(firedAt) &&
-              firedAt !== autoKillFiredAtRef.current
+              noticeKey !== autoKillNoticeRef.current
             ) {
-              autoKillFiredAtRef.current = firedAt;
+              autoKillNoticeRef.current = noticeKey;
               const reason = String(msg.fired_reason ?? "threshold");
               const upnl = msg.fired_upnl != null ? Number(msg.fired_upnl) : null;
-              const status = String(msg.last_kill_status ?? "unknown");
               const upnlText =
                 upnl != null && !Number.isNaN(upnl) ? ` uPnL ${upnl.toFixed(2)}` : "";
               notifyWarn(

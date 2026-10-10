@@ -74,7 +74,8 @@ GTT limits: expiry between **5 minutes and 30 days** (ms timestamp). We use SDK 
 - **Standard REST:** 60 requests / rolling minute. Not weighted. `sendTx` and `sendTxBatch` count in that same bucket, over HTTP or WebSocket.
 - **All account types — default tx bucket:** 40 requests / minute (includes order create/cancel).
 - **429 / 405:** 60s firewall cooldown. When REST is limited, the WebSocket is limited too.
-- Mayedge keeps one shared limiter under both caps. Algo sends stop before the bucket is full so a manual order still fits.
+- Mayedge keeps one shared limiter under both caps. Algo sends stop before the bucket is full so a manual order still fits: algos hold to 30 of the 38 transactions a minute.
+- Kill is never refused by the local limiter. It is sent through a full window and through the 60s cooldown.
 
 We do **not** use `sendTxBatch` today — each child is one transaction.
 

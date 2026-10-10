@@ -10,6 +10,8 @@ from mayedge.numbers import fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
+FLATTEN_SLIPPAGE = 0.01
+
 
 class AlgoKill(Protocol):
     async def stop(self) -> None: ...
@@ -40,12 +42,14 @@ class KillResult:
     cancel_ok: bool
     cancel_error: str | None
     flatten: list[dict[str, Any]]
+    algo_error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "cancel_ok": self.cancel_ok,
             "cancel_error": self.cancel_error,
+            "algo_error": self.algo_error,
             "flatten": self.flatten,
         }
 
@@ -56,8 +60,16 @@ async def kill(
     algos: AlgoKill,
     orders: OrdersKill,
     get_account_summary: Any,
+    slippage: float = FLATTEN_SLIPPAGE,
 ) -> KillResult:
-    await algos.stop()
+    # Each step runs whatever the one before it did. A book that will not stop
+    # must not keep cancel-all or flatten from going out.
+    algo_error: str | None = None
+    try:
+        await algos.stop()
+    except Exception as e:
+        algo_error = str(e) or type(e).__name__
+        logger.exception("kill algo stop failed")
 
     cancel_ok = True
     cancel_error: str | None = None
@@ -100,7 +112,7 @@ async def kill(
                         pos.market_index,
                         side,
                         fmt_decimal(size_dec) or "0",
-                        0.01,
+                        slippage,
                         True,
                     )
                     leg["ok"] = True
@@ -116,11 +128,12 @@ async def kill(
             flatten_legs.append({"ok": False, "error": str(e)})
 
     flatten_ok = all(leg.get("ok") for leg in flatten_legs) if flatten_legs else True
-    killed = cancel_ok and (not flatten or flatten_ok)
+    killed = algo_error is None and cancel_ok and (not flatten or flatten_ok)
 
     return KillResult(
         status="killed" if killed else "partial",
         cancel_ok=cancel_ok,
         cancel_error=cancel_error,
         flatten=flatten_legs,
+        algo_error=algo_error,
     )

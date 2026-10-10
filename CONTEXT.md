@@ -163,7 +163,7 @@ An algo that slices a parent size across time into Clips.
 _Avoid_: VWAP, iceberg
 
 **Kill**:
-Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied.
+Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied. Each step is sent whatever the one before it did, and none waits on the rate budget.
 _Avoid_: panic, shutdown, flatten (as a synonym for Kill)
 
 ### Account
