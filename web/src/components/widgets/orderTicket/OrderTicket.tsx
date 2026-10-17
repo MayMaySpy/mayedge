@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -20,7 +21,14 @@ import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins"
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
-import { setAlgo as setLiveAlgo, useLiveAccount, useLiveBbo } from "@/lib/liveData";
+import {
+  setAlgo as setLiveAlgo,
+  useLiveAccount,
+  useLiveAlgos,
+  useLiveBbo,
+} from "@/lib/liveData";
+import { livePlannerFor } from "@/lib/plannerPlan";
+import { PlannerDialog } from "@/components/widgets/planner/PlannerDialog";
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
@@ -94,6 +102,9 @@ export function OrderTicket({
   const lastBookPickSeq = useRef(0);
   const bbo = useLiveBbo();
   const account = useLiveAccount();
+  const algoBook = useLiveAlgos();
+  const [plannerOpen, setPlannerOpen] = useState(false);
+  const runningPlanner = livePlannerFor(algoBook, market?.market_index);
   const tradeAvailable =
     parseFloat(account?.trade_available ?? account?.available ?? "0") || 0;
   const signedPos =
@@ -466,6 +477,13 @@ export function OrderTicket({
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={!tradingEnabled}
+                    onSelect={() => setPlannerOpen(true)}
+                  >
+                    {runningPlanner ? "Re-plan…" : "Planner…"}
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -597,6 +615,13 @@ export function OrderTicket({
         onDraftChange={setLevDraft}
         onClose={() => setLevOpen(false)}
         onApply={applyLeverage}
+      />
+      <PlannerDialog
+        open={plannerOpen}
+        onOpenChange={setPlannerOpen}
+        market={market}
+        mode={runningPlanner ? "attach" : "enter"}
+        running={runningPlanner}
       />
     </div>
   );

@@ -18,7 +18,7 @@ Personal software, not a product. There is no login: anyone who can reach the HT
 
 **Execution.** Market and limit Tickets from the Order panel. Floating Buy/Sell are market at Quick size (the same size Axis rest uses). On the Orders tab, **Bids** and **Asks** cancel Tickets of that side in the current All/Market scope; Clips stay with the algo. **Kill** stops all algos then cancels working orders; flatten is optional, not implied.
 
-**Algos.** Chase, Grid, Ladder, TWAP. Each owns Clips, not Tickets. Grid will not start on a Market that already has another desk algo live. Jobs persist in SQLite; start / pause / stop from the blotter.
+**Algos.** Chase, Grid, Ladder, TWAP, Planner. Each owns Clips, not Tickets. Grid and Planner will not start on a Market that already has another desk algo live. Jobs persist in SQLite; start / pause / stop from the blotter.
 
 **Feed.** Lighter WebSocket fan-out. Public market data works without keys. Testnet or mainnet via `LIGHTER_NETWORK` in backend `.env`.
 
@@ -90,6 +90,10 @@ Keeps N live rungs on static prices across a range; refills on fill.
 ### TWAP
 
 Slices a parent size across time into Clips.
+
+### Planner
+
+Runs one trade from its stop: sends the entry (Limit or Market) or takes over an open Position, sizes it from a risk % of equity, puts on a stop tied to the Position and Take Profit targets, and moves the stop to breakeven once the first target fills. Opened from the ticket's Algo menu or a Positions row. Unlike the other algos, its stop and targets stay on the venue through a desk restart. Rules: [docs/planner-rules.md](docs/planner-rules.md).
 
 ## Notes
 

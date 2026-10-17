@@ -178,6 +178,9 @@ export function Header({
   const autoKill = useAutoKill();
   const { working: workingAlgos } = algoBlotter(algoBook);
   const algosRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
+  const plannersRunning = workingAlgos.filter(
+    (a) => a.algo_type === "planner" && algoIsWorking(a.status)
+  ).length;
   const bid = parseFloat(bbo.bid ?? "");
   const ask = parseFloat(bbo.ask ?? "");
   const spot = bid > 0 && ask > 0 ? (bid + ask) / 2 : bid > 0 ? bid : ask > 0 ? ask : null;
@@ -407,6 +410,13 @@ export function Header({
             <DialogDescription>
               Stop all algos and cancel every open order. Optionally flatten every open
               position with market reduce-only orders.
+              {plannersRunning > 0 && (
+                <span className="mt-2 block text-warn">
+                  {plannersRunning === 1 ? "A Planner is" : `${plannersRunning} Planners are`} live.
+                  Stop + cancel takes off its stop: without a flatten, the Position is left with
+                  no stop.
+                </span>
+              )}
               {openPositions.length > 0 && (
                 <span className="mt-2 block font-mono text-base text-foreground">
                   Flatten: {openPositions.length} position

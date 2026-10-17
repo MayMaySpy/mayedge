@@ -83,3 +83,43 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
             res = await client.get("/api/algos/chase-iceberg")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["id"], "chase-iceberg")
+
+
+class PlannerApiTests(unittest.IsolatedAsyncioTestCase):
+    @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.planner_book")
+    async def test_preview_delegates_to_the_planner_book(self, planner_book, *_mocks) -> None:
+        planner_book.preview_from_body = MagicMock(return_value={"plan": None, "refused": None})
+        app = create_app()
+        transport = ASGITransport(app=app)
+        body = {"market_index": 1, "side": "buy", "stop": "95"}
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            res = await client.post("/api/algos/planner/preview", json=body)
+        self.assertEqual(res.status_code, 200)
+        planner_book.preview_from_body.assert_called_once_with(body)
+
+    @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.planner_owns_exit", return_value=True)
+    @patch("mayedge.api.app.order_service")
+    async def test_the_stop_editor_refuses_on_a_planner_market(
+        self, order_service, _owns, *_mocks
+    ) -> None:
+        order_service.enabled = True
+        order_service.create_sl_tp = AsyncMock()
+        app = create_app()
+        transport = ASGITransport(app=app)
+        body = {
+            "market_index": 1,
+            "side": "sell",
+            "size": "0",
+            "sl": {"kind": "market", "trigger": "90"},
+        }
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            res = await client.post("/api/orders/sl-tp", json=body)
+        self.assertEqual(res.status_code, 409)
+        order_service.create_sl_tp.assert_not_called()
+

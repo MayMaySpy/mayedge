@@ -8,15 +8,25 @@ from mayedge.algos.book import find_book, find_book_by_algo_id
 
 
 class DeskRegistryTests(unittest.TestCase):
-    def test_books_include_chase_twap_ladder_and_grid(self) -> None:
+    def test_books_include_chase_twap_ladder_grid_and_planner(self) -> None:
         types = {book.algo_type for book in desk.books}
-        self.assertEqual(types, {"chase-iceberg", "advanced-twap", "ladder", "chase-grid"})
+        self.assertEqual(
+            types, {"chase-iceberg", "advanced-twap", "ladder", "chase-grid", "planner"}
+        )
+
+    def test_grid_and_planner_each_refuse_beside_another_algo(self) -> None:
+        with patch.object(desk.planner_book, "live_on_market", return_value=True):
+            self.assertTrue(desk._market_has_other_desk_algo(desk.grid_book)(1))
+            self.assertTrue(desk.planner_owns_exit(1))
+        with patch.object(desk.grid_book, "live_on_market", return_value=True):
+            self.assertTrue(desk._market_has_other_desk_algo(desk.planner_book)(1))
 
     def test_get_book_by_type(self) -> None:
         self.assertIs(desk.get_book("chase-iceberg"), desk.chase_book)
         self.assertIs(desk.get_book("advanced-twap"), desk.twap_book)
         self.assertIs(desk.get_book("ladder"), desk.ladder_book)
         self.assertIs(desk.get_book("chase-grid"), desk.grid_book)
+        self.assertIs(desk.get_book("planner"), desk.planner_book)
         self.assertIsNone(desk.get_book("unknown-algo"))
 
     def test_find_book_helpers(self) -> None:

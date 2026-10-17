@@ -15,6 +15,8 @@ from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
+from mayedge.algos.planner.book import PlannerBook
+from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
 from mayedge.algos.twap.book import AdvancedTwapBook
 from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 from mayedge.lighter.account import account_service
@@ -71,6 +73,8 @@ def execution() -> ChaseExecution:
         trades_payload=gateway.trades_payload,
         recent_liquidations=gateway.recent_liquidations,
         feed_health=feed_health.snapshot,
+        create_trigger_leg=order_service.create_trigger_leg,
+        amend_trigger_leg=order_service.amend_trigger_leg,
     )
 
 
@@ -103,7 +107,13 @@ grid_book = ChaseGridBook(
     coi_base=GRID_COI_BASE,
     coi_end=GRID_COI_END,
 )
-books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book, grid_book)
+planner_book = PlannerBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=PLANNER_COI_BASE,
+    coi_end=PLANNER_COI_END,
+)
+books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book, grid_book, planner_book)
 
 
 def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
@@ -119,6 +129,12 @@ def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
 
 
 grid_book.set_market_conflict(_market_has_other_desk_algo(grid_book))
+planner_book.set_market_conflict(_market_has_other_desk_algo(planner_book))
+
+
+def planner_owns_exit(market_index: int) -> bool:
+    """ADR 0015: while a Planner is live on a Market, its exit is Planner's alone."""
+    return planner_book.live_on_market(market_index)
 
 
 def get_book(algo_type: str) -> AlgoBook | None:

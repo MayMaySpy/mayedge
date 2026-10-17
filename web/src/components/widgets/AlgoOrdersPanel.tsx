@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AlgoRow } from "@/components/widgets/algo/AlgoRow";
+import { PlannerRow } from "@/components/widgets/planner/PlannerRow";
 import { algoBlotter, algoResumeNotice } from "@/lib/algos";
 import { api, type AlgoState } from "@/lib/api";
 import { setAlgo, useLiveAlgos } from "@/lib/liveData";
@@ -46,24 +47,36 @@ function AlgoList({
 
   return (
     <>
-      {rows.map((algo) => (
-        <AlgoRow
-          key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
-          algo={algo}
-          busy={busyId === algo.algo_id || busyId === "*"}
-          emphasize={!!symbol && algo.symbol === symbol}
-          tradingEnabled={tradingEnabled}
-          onStop={
-            showControls && algo.algo_id ? () => onStop(algo.algo_id!) : undefined
-          }
-          onPause={
-            showControls && algo.algo_id ? () => onPause(algo.algo_id!) : undefined
-          }
-          onResume={
-            showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined
-          }
-        />
-      ))}
+      {rows.map((algo) =>
+        algo.algo_type === "planner" ? (
+          <PlannerRow
+            key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
+            algo={algo}
+            busy={busyId === algo.algo_id || busyId === "*"}
+            emphasize={!!symbol && algo.symbol === symbol}
+            tradingEnabled={tradingEnabled}
+            onStop={showControls && algo.algo_id ? () => onStop(algo.algo_id!) : undefined}
+            onResume={showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined}
+          />
+        ) : (
+          <AlgoRow
+            key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
+            algo={algo}
+            busy={busyId === algo.algo_id || busyId === "*"}
+            emphasize={!!symbol && algo.symbol === symbol}
+            tradingEnabled={tradingEnabled}
+            onStop={
+              showControls && algo.algo_id ? () => onStop(algo.algo_id!) : undefined
+            }
+            onPause={
+              showControls && algo.algo_id ? () => onPause(algo.algo_id!) : undefined
+            }
+            onResume={
+              showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined
+            }
+          />
+        )
+      )}
     </>
   );
 }

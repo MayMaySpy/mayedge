@@ -61,6 +61,14 @@ async function openDialog(user: ReturnType<typeof userEvent.setup>) {
 afterEach(cleanup);
 
 describe("PositionProtectPopover", () => {
+  it("shows a Planner's exit and edits nothing while Planner owns it", () => {
+    setup({ lockedBy: "Planner", orders: [LIVE_STOP] });
+    expect(screen.queryByTitle("TP/SL for Position")).toBeNull();
+    expect(screen.getByTitle("Planner owns the exit on this Market").textContent).toContain(
+      "Planner"
+    );
+  });
+
   it("places a market Stop on the whole long Position", async () => {
     const { onPlace, user } = setup();
     const submit = await openDialog(user);

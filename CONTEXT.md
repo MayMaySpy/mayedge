@@ -162,6 +162,22 @@ _Avoid_: calling Relative Strength “strength” without “relative”
 An algo that slices a parent size across time into Clips.
 _Avoid_: VWAP, iceberg
 
+**Planner**:
+An algo that runs one trade from the stop out: it sends the entry (or takes over an open Position), places the stop and targets as Clips, and moves the stop to Breakeven once the first target fills. It owns the exit on its Market. The rules are in [docs/planner-rules.md](docs/planner-rules.md).
+_Avoid_: Planer, bracket, OCO, setup
+
+**R**:
+The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R.
+_Avoid_: risk unit (unqualified), ATR, a second "suggested" stop
+
+**Breakeven**:
+A Planner stop moved to entry plus round-trip fees, so closing there loses nothing.
+_Avoid_: BE (in prose), entry (as the stop price)
+
+**Runner**:
+The part of a Planner Position no target closes. It rides on the stop until the Position closes.
+_Avoid_: remainder (unqualified), moonbag, trail (that's v2)
+
 **Kill**:
 Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied. Each step is sent whatever the one before it did, and none waits on the rate budget.
 _Avoid_: panic, shutdown, flatten (as a synonym for Kill)

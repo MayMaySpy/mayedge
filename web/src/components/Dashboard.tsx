@@ -186,7 +186,9 @@ function ChartPanel({
       const buy = o.side === "buy";
       const protect = stopTakeKind(o.order_type);
       const algo = algoOrderKind(o.client_order_index, { reduceOnly: o.reduce_only });
-      const tag = protect === "sl" ? "SL " : protect === "tp" ? "TP " : algo ? `${algo} ` : "";
+      const owner = algo ? `${algo} ` : "";
+      const tag =
+        protect === "sl" ? `${owner}SL ` : protect === "tp" ? `${owner}TP ` : algo ? `${algo} ` : "";
       const qty = parseFloat(o.remaining) > 0 ? formatSize(o.remaining) : "";
       const side = buy ? "BUY" : "SELL";
       const isLimitTicket = !protect && !algo;

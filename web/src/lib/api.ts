@@ -247,6 +247,58 @@ export interface AlgoState {
     tp_price: string;
     merged?: boolean;
   }[];
+  planner?: PlannerRuntime | null;
+}
+
+export interface PlannerTargetPlan {
+  index: number;
+  price: string;
+  qty: string;
+  pct: string;
+  r: string;
+  move_pct: string;
+}
+
+/** What Planner will send: every number comes from one stop (docs/planner-rules.md). */
+export interface PlannerPlan {
+  side: "buy" | "sell";
+  entry: string;
+  stop: string;
+  r: string;
+  size: string;
+  targets: PlannerTargetPlan[];
+  runner: string;
+  risk_usd: string;
+  risk_pct: string | null;
+  breakeven: string;
+  stop_pct: string;
+  warnings: string[];
+}
+
+export interface PlannerRefusal {
+  rule: string;
+  message: string;
+}
+
+export interface PlannerPreview {
+  plan: PlannerPlan | null;
+  refused: PlannerRefusal | null;
+  replaces: OpenOrder[];
+  equity: string | null;
+  mark: string;
+}
+
+export interface PlannerRuntime {
+  phase: "entering" | "managing";
+  plan: PlannerPlan | null;
+  roles: Record<string, string>;
+  entry_filled: string;
+  expected_size: string;
+  stop_trigger: string | null;
+  breakeven_done: boolean;
+  entry_deadline_ms: number | null;
+  /** client_order_index → "entry" | "stop" | "tp1"… */
+  clip_roles?: Record<string, string>;
 }
 
 export interface AlgoBook {
@@ -494,6 +546,16 @@ export const api = {
     request<AlgoBook>("/algos/unpause", {
       method: "POST",
       body: JSON.stringify({ algo_id }),
+    }),
+  plannerPreview: (body: Record<string, unknown>) =>
+    request<PlannerPreview>("/algos/planner/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  plannerReplan: (body: Record<string, unknown>) =>
+    request<AlgoBook>("/algos/planner/replan", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
   kill: (flatten = false) =>
     request<{

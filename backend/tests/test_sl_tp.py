@@ -306,3 +306,82 @@ class StopTakeOrderTests(IsolatedAsyncioTestCase):
             )
         self.assertIn("still live", str(ctx.exception))
         signer.create_sl_limit_order.assert_awaited_once()
+
+
+class AlgoTriggerLegTests(IsolatedAsyncioTestCase):
+    def _svc(self) -> OrderService:
+        svc = OrderService()
+        svc._signer = _signer()
+        svc._next_client_order_index = MagicMock(side_effect=AssertionError("manual band"))
+        return svc
+
+    async def test_a_trigger_leg_goes_out_on_the_algos_client_order_index(self) -> None:
+        svc = self._svc()
+        with patch.object(svc, "_market_meta", return_value=_eth()):
+            out = await svc.create_trigger_leg(
+                1,
+                "sell",
+                "0",
+                role="sl",
+                kind="market",
+                trigger="90",
+                client_order_index=11_000_000_001,
+            )
+        self.assertEqual(out["client_order_index"], 11_000_000_001)
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        call = signer.create_sl_order.await_args.kwargs
+        self.assertEqual(call["client_order_index"], 11_000_000_001)
+        self.assertEqual(call["base_amount"], 0)
+
+    async def test_a_take_profit_limit_rests_at_its_price(self) -> None:
+        svc = self._svc()
+        with patch.object(svc, "_market_meta", return_value=_eth()):
+            await svc.create_trigger_leg(
+                1,
+                "sell",
+                "0.5",
+                role="tp",
+                kind="limit",
+                trigger="110",
+                price="110",
+                client_order_index=11_000_000_002,
+            )
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        call = signer.create_tp_limit_order.await_args.kwargs
+        self.assertEqual(call["trigger_price"], 11000)
+        self.assertEqual(call["price"], 11000)
+        self.assertEqual(call["base_amount"], 5)
+
+    async def test_the_stop_editor_never_replaces_an_algos_stop(self) -> None:
+        svc = OrderService()
+        svc._signer = _signer()
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+        planner_stop = OpenOrder(
+            order_index=88,
+            client_order_index=11_000_000_005,
+            market_index=1,
+            symbol="ETH",
+            side="sell",
+            price="89.10",
+            size="0",
+            remaining="0",
+            order_type="stop-loss",
+            reduce_only=True,
+            trigger_price="90",
+        )
+        cancel = AsyncMock()
+        with (
+            patch.object(svc, "_market_meta", return_value=_eth()),
+            patch.object(svc, "cancel_order", cancel),
+            patch(
+                "mayedge.lighter.orders.account_service.list_open_orders",
+                return_value=[planner_stop],
+            ),
+        ):
+            await svc.create_sl_tp(1, "sell", "0", sl={"kind": "market", "trigger": "85"})
+        signer = svc._signer
+        assert isinstance(signer, MagicMock)
+        signer.create_sl_order.assert_awaited_once()
+        cancel.assert_not_called()

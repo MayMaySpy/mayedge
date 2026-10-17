@@ -456,6 +456,7 @@ class OrderService:
         role: str,
         leg: dict[str, Any],
         slippage: float,
+        client_order_index: int | None = None,
     ) -> tuple[CreateOrderTxReq, int]:
         kind = str(leg.get("kind") or "")
         trigger = str(leg.get("trigger") or "")
@@ -491,7 +492,7 @@ class OrderService:
             if market_parent
             else self.signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME
         )
-        coi = self._next_client_order_index()
+        coi = client_order_index or self._next_client_order_index()
         req = CreateOrderTxReq(
             MarketIndex=market_index,
             ClientOrderIndex=coi,
@@ -526,6 +527,71 @@ class OrderService:
             send = self.signer.create_tp_limit_order
         _tx, resp, err = await self._retry_nonce(lambda: send(**kwargs))
         return self._created_tx_hash(resp, err, meta, action="Order")
+
+    async def create_trigger_leg(
+        self,
+        market_index: int,
+        side: str,
+        size: str,
+        *,
+        role: str,
+        kind: str,
+        trigger: str,
+        price: str | None = None,
+        slippage: float = 0.01,
+        client_order_index: int,
+    ) -> dict[str, Any]:
+        """One Stop or Take Profit for an algo, on its own client_order_index.
+
+        ``side`` is the closing side. Size ``0`` is tied to the Position.
+        Unlike create_sl_tp, nothing already on the Market is replaced.
+        """
+        if role not in ("sl", "tp"):
+            raise ValueError("role must be sl or tp")
+        if kind not in ("market", "limit"):
+            raise ValueError("kind must be market or limit")
+        meta = self._market_meta(market_index)
+        is_ask = self._is_ask(side)
+        base_amount = self._scale_size(size, meta.size_decimals, allow_zero=True)
+        req, coi = self._conditional_leg(
+            meta,
+            market_index=market_index,
+            is_ask=is_ask,
+            base_amount=base_amount,
+            role=role,
+            leg={"kind": kind, "trigger": trigger, "price": price},
+            slippage=max(0.0, min(float(slippage), 0.05)),
+            client_order_index=client_order_index,
+        )
+        tx_hash = await self._send_sl_tp_leg(role, kind, req, meta)
+        return {"tx_hash": tx_hash, "client_order_index": coi}
+
+    async def amend_trigger_leg(
+        self,
+        market_index: int,
+        order_index: int,
+        side: str,
+        *,
+        role: str,
+        kind: str,
+        trigger: str,
+        price: str | None = None,
+        slippage: float = 0.01,
+    ) -> dict[str, Any]:
+        """Move an algo's Stop or Take Profit trigger. Size stays, so a tied stop stays tied."""
+        meta = self._market_meta(market_index)
+        is_ask = self._is_ask(side)
+        self._check_trigger_side(meta, is_ask=is_ask, role=role, trigger=trigger)
+        price_int = self._trigger_exec_price(
+            meta,
+            is_ask=is_ask,
+            kind=kind,
+            trigger=trigger,
+            price=price,
+            slippage=max(0.0, min(float(slippage), 0.05)),
+        )
+        exec_price = fmt_decimal(from_scaled(price_int, meta.price_decimals)) or trigger
+        return await self.modify_order(market_index, order_index, exec_price, trigger=trigger)
 
     async def create_sl_tp(
         self,
@@ -567,6 +633,9 @@ class OrderService:
         existing: dict[str, list[Any]] = {"sl": [], "tp": []}
         for order in account_service.list_open_orders():
             if order.market_index != market_index:
+                continue
+            # An algo's own Stop or Take Profit is never this one's to replace.
+            if is_algo_client_order(order.client_order_index):
                 continue
             parsed = protect_role_kind(order.order_type)
             if parsed is None:

@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+import dataclasses
+import sys
+from decimal import Decimal as D
+from pathlib import Path
+from unittest import IsolatedAsyncioTestCase
+from unittest.mock import patch
+
+from mayedge.algos.chase import util
+from mayedge.algos.chase.state import ChaseStatus
+from mayedge.algos.planner import venue as planner_venue
+from mayedge.algos.planner.config import MISMATCH_GRACE_MS, MISSING_GRACE_MS, PLANNER_COI_BASE
+from mayedge.algos.planner.job import PlannerRunner
+from mayedge.algos.planner.plan import PlannerParams, Target, build_plan
+
+# Allow `from planner_harness import ...` when discover runs from backend/
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from planner_harness import MI, FakeBook, FakeClock, FakeVenue  # noqa: E402
+
+LONG = PlannerParams(
+    mode="enter",
+    side="buy",
+    stop=D("95"),
+    targets=[Target("r", D("1"), D("50")), Target("r", D("2"), D("50"))],
+    entry_type="limit",
+    entry_price=D("100"),
+    size=D("2"),
+)
+
+
+class PlannerJobTests(IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.clock = FakeClock()
+        p = patch.object(util, "now_ms", self.clock)
+        p.start()
+        self.addCleanup(p.stop)
+        self.venue = FakeVenue()
+        self.book = FakeBook(self.venue)
+
+    async def _start(self, params: PlannerParams = LONG, **kw) -> PlannerRunner:
+        job = PlannerRunner(self.book)
+        ctx, _ = planner_venue.market_context(self.venue.execution(), MI)
+        plan = build_plan(params, ctx)
+        await job.start(
+            algo_id="PL-0001", market_index=MI, symbol="ETH", params=params, plan=plan, **kw
+        )
+        # Tests drive the job by hand, not through its loop.
+        await job._halt()
+        job._stop.clear()
+        return job
+
+    def _coi(self, kind: str, n: int = 0) -> int:
+        return int(self.venue.sent(kind)[n]["client_order_index"])
+
+    async def _tick(self, job: PlannerRunner, ms: int = 0) -> None:
+        self.clock.advance(ms)
+        await job._evaluate()
+
+    async def _managed(self) -> PlannerRunner:
+        job = await self._start()
+        self.venue.fill(self._coi("limit"), "2")
+        await self._tick(job)
+        self.assertEqual(job.state.phase, "managing")
+        return job
+
+    def _tp1_fills(self) -> None:
+        self.venue.set_mark("105")
+        self.venue.fill(self._coi("trigger_tp", 0), "1")
+
+    # ── entry ──
+
+    async def test_the_stop_goes_on_with_the_first_fill(self) -> None:
+        job = await self._start()
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("trigger_sl"), [])
+        self.venue.fill(self._coi("limit"), "0.5")
+        await self._tick(job)
+        stop = self.venue.sent("trigger_sl")
+        self.assertEqual(len(stop), 1)
+        self.assertEqual(stop[0]["size"], "0")
+        self.assertEqual(stop[0]["trigger"], "95")
+        self.assertEqual(stop[0]["side"], "sell")
+        self.venue.fill(self._coi("limit"), "0.5")
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 1)
+
+    async def test_targets_go_on_once_the_entry_is_complete_from_its_actual_price(self) -> None:
+        job = await self._start()
+        self.venue.fill(self._coi("limit"), "1", price="100")
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("trigger_tp"), [])
+        self.venue.fill(self._coi("limit"), "1", price="99")
+        await self._tick(job)
+        tps = self.venue.sent("trigger_tp")
+        # Entry 99.5, R 4.5: 1R at 104, 2R at 108.5 (rounded toward entry).
+        self.assertEqual([t["trigger"] for t in tps], ["104", "108.5"])
+        self.assertEqual([t["size"] for t in tps], ["1", "1"])
+        self.assertTrue(all(t["kind"] == "limit" for t in tps))
+        # P3: the risk is restated at the entry that filled.
+        plan = job.state.plan
+        assert plan is not None
+        self.assertEqual(plan.entry, D("99.5"))
+        self.assertEqual(plan.risk_usd, D("9"))
+
+    async def test_the_entry_is_a_clip_on_planners_band(self) -> None:
+        await self._start()
+        limit = self.venue.sent("limit")[0]
+        self.assertGreater(limit["client_order_index"], PLANNER_COI_BASE)
+        self.assertEqual(limit["time_in_force"], "gtt")
+        self.assertFalse(limit["reduce_only"])
+        self.venue.calls.clear()
+        self.venue.orders.clear()
+        self.book.finished.clear()
+        await self._start(dataclasses.replace(LONG, entry_type="market", slippage=0.02))
+        market = self.venue.sent("market")[0]
+        self.assertEqual(market["slippage"], 0.02)
+        self.assertEqual(market["size"], "2")
+
+    async def test_mark_through_the_stop_cancels_the_entry(self) -> None:
+        job = await self._start()
+        self.venue.set_mark("94.9")
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("cancel")), 1)
+        self.assertIn("stop reached", job.state.reason or "")
+
+    async def test_an_expired_entry_protects_what_filled(self) -> None:
+        job = await self._start(dataclasses.replace(LONG, expiry_min=1))
+        self.venue.fill(self._coi("limit"), "1")
+        await self._tick(job, 61_000)
+        self.assertEqual(len(self.venue.sent("cancel")), 1)
+        await self._tick(job)
+        self.assertEqual(job.state.phase, "managing")
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 1)
+        self.assertEqual([t["size"] for t in self.venue.sent("trigger_tp")], ["0.5", "0.5"])
+
+    async def test_an_entry_that_never_fills_ends_the_planner(self) -> None:
+        job = await self._start(dataclasses.replace(LONG, expiry_min=1))
+        await self._tick(job, 61_000)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.DONE)
+        self.assertEqual(self.book.finished, [job])
+        self.assertEqual(self.venue.sent("trigger_sl"), [])
+
+    async def test_a_vanished_entry_is_not_a_fill(self) -> None:
+        job = await self._start()
+        await self._tick(job)
+        self.venue.orders.clear()
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.DONE)
+        self.assertEqual(job.state.entry_filled, D("0"))
+        self.assertEqual(self.venue.sent("trigger_sl"), [])
+
+    async def test_a_stop_mark_has_passed_closes_at_market(self) -> None:
+        job = await self._start()
+        self.venue.fill(self._coi("limit"), "1")
+        self.venue.set_mark("94")
+        await self._tick(job)
+        close = self.venue.sent("market")
+        self.assertEqual(len(close), 1)
+        self.assertTrue(close[0]["reduce_only"])
+        self.assertEqual(close[0]["size"], "1")
+        self.assertEqual(close[0]["side"], "sell")
+
+    # ── manage ──
+
+    async def test_breakeven_once_the_first_target_fills(self) -> None:
+        job = await self._managed()
+        self._tp1_fills()
+        await self._tick(job)
+        amends = self.venue.sent("amend")
+        self.assertEqual(len(amends), 1)
+        self.assertEqual(amends[0]["trigger"], "100")
+        self.assertTrue(job.state.breakeven_done)
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("amend")), 1)
+        self.assertEqual(job.state.expected_size, D("1"))
+
+    async def test_breakeven_covers_the_round_trip_fee(self) -> None:
+        payload = self.venue.payload
+        self.venue.payload = lambda: {**payload(), "taker_fee_bps": "5"}  # type: ignore[method-assign]
+        job = await self._managed()
+        self._tp1_fills()
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("amend")[0]["trigger"], "100.1")
+
+    async def test_breakeven_waits_while_mark_sits_on_it(self) -> None:
+        job = await self._managed()
+        self.venue.fill(self._coi("trigger_tp", 0), "1")
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("amend"), [])
+        self.assertFalse(job.state.breakeven_done)
+        self.venue.set_mark("101")
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("amend")), 1)
+
+    async def test_breakeven_never_loosens_the_stop(self) -> None:
+        job = await self._managed()
+        job.state.stop_trigger = D("100.5")
+        self._tp1_fills()
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("amend"), [])
+        self.assertTrue(job.state.breakeven_done)
+
+    async def test_an_outside_change_pauses_the_planner(self) -> None:
+        job = await self._managed()
+        self.venue.move("1", "100")
+        await self._tick(job)
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        await self._tick(job, MISMATCH_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.PAUSED)
+        self.assertEqual(job.state.reason, "position changed")
+        self.assertEqual(self.venue.sent("cancel"), [])
+        self.assertEqual(len(self.venue.orders), 3)
+        await job.unpause()
+        await job._halt()
+        job._stop.clear()
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(job.state.expected_size, D("3"))
+
+    async def test_a_restart_applies_the_target_fill_it_missed(self) -> None:
+        job = await self._managed()
+        await job.drain_for_shutdown()
+        row = {**job.snapshot(), **job.state.ledger.to_persist()}
+        self._tp1_fills()
+        again = PlannerRunner(self.book)
+        again.hydrate_from_row(row)
+        await again.resume()
+        await again._halt()
+        again._stop.clear()
+        self.assertEqual(len(self.venue.sent("amend")), 1)
+        await self._tick(again)
+        self.assertEqual(len(self.venue.sent("amend")), 1)
+
+    async def test_shutdown_leaves_the_stop_and_targets_on(self) -> None:
+        job = await self._managed()
+        await job.drain_for_shutdown()
+        self.assertEqual(self.venue.sent("cancel"), [])
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+
+    async def test_a_missing_stop_is_put_back(self) -> None:
+        job = await self._managed()
+        await self._tick(job)
+        del self.venue.orders[self._coi("trigger_sl")]
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 2)
+
+    # ── end ──
+
+    async def test_flat_ends_the_planner(self) -> None:
+        job = await self._managed()
+        self.venue.trigger(self._coi("trigger_sl"))
+        await self._tick(job)
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.DONE)
+        self.assertEqual(len(self.venue.sent("cancel")), 2)
+        self.assertEqual(self.venue.orders, {})
+
+    async def test_stopping_cancels_every_clip(self) -> None:
+        job = await self._managed()
+        await job.stop()
+        self.assertEqual(job.state.status, ChaseStatus.STOPPED)
+        self.assertEqual(self.venue.orders, {})
+        self.assertEqual(self.book.finished, [job])
+
+    # ── attach ──
+
+    async def test_attach_puts_its_stop_on_before_pulling_tickets(self) -> None:
+        self.venue.move("2", "100")
+        self.venue.orders[1_000_000_009] = {
+            "order_index": "77",
+            "client_order_index": "1000000009",
+            "market_index": MI,
+            "side": "sell",
+            "price": "89",
+            "size": "0",
+            "remaining": "0",
+            "filled": "0",
+            "order_type": "stop-loss",
+            "reduce_only": True,
+            "trigger_price": "90",
+        }
+        replaced = planner_venue.ticket_protects(self.venue.execution(), MI)
+        self.assertEqual(len(replaced), 1)
+        job = await self._start(
+            dataclasses.replace(LONG, mode="attach", size=None, entry_price=None),
+            replaced=replaced,
+        )
+        kinds = [k for k, _ in self.venue.calls]
+        self.assertEqual(kinds[:2], ["trigger_sl", "cancel"])
+        self.assertEqual(self.venue.sent("cancel")[0]["order_index"], 77)
+        self.assertEqual(job.state.phase, "managing")
+        self.assertEqual(len(self.venue.sent("trigger_tp")), 2)
+
+    async def test_a_replan_moves_the_stop_and_redraws_the_targets(self) -> None:
+        job = await self._managed()
+        await job.replan(
+            dataclasses.replace(LONG, stop=D("97"), targets=[Target("price", D("106"), D("100"))])
+        )
+        await job._halt()
+        job._stop.clear()
+        self.assertEqual(self.venue.sent("amend")[0]["trigger"], "97")
+        self.assertEqual(len(self.venue.sent("cancel")), 2)
+        tps = self.venue.sent("trigger_tp")
+        self.assertEqual(tps[-1]["trigger"], "106")
+        self.assertEqual(tps[-1]["size"], "2")

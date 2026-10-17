@@ -380,4 +380,5 @@ def _public_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         "inventory_vwap": runtime.get("inventory_vwap"),
         "captured_pnl": runtime.get("captured_pnl"),
         "profit_bps": params.get("profit_bps") if isinstance(params, dict) else None,
+        "planner": runtime.get("planner"),
     }

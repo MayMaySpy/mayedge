@@ -56,6 +56,9 @@ export interface AlgoPlugin<TState = unknown> {
   ParamsSheet: ComponentType<AlgoParamsSheetProps<TState>>;
 }
 
+/** What client_order_index attribution and labels need from an algo. */
+export type AlgoBandEntry = Pick<AlgoPlugin, "id" | "label" | "deskType" | "coi">;
+
 export function coiInBand(coi: string | number | null | undefined, band: AlgoCoiBand): boolean {
   if (coi == null || coi === "") return false;
   const n = typeof coi === "number" ? coi : Number(coi);

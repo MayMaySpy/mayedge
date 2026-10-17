@@ -370,6 +370,8 @@ def create_app() -> FastAPI:
     @app.post("/api/orders/sl-tp")
     async def place_sl_tp(req: StopTakeRequest) -> dict[str, Any]:
         _require_trading()
+        if desk.planner_owns_exit(req.market_index):
+            raise HTTPException(409, "Planner owns the exit on this Market")
         return await _trade(
             lambda: order_service.create_sl_tp(
                 req.market_index,
@@ -458,6 +460,22 @@ def create_app() -> FastAPI:
         if book is None:
             raise HTTPException(404, f"Unknown algo type {algo_type!r}")
         return book.to_dict()
+
+    @app.post("/api/algos/planner/preview")
+    async def preview_planner(body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return desk.planner_book.preview_from_body(body)
+        except (ValueError, ArithmeticError, KeyError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/algos/planner/replan")
+    async def replan_planner(body: dict[str, Any]) -> dict[str, Any]:
+        _require_trading()
+        try:
+            await desk.planner_book.replan_from_body(body)
+        except (ValueError, ArithmeticError, KeyError) as e:
+            raise HTTPException(400, str(e)) from e
+        return desk.algo_book()
 
     @app.post("/api/algos/{algo_type}/start")
     async def start_algo(algo_type: str, body: dict[str, Any]) -> dict[str, Any]:

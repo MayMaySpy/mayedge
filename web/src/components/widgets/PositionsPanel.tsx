@@ -3,6 +3,8 @@ import { X } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
+import { PositionPlanButton } from "@/components/widgets/planner/PositionPlanButton";
+import { livePlannerFor } from "@/lib/plannerPlan";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
@@ -539,6 +541,7 @@ export function PositionsPanel({
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
                     const m = markets.find((x) => x.market_index === p.market_index) ?? market;
+                    const planner = livePlannerFor(algoBook, p.market_index);
                     return (
                       <TableRow
                         key={p.market_index}
@@ -606,26 +609,35 @@ export function PositionsPanel({
                           className="text-right"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <PositionProtectPopover
-                            position={p}
-                            mark={mark}
-                            sizeDecimals={m?.size_decimals ?? 4}
-                            priceDecimals={m?.price_decimals ?? 4}
-                            tradingEnabled={tradingEnabled && feed.ready}
-                            busy={busy != null}
-                            orders={allOrders}
-                            onPlace={async (body) => {
-                              const ok = await run(
-                                `protect-${p.market_index}`,
-                                () => api.placeStopTake(body),
-                                `${p.symbol} stop / take profit placed`
-                              );
-                              if (!ok) throw new Error("not placed");
-                            }}
-                            onCancel={async (orderIndex) => {
-                              await cancelOrder(p.market_index, orderIndex);
-                            }}
-                          />
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            <PositionProtectPopover
+                              lockedBy={planner ? "Planner" : null}
+                              position={p}
+                              mark={mark}
+                              sizeDecimals={m?.size_decimals ?? 4}
+                              priceDecimals={m?.price_decimals ?? 4}
+                              tradingEnabled={tradingEnabled && feed.ready}
+                              busy={busy != null}
+                              orders={allOrders}
+                              onPlace={async (body) => {
+                                const ok = await run(
+                                  `protect-${p.market_index}`,
+                                  () => api.placeStopTake(body),
+                                  `${p.symbol} stop / take profit placed`
+                                );
+                                if (!ok) throw new Error("not placed");
+                              }}
+                              onCancel={async (orderIndex) => {
+                                await cancelOrder(p.market_index, orderIndex);
+                              }}
+                            />
+                            <PositionPlanButton
+                              position={p}
+                              market={m ?? null}
+                              running={planner}
+                              disabled={!tradingEnabled || !feed.ready || busy != null}
+                            />
+                          </div>
                         </TableCell>
                         <TableCell
                           className="pl-2 text-right"

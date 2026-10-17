@@ -64,7 +64,10 @@ export function PositionProtectPopover({
   orders,
   onPlace,
   onCancel,
+  lockedBy,
 }: {
+  /** ADR 0015: an algo owns this exit, so the editor shows it and changes nothing. */
+  lockedBy?: string | null;
   position: Position;
   mark: number;
   sizeDecimals: number;
@@ -146,6 +149,18 @@ export function PositionProtectPopover({
       setSending(false);
     }
   };
+
+  if (lockedBy) {
+    return (
+      <span
+        title={`${lockedBy} owns the exit on this Market`}
+        className="inline-flex items-center gap-1 font-mono text-sm tabular-nums text-muted-foreground"
+      >
+        <span>{protectTriggersLabel(shown.tp, shown.sl)}</span>
+        <span className="text-xs uppercase tracking-wide">{lockedBy}</span>
+      </span>
+    );
+  }
 
   return (
     <Dialog

@@ -1,0 +1,433 @@
+import { useEffect, useState } from "react";
+import { Plus, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { loadSlipPct } from "@/components/widgets/orderTicket/math";
+import { TicketField } from "@/components/widgets/orderTicket/ui";
+import { api, type AlgoState, type Market, type PlannerPreview } from "@/lib/api";
+import { setAlgo } from "@/lib/liveData";
+import { notifyErr, notifyOrder } from "@/lib/notify";
+import { decimalInput } from "@/lib/numbers";
+import {
+  MAX_TARGETS,
+  defaultPlannerForm,
+  formFromPlanner,
+  plannerBody,
+  plannerFormBlock,
+  replacedLine,
+  rLabel,
+  runnerPct,
+  signedPct,
+  type PlannerForm,
+  type PlannerMode,
+  type PlannerSide,
+} from "@/lib/plannerPlan";
+import { cn, formatPrice, formatSize } from "@/lib/utils";
+
+const PREVIEW_DEBOUNCE_MS = 250;
+
+function Row({ label, children, tone }: { label: string; children: React.ReactNode; tone?: "bid" | "ask" }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 font-mono text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn("tabular-nums text-text", tone === "bid" && "text-bid", tone === "ask" && "text-ask")}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+function Seg<T extends string>({
+  value,
+  onChange,
+  items,
+  label,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  items: { value: T; label: string }[];
+  label: string;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      spacing={0}
+      value={value}
+      onValueChange={(v) => {
+        if (v) onChange(v as T);
+      }}
+      aria-label={label}
+    >
+      {items.map((i) => (
+        <ToggleGroupItem key={i.value} value={i.value} className="h-7 px-2.5">
+          {i.label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+/**
+ * Planner: one trade run from its stop. Enter sends the entry; Attach takes over
+ * the open Position; a running Planner re-plans here (docs/planner-rules.md).
+ */
+interface PlannerDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  market: Market;
+  mode: PlannerMode;
+  /** Attach: the Position's side. Enter: the side to start on. */
+  side?: PlannerSide;
+  /** A live Planner on this Market: the dialog re-plans it. */
+  running?: AlgoState;
+}
+
+export function PlannerDialog(props: PlannerDialogProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      {/* Mounted per open, so each open starts from a fresh form. */}
+      {props.open ? <PlannerDialogBody {...props} /> : null}
+    </Dialog>
+  );
+}
+
+function PlannerDialogBody({ onOpenChange, market, mode, side, running }: PlannerDialogProps) {
+  const replan = running != null;
+  const [form, setForm] = useState<PlannerForm>(() =>
+    running ? formFromPlanner(running) : defaultPlannerForm(side ?? "buy")
+  );
+  const [drawn, setDrawn] = useState<{ key: string; preview: PlannerPreview | null } | null>(null);
+  const [sending, setSending] = useState(false);
+
+  const set = (patch: Partial<PlannerForm>) => setForm((f) => ({ ...f, ...patch }));
+  const setTarget = (i: number, patch: Partial<PlannerForm["targets"][number]>) =>
+    setForm((f) => ({ ...f, targets: f.targets.map((t, j) => (j === i ? { ...t, ...patch } : t)) }));
+
+  const slippage = Math.min(0.05, Math.max(0, (parseFloat(loadSlipPct()) || 1) / 100));
+  const blocked = plannerFormBlock(form, replan ? "attach" : mode);
+  const body = plannerBody(form, {
+    mode: replan ? "attach" : mode,
+    marketIndex: market.market_index,
+    slippage,
+  });
+  const bodyKey = JSON.stringify(body);
+
+  const wantPreview = !replan && !blocked;
+  useEffect(() => {
+    if (!wantPreview) return;
+    let live = true;
+    const t = setTimeout(() => {
+      api
+        .plannerPreview(JSON.parse(bodyKey) as Record<string, unknown>)
+        .then((p) => {
+          if (live) setDrawn({ key: bodyKey, preview: p });
+        })
+        .catch(() => {
+          if (live) setDrawn({ key: bodyKey, preview: null });
+        });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [wantPreview, bodyKey]);
+
+  // A preview drawn for other inputs is not this plan.
+  const preview = wantPreview && drawn?.key === bodyKey ? drawn.preview : null;
+  const plan = preview?.plan ?? null;
+  const refused = preview?.refused ?? null;
+  const replaces = mode === "attach" && !replan ? replacedLine(preview?.replaces ?? []) : null;
+  const canSend = !blocked && !sending && (replan || (plan != null && refused == null));
+  const long = form.side === "buy";
+  const runner = runnerPct(form.targets);
+
+  const send = async () => {
+    if (!canSend) return;
+    setSending(true);
+    try {
+      const book = replan
+        ? await api.plannerReplan({ ...body, algo_id: running?.algo_id })
+        : await api.algoStart("planner", body);
+      setAlgo(book);
+      notifyOrder({
+        kind: "planner",
+        side: form.side,
+        size: plan?.size,
+        symbol: market.symbol,
+        status: "active",
+        note: replan ? "re-planned" : mode === "attach" ? "attached" : undefined,
+      });
+      onOpenChange(false);
+    } catch (e) {
+      notifyErr(e instanceof Error ? e.message : "Planner refused");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const title = replan
+    ? `Re-plan ${market.symbol}`
+    : mode === "attach"
+      ? `Plan ${market.symbol} ${long ? "long" : "short"}`
+      : `Planner · ${market.symbol}`;
+
+  return (
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>
+          {replan
+            ? "Move the stop or redraw the targets. Checked as if new."
+            : mode === "attach"
+              ? "Takes over this Position's exit: one stop, your targets, breakeven after TP1."
+              : "Entry, stop, targets and size from one stop. Breakeven after TP1."}
+        </DialogDescription>
+      </DialogHeader>
+
+      <FieldGroup className="gap-3">
+        {mode === "enter" && !replan && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Seg
+              label="Side"
+              value={form.side}
+              onChange={(v) => set({ side: v })}
+              items={[
+                { value: "buy", label: "Long" },
+                { value: "sell", label: "Short" },
+              ]}
+            />
+            <Seg
+              label="Entry type"
+              value={form.entryType}
+              onChange={(v) => set({ entryType: v })}
+              items={[
+                { value: "limit", label: "Limit" },
+                { value: "market", label: "Market" },
+              ]}
+            />
+          </div>
+        )}
+
+        <FieldGroup className="grid grid-cols-2 items-start gap-3">
+          {mode === "enter" && !replan && form.entryType === "limit" ? (
+            <TicketField
+              id="planner-entry"
+              label="Entry price"
+              value={form.entryPrice}
+              inputMode="decimal"
+              placeholder="Entry"
+              sanitize={decimalInput}
+              onChange={(v) => set({ entryPrice: v })}
+            />
+          ) : null}
+          <TicketField
+            id="planner-stop"
+            label="Stop"
+            value={form.stop}
+            inputMode="decimal"
+            placeholder="Stop"
+            sanitize={decimalInput}
+            onChange={(v) => set({ stop: v })}
+          />
+        </FieldGroup>
+
+        {mode === "enter" && !replan && (
+          <div className="flex items-start gap-2">
+            <Seg
+              label="Size from"
+              value={form.sizeMode}
+              onChange={(v) => set({ sizeMode: v })}
+              items={[
+                { value: "risk", label: "Risk %" },
+                { value: "size", label: "Size" },
+              ]}
+            />
+            {form.sizeMode === "risk" ? (
+              <TicketField
+                id="planner-risk"
+                label="Risk % of equity"
+                value={form.riskPct}
+                inputMode="decimal"
+                placeholder="1"
+                sanitize={decimalInput}
+                onChange={(v) => set({ riskPct: v })}
+                className="flex-1"
+              />
+            ) : (
+              <TicketField
+                id="planner-size"
+                label={`Size ${market.symbol}`}
+                value={form.size}
+                inputMode="decimal"
+                placeholder={`Size ${market.symbol}`}
+                sanitize={decimalInput}
+                onChange={(v) => set({ size: v })}
+                className="flex-1"
+              />
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          {form.targets.map((t, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <span className="w-9 pt-1.5 font-mono text-xs text-muted-foreground">TP{i + 1}</span>
+              <Seg
+                label={`Target ${i + 1} kind`}
+                value={t.kind}
+                onChange={(v) => setTarget(i, { kind: v, value: "" })}
+                items={[
+                  { value: "r", label: "R" },
+                  { value: "price", label: "Price" },
+                ]}
+              />
+              <TicketField
+                id={`planner-tp${i}-value`}
+                label={t.kind === "r" ? `Target ${i + 1} R` : `Target ${i + 1} price`}
+                value={t.value}
+                inputMode="decimal"
+                placeholder={t.kind === "r" ? "R" : "Price"}
+                sanitize={decimalInput}
+                onChange={(v) => setTarget(i, { value: v })}
+                className="flex-1"
+              />
+              <TicketField
+                id={`planner-tp${i}-pct`}
+                label={`Target ${i + 1} % of the Position`}
+                value={t.pct}
+                inputMode="decimal"
+                placeholder="%"
+                sanitize={decimalInput}
+                onChange={(v) => setTarget(i, { pct: v })}
+                addon="%"
+                className="w-20"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                aria-label={`Remove target ${i + 1}`}
+                onClick={() => set({ targets: form.targets.filter((_, j) => j !== i) })}
+              >
+                <X />
+              </Button>
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7"
+              disabled={form.targets.length >= MAX_TARGETS}
+              onClick={() =>
+                set({ targets: [...form.targets, { kind: "r", value: "", pct: String(runner || "") }] })
+              }
+            >
+              <Plus data-icon="inline-start" />
+              Target
+            </Button>
+            <span className="font-mono text-xs text-muted-foreground">
+              Runner {Number(runner.toFixed(2))}% rides on the stop
+            </span>
+          </div>
+        </div>
+
+        <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
+          <FieldLabel htmlFor="planner-be" className="text-base font-normal text-muted-foreground">
+            Stop to breakeven after TP1
+          </FieldLabel>
+          <Switch
+            id="planner-be"
+            checked={form.breakeven}
+            onCheckedChange={(v) => set({ breakeven: v === true })}
+            aria-label="Stop to breakeven after TP1"
+          />
+        </Field>
+
+        {mode === "enter" && !replan && form.entryType === "limit" && (
+          <TicketField
+            id="planner-expiry"
+            label="Cancel the entry after minutes"
+            value={form.expiryMin}
+            inputMode="numeric"
+            placeholder="Expiry, minutes (optional)"
+            sanitize={(raw) => raw.replace(/[^\d]/g, "")}
+            onChange={(v) => set({ expiryMin: v })}
+          />
+        )}
+      </FieldGroup>
+
+      <div className="flex flex-col gap-1 rounded-sm border border-rule p-2" aria-live="polite">
+        {blocked ? (
+          <span className="font-mono text-sm text-muted-foreground">{blocked}</span>
+        ) : replan ? (
+          <span className="font-mono text-sm text-muted-foreground">
+            The desk checks the stop and targets against mark when you re-plan.
+          </span>
+        ) : refused ? (
+          <span className="font-mono text-sm text-warn">
+            {refused.rule} · {refused.message}
+          </span>
+        ) : plan ? (
+          <>
+            <Row label="Entry">{formatPrice(plan.entry)}</Row>
+            <Row label="Stop" tone="ask">
+              {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)})
+            </Row>
+            <Row label="R">{formatPrice(plan.r)}</Row>
+            <Row label="Size">
+              {formatSize(plan.size)} {market.symbol}
+            </Row>
+            <Row label="Risk at the stop">
+              ${Number(parseFloat(plan.risk_usd).toFixed(2))}
+              {plan.risk_pct != null ? ` = ${Number(parseFloat(plan.risk_pct).toFixed(2))}% of equity` : ""}
+            </Row>
+            {plan.targets.map((t) => (
+              <Row key={t.index} label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}%`} tone="bid">
+                {formatPrice(t.price)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}
+              </Row>
+            ))}
+            {parseFloat(plan.runner) > 0 && <Row label="Runner">{formatSize(plan.runner)}</Row>}
+            {form.breakeven && <Row label="At TP1, stop to">{formatPrice(plan.breakeven)}</Row>}
+            {plan.warnings.map((w) => (
+              <span key={w} className="font-mono text-xs text-warn">
+                {w}
+              </span>
+            ))}
+            {replaces && <span className="font-mono text-xs text-warn">{replaces}</span>}
+          </>
+        ) : (
+          <span className="font-mono text-sm text-muted-foreground">Drawing the plan…</span>
+        )}
+      </div>
+
+      <DialogFooter className="gap-2 sm:justify-end">
+        <Button type="button" variant="ghost" disabled={sending} onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant={long ? "buy" : "sell"}
+          disabled={!canSend}
+          onClick={() => void send()}
+        >
+          {replan ? "Re-plan" : mode === "attach" ? "Attach" : long ? "Plan long" : "Plan short"}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}

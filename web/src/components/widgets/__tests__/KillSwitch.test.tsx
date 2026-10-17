@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Header } from "@/components/widgets/Header";
 import { api, type Market, type Position } from "@/lib/api";
-import { setAccount, setAutoKill, setFeedHealth } from "@/lib/liveData";
+import { setAccount, setAlgo, setAutoKill, setFeedHealth } from "@/lib/liveData";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 
 vi.mock("@/lib/notify", () => ({
@@ -96,9 +96,28 @@ afterEach(() => {
   for (const fn of [notifyErr, notifyOk, notifyWarn]) vi.mocked(fn).mockClear();
   setAccount(null);
   setAutoKill(DISARMED);
+  setAlgo({ working: [], history: [] });
 });
 
 describe("Kill switch", () => {
+  it("warns that Stop + cancel leaves a Planner's Position with no stop", async () => {
+    setAlgo({
+      working: [
+        { type: "algo", id: "planner", algo_type: "planner", algo_id: "PL-0001", status: "running", symbol: "ETH" },
+      ],
+      history: [],
+    });
+    const user = setup();
+    await user.click(button("Kill"));
+    expect(screen.getByText(/A Planner is live/)).toBeTruthy();
+  });
+
+  it("says nothing about Planner when none is live", async () => {
+    const user = setup();
+    await user.click(button("Kill"));
+    expect(screen.queryByText(/Planner is live/)).toBeNull();
+  });
+
   it("does nothing until a choice is made in the dialog", async () => {
     const user = setup();
     await user.click(button("Kill"));

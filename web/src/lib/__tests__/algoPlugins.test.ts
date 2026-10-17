@@ -7,8 +7,11 @@ import {
   chaseIcebergPlugin,
   GRID_COI_BASE,
   isAlgoClientOrder,
+  ALGOS,
   LADDER_COI_BASE,
   ladderPlugin,
+  PLANNER_COI_BASE,
+  PLANNER_COI_END,
   TWAP_COI_BASE,
   twapPlugin,
 } from "@/lib/algoPlugins";
@@ -35,6 +38,14 @@ describe("algo plugin COI bands", () => {
     expect(algoPluginByDeskType("chase-iceberg")?.id).toBe("chase-iceberg");
     expect(algoPluginByDeskType("ladder")?.id).toBe("ladder");
     expect(algoPluginByDeskType("chase-grid")?.id).toBe("chase-grid");
+    expect(algoPluginByDeskType("planner")?.label).toBe("Planner");
+  });
+
+  it("attributes Planner Clips by band without putting Planner in the Algo menu", () => {
+    expect(isAlgoClientOrder(PLANNER_COI_BASE + 1)).toBe(true);
+    expect(isAlgoClientOrder(PLANNER_COI_END)).toBe(false);
+    expect(algoOrderKind(PLANNER_COI_BASE + 1)).toBe("Planner");
+    expect(ALGOS.some((a) => (a.id as string) === "planner")).toBe(false);
   });
 });
 
