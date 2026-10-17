@@ -20,6 +20,8 @@ from mayedge.numbers import fmt_decimal, parse_decimal
 
 logger = logging.getLogger(__name__)
 
+ID_PREFIX = "LD-"
+
 AlgoPayload = dict[str, object]
 
 
@@ -124,15 +126,15 @@ class LadderBook:
 
     def alloc_id(self) -> str:
         self._id_seq += 1
-        store.save_counters(self._id_seq, self._coi_seq)
-        return f"LD-{self._id_seq:04d}"
+        store.save_book_counters(ALGO_ID, self._id_seq, self._coi_seq)
+        return f"{ID_PREFIX}{self._id_seq:04d}"
 
     def alloc_coi(self) -> int:
         self._coi_seq += 1
         coi = self._coi_base + self._coi_seq
         if coi >= self._coi_end:
             raise RuntimeError("Ladder client_order_index range exhausted")
-        store.save_counters(self._id_seq, self._coi_seq)
+        store.save_book_counters(ALGO_ID, self._id_seq, self._coi_seq)
         return coi
 
     def to_dict(self) -> AlgoPayload:
@@ -214,7 +216,9 @@ class LadderBook:
 
     async def restore(self) -> None:
         store.init_db()
-        counters = store.load_counters()
+        counters = store.load_book_counters(
+            ALGO_ID, id_prefix=ID_PREFIX, coi_band=(self._coi_base, self._coi_end)
+        )
         self._id_seq = counters["id_seq"]
         self._coi_seq = counters["coi_seq"]
         self._archive = store.load_history(HISTORY_CAP, algo_type=ALGO_ID)
@@ -323,7 +327,7 @@ class LadderBook:
                     self._persist_job(job, archived=False)
                 except Exception:
                     logger.exception("flush persist failed for %s", job.state.algo_id)
-        store.save_counters(self._id_seq, self._coi_seq)
+        store.save_book_counters(ALGO_ID, self._id_seq, self._coi_seq)
 
     def _market_limits(self, market_index: int) -> tuple[Decimal, Decimal, Decimal]:
         ex = self.execution()

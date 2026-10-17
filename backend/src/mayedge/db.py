@@ -387,6 +387,91 @@ def load_manual_coi_seq() -> int:
         return _meta_int(conn, "manual_coi_seq", fallback="manual_coi_seq:lighter")
 
 
+def save_book_counters(book: str, id_seq: int, coi_seq: int) -> None:
+    """A book's own id and client_order_index counters, under keys no other book writes."""
+    with _lock:
+        conn = _connect()
+        for key, value in ((f"{book}_id_seq", id_seq), (f"{book}_coi_seq", coi_seq)):
+            conn.execute(
+                "INSERT INTO meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, str(value)),
+            )
+        conn.commit()
+
+
+def _has_meta(conn: sqlite3.Connection, key: str) -> bool:
+    return conn.execute("SELECT 1 FROM meta WHERE key = ?", (key,)).fetchone() is not None
+
+
+def _max_run_seq(conn: sqlite3.Connection, id_prefix: str) -> int:
+    best = 0
+    for row in conn.execute(
+        "SELECT algo_id FROM algo_runs WHERE substr(algo_id, 1, ?) = ?",
+        (len(id_prefix), id_prefix),
+    ):
+        try:
+            best = max(best, int(str(row["algo_id"])[len(id_prefix) :]))
+        except ValueError:
+            continue
+    return best
+
+
+def _max_coi_seq(conn: sqlite3.Connection, coi_base: int, coi_end: int) -> int:
+    best = 0
+    for table in ("algo_clips", "algo_fills"):
+        row = conn.execute(
+            f"SELECT MAX(client_order_index) AS top FROM {table} "
+            "WHERE client_order_index >= ? AND client_order_index < ?",
+            (coi_base, coi_end),
+        ).fetchone()
+        if row and row["top"] is not None:
+            best = max(best, int(row["top"]) - coi_base)
+    return best
+
+
+def load_book_counters(
+    book: str,
+    *,
+    id_prefix: str | None = None,
+    coi_band: tuple[int, int] | None = None,
+) -> dict[str, int]:
+    """A book's own counters.
+
+    With id_prefix and coi_band, a book that has never saved its own keys starts above
+    the shared id_seq / coi_seq and above every algo id and client_order_index already
+    in its rows, and those seeds are saved under its own keys.
+    """
+    id_key, coi_key = f"{book}_id_seq", f"{book}_coi_seq"
+    with _lock:
+        conn = _connect()
+        if id_prefix is None or coi_band is None:
+            return {"id_seq": _meta_int(conn, id_key), "coi_seq": _meta_int(conn, coi_key)}
+        seeded = False
+        if _has_meta(conn, id_key):
+            id_seq = _meta_int(conn, id_key)
+        else:
+            id_seq = max(
+                _meta_int(conn, "id_seq", fallback="id_seq:lighter"),
+                _max_run_seq(conn, id_prefix),
+            )
+            _set_meta(conn, id_key, str(id_seq))
+            seeded = True
+        if _has_meta(conn, coi_key):
+            coi_seq = _meta_int(conn, coi_key)
+        else:
+            coi_seq = max(
+                _meta_int(conn, "coi_seq", fallback="coi_seq:lighter"),
+                _max_coi_seq(conn, *coi_band),
+            )
+            _set_meta(conn, coi_key, str(coi_seq))
+            seeded = True
+        if seeded:
+            conn.commit()
+            logger.info("%s counters seeded at id_seq=%s coi_seq=%s", book, id_seq, coi_seq)
+        return {"id_seq": id_seq, "coi_seq": coi_seq}
+
+
 # persist_* import db internals; re-export after they are defined.
 from mayedge.persist_algo import (  # noqa: E402
     load_active_runs,
@@ -419,9 +504,11 @@ __all__ = [
     "list_liquidations",
     "list_open_interest",
     "load_active_runs",
+    "load_book_counters",
     "load_counters",
     "load_history",
     "load_manual_coi_seq",
+    "save_book_counters",
     "save_counters",
     "save_manual_coi_seq",
     "summarize_liquidations",
