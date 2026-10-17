@@ -184,7 +184,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
       : `Planner · ${market.symbol}`;
 
   return (
-    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+    <DialogContent className="max-h-[90vh] overflow-x-hidden overflow-y-auto sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
@@ -282,7 +282,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
 
         <div className="flex flex-col gap-2">
           {form.targets.map((t, i) => (
-            <div key={i} className="flex items-start gap-2">
+            <div key={i} className="flex flex-wrap items-start gap-2">
               <span className="w-9 pt-1.5 font-mono text-xs text-muted-foreground">TP{i + 1}</span>
               <Seg
                 label={`Target ${i + 1} kind`}
@@ -296,34 +296,39 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               <TicketField
                 id={`planner-tp${i}-value`}
                 label={t.kind === "r" ? `Target ${i + 1} R` : `Target ${i + 1} price`}
+                shortLabel={t.kind === "r" ? "R" : "Price"}
                 value={t.value}
                 inputMode="decimal"
                 placeholder={t.kind === "r" ? "R" : "Price"}
                 sanitize={decimalInput}
                 onChange={(v) => setTarget(i, { value: v })}
-                className="flex-1"
+                className="min-w-24 flex-1"
               />
-              <TicketField
-                id={`planner-tp${i}-pct`}
-                label={`Target ${i + 1} % of the Position`}
-                value={t.pct}
-                inputMode="decimal"
-                placeholder="%"
-                sanitize={decimalInput}
-                onChange={(v) => setTarget(i, { pct: v })}
-                addon="%"
-                className="w-20"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                aria-label={`Remove target ${i + 1}`}
-                onClick={() => set({ targets: form.targets.filter((_, j) => j !== i) })}
-              >
-                <X />
-              </Button>
+              {/* On a narrow screen these wrap to their own line together. */}
+              <div className="ml-auto flex items-start gap-2">
+                <TicketField
+                  id={`planner-tp${i}-pct`}
+                  label={`Target ${i + 1} % of the Position`}
+                  shortLabel="Close"
+                  value={t.pct}
+                  inputMode="decimal"
+                  placeholder="50"
+                  sanitize={decimalInput}
+                  onChange={(v) => setTarget(i, { pct: v })}
+                  addon="%"
+                  className="w-36 shrink-0"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label={`Remove target ${i + 1}`}
+                  onClick={() => set({ targets: form.targets.filter((_, j) => j !== i) })}
+                >
+                  <X />
+                </Button>
+              </div>
             </div>
           ))}
           <div className="flex items-center justify-between">
@@ -362,9 +367,10 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
           <TicketField
             id="planner-expiry"
             label="Cancel the entry after minutes"
+            shortLabel="Expiry"
             value={form.expiryMin}
             inputMode="numeric"
-            placeholder="Expiry, minutes (optional)"
+            placeholder="minutes, optional"
             sanitize={(raw) => raw.replace(/[^\d]/g, "")}
             onChange={(v) => set({ expiryMin: v })}
           />

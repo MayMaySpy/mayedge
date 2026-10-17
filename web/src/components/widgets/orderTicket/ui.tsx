@@ -30,6 +30,7 @@ export type TicketChipSet = {
 export function TicketField({
   id,
   label,
+  shortLabel,
   value,
   onChange,
   addon,
@@ -43,6 +44,8 @@ export function TicketField({
 }: {
   id: string;
   label: string;
+  /** What the field shows when the full label is too long for it. `label` stays its name. */
+  shortLabel?: string;
   value: string;
   onChange: (raw: string) => void;
   addon?: ReactNode;
@@ -62,7 +65,7 @@ export function TicketField({
         </FieldLabel>
         <InputGroup>
           <InputGroupAddon align="inline-start">
-            <InputGroupText className="font-normal">{label}</InputGroupText>
+            <InputGroupText className="font-normal">{shortLabel ?? label}</InputGroupText>
           </InputGroupAddon>
           <InputGroupInput
             id={id}
