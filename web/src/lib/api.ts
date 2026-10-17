@@ -257,6 +257,7 @@ export interface PlannerTargetPlan {
   pct: string;
   r: string;
   move_pct: string;
+  order?: "limit" | "trigger";
 }
 
 /** What Planner will send: every number comes from one stop (docs/planner-rules.md). */

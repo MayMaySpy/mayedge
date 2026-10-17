@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, Literal
@@ -17,6 +18,8 @@ Mode = Literal["enter", "attach"]
 EntryType = Literal["market", "limit"]
 TargetKind = Literal["price", "r"]
 StopSteps = Literal["off", "breakeven", "ladder"]
+# P9: a resting reduce-only limit, or a Take Profit Limit that waits off the book.
+TargetOrder = Literal["limit", "trigger"]
 
 HUNDRED = Decimal("100")
 BPS = Decimal("10000")
@@ -39,12 +42,14 @@ class Target:
     kind: TargetKind
     value: Decimal
     pct: Decimal
+    order: TargetOrder = "limit"
 
     def to_json(self) -> dict[str, str]:
         return {
             "kind": self.kind,
             "value": fmt_decimal(self.value) or "0",
             "pct": fmt_decimal(self.pct) or "0",
+            "order": self.order,
         }
 
     @classmethod
@@ -59,7 +64,11 @@ class Target:
             pct = parse_decimal(str(raw.get("pct") or ""))
         except ValueError:
             raise PlanRefused("P5", "Each target needs a price or R and a %") from None
-        return cls(kind=kind, value=value, pct=pct)
+        # P9: saved before the choice, every target was a Trigger.
+        order = raw.get("order") or "trigger"
+        if order not in ("limit", "trigger"):
+            raise PlanRefused("P9", "A target is a Limit or a Trigger")
+        return cls(kind=kind, value=value, pct=pct, order=order)
 
 
 @dataclass
@@ -149,6 +158,7 @@ class PlannedTarget:
     pct: Decimal
     r: Decimal
     move_pct: Decimal
+    order: TargetOrder = "trigger"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -158,6 +168,7 @@ class PlannedTarget:
             "pct": fmt_decimal(self.pct) or "0",
             "r": fmt_decimal(self.r) or "0",
             "move_pct": fmt_decimal(self.move_pct) or "0",
+            "order": self.order,
         }
 
     @classmethod
@@ -169,6 +180,7 @@ class PlannedTarget:
             pct=Decimal(str(raw["pct"])),
             r=Decimal(str(raw.get("r") or "0")),
             move_pct=Decimal(str(raw.get("move_pct") or "0")),
+            order="limit" if raw.get("order") == "limit" else "trigger",
         )
 
 
@@ -336,51 +348,62 @@ def _check_targets_shape(targets: list[Target]) -> None:
         raise PlanRefused("P5", "Targets add up to more than 100%")
 
 
+@dataclass(frozen=True)
+class _Leg:
+    price: Decimal
+    pct: Decimal
+    order: TargetOrder
+    qty: Decimal = Decimal("0")
+
+
 def _target_prices(
     side: Side, entry: Decimal, r: Decimal, targets: list[Target], tick: Decimal
-) -> list[tuple[Decimal, Decimal]]:
-    """(price, pct) per target, P4 and P6, nearest entry first."""
-    out: list[tuple[Decimal, Decimal]] = []
+) -> list[_Leg]:
+    """Each target's price, P4 and P6, nearest entry first."""
+    out: list[_Leg] = []
     sign = _sign(side)
     for t in targets:
         raw = entry + sign * r * t.value if t.kind == "r" else t.value
         # Targets round toward entry.
-        out.append((round_price(raw, tick, up=side == "sell"), t.pct))
-    out.sort(key=lambda pt: pt[0] * sign)
+        out.append(_Leg(round_price(raw, tick, up=side == "sell"), t.pct, t.order))
+    out.sort(key=lambda leg: leg.price * sign)
     return out
 
 
 def _size_targets(
-    priced: list[tuple[Decimal, Decimal]],
+    priced: list[_Leg],
     *,
     size: Decimal,
     qty_step: Decimal,
     min_qty: Decimal,
-) -> tuple[list[tuple[Decimal, Decimal, Decimal]], list[str]]:
-    """(price, pct, qty) per target. P5 Runner, P6 rounding, P7 merges."""
+) -> tuple[list[_Leg], list[str]]:
+    """Each target's size. P5 Runner, P6 rounding, P7 merges."""
     legs = list(priced)
     warnings: list[str] = []
     while legs:
-        total_pct = sum((pct for _, pct in legs), Decimal("0"))
+        total_pct = sum((leg.pct for leg in legs), Decimal("0"))
         closing = round_qty(size * total_pct / HUNDRED, qty_step)
-        sized: list[tuple[Decimal, Decimal, Decimal]] = []
+        sized: list[_Leg] = []
         used = Decimal("0")
-        for i, (price, pct) in enumerate(legs):
+        for i, leg in enumerate(legs):
             if i == len(legs) - 1:
                 qty = closing - used
             else:
-                qty = round_qty(size * pct / HUNDRED, qty_step)
+                qty = round_qty(size * leg.pct / HUNDRED, qty_step)
             used += qty
-            sized.append((price, pct, qty))
-        small = next((i for i, leg in enumerate(sized) if leg[2] <= 0 or leg[2] < min_qty), None)
+            sized.append(dataclasses.replace(leg, qty=qty))
+        small = next((i for i, leg in enumerate(sized) if leg.qty <= 0 or leg.qty < min_qty), None)
         if small is None:
             return sized, warnings
         if len(legs) == 1:
             break
-        price, pct = legs.pop(small)
+        gone = legs.pop(small)
+        price = gone.price
         into = small if small < len(legs) else small - 1
-        keep_price, keep_pct = legs[into]
-        legs[into] = (keep_price, keep_pct + pct)
+        keep = legs[into]
+        keep_price = keep.price
+        # The joined target keeps its own price and order type (P7).
+        legs[into] = dataclasses.replace(keep, pct=keep.pct + gone.pct)
         warnings.append(
             f"Target at {fmt_decimal(price)} is below the venue minimum and joins "
             f"the one at {fmt_decimal(keep_price)}"
@@ -407,9 +430,9 @@ def price_plan(
         raise PlanRefused("S1", "The stop is on the winning side of entry")
     r = abs(entry - stop)
     priced = _target_prices(side, entry, r, targets, ctx.tick)
-    for price, _ in priced:
-        if (price - entry) * sign <= 0:
-            raise PlanRefused("S1", f"Target {fmt_decimal(price)} is not past entry")
+    for leg in priced:
+        if (leg.price - entry) * sign <= 0:
+            raise PlanRefused("S1", f"Target {fmt_decimal(leg.price)} is not past entry")
     if size <= 0:
         raise PlanRefused("P2", "Size is 0")
     sized, warnings = _size_targets(
@@ -418,13 +441,14 @@ def price_plan(
     planned = tuple(
         PlannedTarget(
             index=i + 1,
-            price=price,
-            qty=qty,
-            pct=pct,
-            r=(abs(price - entry) / r) if r > 0 else Decimal("0"),
-            move_pct=_move_pct(side, entry, price),
+            price=leg.price,
+            qty=leg.qty,
+            pct=leg.pct,
+            r=(abs(leg.price - entry) / r) if r > 0 else Decimal("0"),
+            move_pct=_move_pct(side, entry, leg.price),
+            order=leg.order,
         )
-        for i, (price, pct, qty) in enumerate(sized)
+        for i, leg in enumerate(sized)
     )
     closing = sum((t.qty for t in planned), Decimal("0"))
     be = breakeven_price(side, entry, taker_bps=ctx.taker_bps, tick=ctx.tick)

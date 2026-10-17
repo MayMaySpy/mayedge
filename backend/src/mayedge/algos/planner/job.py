@@ -323,7 +323,7 @@ class PlannerRunner:
         st.reason = "stop reached: closed at market"
 
     async def _place_targets(self) -> None:
-        """E3: each target a Take Profit Limit at its price (P9). Skips what is placed or done."""
+        """E3 and P9: each target as its order type, at its price. Skips what is placed or done."""
         st = self._state
         assert st.plan is not None
         for t in st.plan.targets:
@@ -336,26 +336,39 @@ class PlannerRunner:
             left = t.qty - sum((c.filled for c in clips), ZERO)
             if left <= 0:
                 continue
-            clip = self._place(role, price=t.price, qty=left)
             try:
+                if t.order == "limit":
+                    await self._rest_target(role, price=t.price, qty=left)
+                    continue
+                clip = self._place(role, price=t.price, qty=left)
                 await self._send_trigger(clip, role="tp", kind="limit", size=left, trigger=t.price)
             except ValueError as e:
-                if "wrong side of mark" not in str(e):
+                if t.order == "limit" or "wrong side of mark" not in str(e):
                     self._gave_up.add(role)
                     st.reason = f"target {t.index} refused: {e}"
                     continue
-                # Mark ran past the target before it went on: a reduce-only
-                # limit at the target fills at it or better.
-                clip = self._place(role, price=t.price, qty=left)
-                await self._exec().create_limit_order(
-                    market_index=st.market_index,
-                    side=self._close_side(),
-                    size=_fmt(left),
-                    price=_fmt(t.price),
-                    time_in_force="gtt",
-                    reduce_only=True,
-                    client_order_index=clip.client_order_index,
-                )
+                # Mark ran past a Trigger before it went on: a resting limit
+                # at the target fills at it or better.
+                await self._rest_target(role, price=t.price, qty=left)
+
+    async def _rest_target(self, role: str, *, price: Decimal, qty: Decimal) -> None:
+        """A reduce-only limit on the book at the target (P9 Limit)."""
+        st = self._state
+        clip = self._place(role, price=price, qty=qty)
+        try:
+            await self._exec().create_limit_order(
+                market_index=st.market_index,
+                side=self._close_side(),
+                size=_fmt(qty),
+                price=_fmt(price),
+                time_in_force="gtt",
+                reduce_only=True,
+                client_order_index=clip.client_order_index,
+            )
+        except Exception:
+            clip.status = "cancelled"
+            clip.closed_at = util.now_ms()
+            raise
 
     async def _await_order_index(self, clip: Clip) -> None:
         """The venue's order_index, which a cancel or an Amend needs, once the feed shows it."""

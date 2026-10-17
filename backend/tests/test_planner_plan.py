@@ -261,6 +261,33 @@ class PlanRefusalTests(unittest.TestCase):
         self.assertEqual(self._refused(_enter(risk_pct=D("1"))), "P2")
 
 
+class TargetOrderTests(unittest.TestCase):
+    def test_targets_are_limits_unless_picked(self) -> None:
+        plan = build_plan(
+            _enter(targets=[Target("r", D("2"), D("50")), Target("r", D("3"), D("50"), "trigger")]),
+            ZRO,
+        )
+        self.assertEqual([t.order for t in plan.targets], ["limit", "trigger"])
+
+    def test_a_joined_target_keeps_the_type_of_the_one_it_joins(self) -> None:
+        plan = build_plan(
+            _enter(
+                size=D("20"),
+                targets=[Target("r", D("1"), D("10"), "limit"), Target("r", D("2"), D("90"), "trigger")],
+            ),
+            ZRO,
+        )
+        self.assertEqual([(t.qty, t.order) for t in plan.targets], [(D("20"), "trigger")])
+
+    def test_a_target_without_a_type_is_a_trigger(self) -> None:
+        self.assertEqual(Target.from_json({"kind": "r", "value": "2", "pct": "50"}).order, "trigger")
+        self.assertEqual(
+            Target.from_json({"kind": "r", "value": "2", "pct": "50", "order": "limit"}).order, "limit"
+        )
+        with self.assertRaises(PlanRefused):
+            Target.from_json({"kind": "r", "value": "2", "pct": "50", "order": "market"})
+
+
 class ParamsJsonTests(unittest.TestCase):
     def test_round_trip(self) -> None:
         params = _enter(risk_pct=None, expiry_min=30, slippage=0.02)

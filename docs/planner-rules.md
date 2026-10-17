@@ -28,7 +28,7 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 | Entry price | price | Limit only. A Market entry plans from mark at send. |
 | Stop | price | Required. It defines **R**. |
 | Size | size, or risk % of equity | Enter only. Attach takes the Position's size. |
-| Targets | list of (price or R multiple, % of the Position) | At least one. The %s add up to 100 or less. |
+| Targets | list of (price or R multiple, % of the Position, Limit or Trigger) | At least one. The %s add up to 100 or less. Limit by default. |
 | Stop steps | Off, Breakeven, Step up | Breakeven by default. |
 | Entry expiry | minutes, or none | Limit only. |
 | Slippage | % | Market entry and Market stop. The order ticket's setting, capped at 5% like every Market order. |
@@ -43,9 +43,9 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 | P4 | A target given in R is priced from the entry, and moves to the actual entry once filled. A target given as a price stays where it was put. | | test_r_targets_reprice_from_the_actual_entry, test_targets_go_on_once_the_entry_is_complete_from_its_actual_price |
 | P5 | Each target closes a % of the filled size. The %s add up to at most 100. Whatever is left is the **Runner**. It rides on the stop until the Position closes. | | test_what_no_target_closes_is_the_runner, test_targets_over_100_pct_are_refused |
 | P6 | Prices round to the tick: the stop away from entry, targets toward it. Sizes round down to the lot. The last target takes what rounding leaves, never the Runner. | code | test_prices_round_to_the_tick_the_safe_way, test_the_last_target_takes_the_rounding_not_the_runner |
-| P7 | A target whose size is below the venue minimum joins the next target. The last one joins the one before it. A plan left with no target refuses to start. | code | test_a_small_target_joins_the_next_one, test_a_small_last_target_joins_the_one_before, test_a_size_too_small_for_any_target_is_refused |
+| P7 | A target whose size is below the venue minimum joins the next target, and takes that target's order type. The last one joins the one before it. A plan left with no target refuses to start. | code | test_a_small_target_joins_the_next_one, test_a_small_last_target_joins_the_one_before, test_a_size_too_small_for_any_target_is_refused |
 | P8 | Percentages on a plan are from entry. | | test_percentages_are_from_entry |
-| P9 | The stop is a Stop Market with the slippage input. Each target is a Take Profit Limit at its own price. | | test_the_stop_goes_on_with_the_first_fill, test_a_take_profit_limit_rests_at_its_price |
+| P9 | The stop is a Stop Market with the slippage input. Each target is the order type picked for it, at its own price. A **Limit** is a reduce-only limit that rests on the book from the moment targets go on. A **Trigger** is a Take Profit Limit that waits off the book until mark reaches it. A target saved without a type is a Trigger, which is what every target was before the choice. | | test_the_stop_goes_on_with_the_first_fill, test_a_take_profit_limit_rests_at_its_price, test_a_limit_target_rests_on_the_book, test_a_target_without_a_type_is_a_trigger |
 
 ## Start
 

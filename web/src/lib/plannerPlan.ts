@@ -9,8 +9,12 @@ export type PlannerSide = "buy" | "sell";
 export type PlannerSizeMode = "size" | "risk";
 export type PlannerStopSteps = "off" | "breakeven" | "ladder";
 
+export type PlannerTargetOrder = "limit" | "trigger";
+
 export interface PlannerTargetDraft {
   kind: "r" | "price";
+  /** P9: a resting reduce-only Limit, or a Trigger that waits off the book. */
+  order: PlannerTargetOrder;
   value: string;
   pct: string;
 }
@@ -40,8 +44,8 @@ export function defaultPlannerForm(side: PlannerSide = "buy"): PlannerForm {
     size: "",
     riskPct: "1",
     targets: [
-      { kind: "r", value: "2", pct: "50" },
-      { kind: "r", value: "3", pct: "50" },
+      { kind: "r", value: "2", pct: "50", order: "limit" },
+      { kind: "r", value: "3", pct: "50", order: "limit" },
     ],
     stopSteps: "breakeven",
     expiryMin: "",
@@ -93,7 +97,12 @@ export function plannerBody(
     stop: dec(form.stop),
     size: enter && form.sizeMode === "size" ? dec(form.size) : null,
     risk_pct: enter && form.sizeMode === "risk" ? dec(form.riskPct) : null,
-    targets: form.targets.map((t) => ({ kind: t.kind, value: dec(t.value), pct: dec(t.pct) })),
+    targets: form.targets.map((t) => ({
+      kind: t.kind,
+      value: dec(t.value),
+      pct: dec(t.pct),
+      order: t.order,
+    })),
     stop_steps: form.stopSteps,
     expiry_min: enter && form.entryType === "limit" && expiry > 0 ? expiry : null,
     slippage: opts.slippage,
@@ -112,6 +121,7 @@ export function formFromPlanner(algo: AlgoState): PlannerForm {
       kind: t.kind === "price" ? "price" : "r",
       value: String(t.value ?? ""),
       pct: String(t.pct ?? ""),
+      order: t.order === "limit" ? "limit" : "trigger",
     })),
     stopSteps:
       p.stop_steps === "off" || p.stop_steps === "breakeven" || p.stop_steps === "ladder"

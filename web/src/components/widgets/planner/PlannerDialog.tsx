@@ -307,6 +307,15 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               />
               {/* On a narrow screen these wrap to their own line together. */}
               <div className="ml-auto flex items-start gap-2">
+                <Seg
+                  label={`Target ${i + 1} order type`}
+                  value={t.order}
+                  onChange={(v) => setTarget(i, { order: v })}
+                  items={[
+                    { value: "limit", label: "Limit" },
+                    { value: "trigger", label: "Trigger" },
+                  ]}
+                />
                 <TicketField
                   id={`planner-tp${i}-pct`}
                   label={`Target ${i + 1} % of the Position`}
@@ -340,7 +349,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               className="h-7"
               disabled={form.targets.length >= MAX_TARGETS}
               onClick={() =>
-                set({ targets: [...form.targets, { kind: "r", value: "", pct: String(runner || "") }] })
+                set({ targets: [...form.targets, { kind: "r", value: "", pct: String(runner || ""), order: "limit" }] })
               }
             >
               <Plus data-icon="inline-start" />
@@ -413,7 +422,11 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               {plan.risk_pct != null ? ` = ${Number(parseFloat(plan.risk_pct).toFixed(2))}% of equity` : ""}
             </Row>
             {plan.targets.map((t) => (
-              <Row key={t.index} label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}%`} tone="bid">
+              <Row
+                key={t.index}
+                label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}% · ${t.order === "trigger" ? "trigger" : "limit"}`}
+                tone="bid"
+              >
                 {formatPrice(t.price)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}
               </Row>
             ))}

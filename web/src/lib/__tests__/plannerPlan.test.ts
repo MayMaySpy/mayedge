@@ -52,7 +52,7 @@ function planner(over: Partial<AlgoState> = {}): AlgoState {
 
 describe("planner form", () => {
   it("rides what no target closes on the stop", () => {
-    expect(runnerPct([{ kind: "r", value: "2", pct: "33" }, { kind: "r", value: "3", pct: "33" }])).toBe(34);
+    expect(runnerPct([{ kind: "r", value: "2", pct: "33", order: "limit" }, { kind: "r", value: "3", pct: "33", order: "limit" }])).toBe(34);
     expect(runnerPct(defaultPlannerForm().targets)).toBe(0);
   });
 
@@ -64,7 +64,7 @@ describe("planner form", () => {
     expect(plannerFormBlock({ ...form, targets: [] }, "enter")).toBe("Add a target");
     expect(
       plannerFormBlock(
-        { ...form, targets: [{ kind: "r", value: "2", pct: "60" }, { kind: "r", value: "3", pct: "50" }] },
+        { ...form, targets: [{ kind: "r", value: "2", pct: "60", order: "limit" }, { kind: "r", value: "3", pct: "50", order: "limit" }] },
         "enter"
       )
     ).toBe("Targets add up to more than 100%");
@@ -72,6 +72,7 @@ describe("planner form", () => {
 
   it("sends a size or a risk %, never both, and nothing an Attach does not use", () => {
     const enter = plannerBody(form, { mode: "enter", marketIndex: 1, slippage: 0.01 });
+    expect((enter.targets as { order: string }[]).map((t) => t.order)).toEqual(["limit", "limit"]);
     expect(enter).toMatchObject({
       mode: "enter",
       entry_price: "100",
@@ -88,7 +89,8 @@ describe("planner form", () => {
   it("re-plans from the running Planner", () => {
     const f = formFromPlanner(planner());
     expect(f.stop).toBe("95");
-    expect(f.targets).toEqual([{ kind: "r", value: "2", pct: "50" }]);
+    // Saved without a type: a Trigger (P9).
+    expect(f.targets).toEqual([{ kind: "r", value: "2", pct: "50", order: "trigger" }]);
     expect(f.stopSteps).toBe("breakeven");
     const ladder = planner({ params_json: { stop: "95", stop_steps: "ladder", targets: [] } });
     expect(formFromPlanner(ladder).stopSteps).toBe("ladder");

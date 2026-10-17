@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@/test/dom";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlannerDialog } from "@/components/widgets/planner/PlannerDialog";
@@ -113,6 +113,20 @@ describe("PlannerDialog", () => {
     expect(screen.getByText(/110,00 \(TP1, −4.35% from TP2\)|110\.00 \(TP1, −4.35% from TP2\)/)).toBeTruthy();
     const body = vi.mocked(api.plannerPreview).mock.calls.at(-1)?.[0];
     expect(body).toMatchObject({ stop_steps: "ladder" });
+  });
+
+  it("sends each target's order type, Limit unless picked", async () => {
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Entry price"), "100");
+    await user.type(screen.getByLabelText("Stop"), "95");
+    const tp2 = screen.getByLabelText("Target 2 order type");
+    await user.click(within(tp2).getByRole("radio", { name: "Trigger" }));
+    await waitFor(() => {
+      const body = vi.mocked(api.plannerPreview).mock.calls.at(-1)?.[0] as {
+        targets: { order: string }[];
+      };
+      expect(body.targets.map((t) => t.order)).toEqual(["limit", "trigger"]);
+    });
   });
 
   it("shows the rule a plan breaks and will not start it", async () => {

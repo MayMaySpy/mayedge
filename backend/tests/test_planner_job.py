@@ -25,7 +25,11 @@ LONG = PlannerParams(
     mode="enter",
     side="buy",
     stop=D("95"),
-    targets=[Target("r", D("1"), D("50")), Target("r", D("2"), D("50"))],
+    # Triggers here; Limit targets have their own tests below.
+    targets=[
+        Target("r", D("1"), D("50"), "trigger"),
+        Target("r", D("2"), D("50"), "trigger"),
+    ],
     entry_type="limit",
     entry_price=D("100"),
     size=D("2"),
@@ -167,6 +171,38 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         self.assertEqual(close[0]["size"], "1")
         self.assertEqual(close[0]["side"], "sell")
 
+    async def test_a_limit_target_rests_on_the_book(self) -> None:
+        params = dataclasses.replace(
+            LONG,
+            targets=[Target("r", D("1"), D("50")), Target("r", D("2"), D("50"), "trigger")],
+        )
+        job = await self._start(params)
+        self.venue.fill(self._coi("limit"), "2")
+        await self._tick(job)
+        rested = self.venue.sent("limit")[1:]
+        self.assertEqual(len(rested), 1)
+        self.assertEqual(rested[0]["price"], "105")
+        self.assertEqual(rested[0]["size"], "1")
+        self.assertEqual(rested[0]["side"], "sell")
+        self.assertTrue(rested[0]["reduce_only"])
+        self.assertEqual(rested[0]["time_in_force"], "gtt")
+        self.assertEqual([t["trigger"] for t in self.venue.sent("trigger_tp")], ["110"])
+
+    async def test_a_limit_target_fill_takes_the_stop_step(self) -> None:
+        params = dataclasses.replace(
+            LONG, targets=[Target("r", D("1"), D("50")), Target("r", D("2"), D("50"))]
+        )
+        job = await self._start(params)
+        self.venue.fill(self._coi("limit"), "2")
+        await self._tick(job)
+        tp1 = self._coi("limit", 1)
+        await self._tick(job)
+        self.venue.set_mark("105.5")
+        self.venue.fill(tp1, "1")
+        await self._tick(job)
+        self.assertEqual([a["trigger"] for a in self.venue.sent("amend")], ["100"])
+        self.assertEqual(job.state.steps_done, 1)
+
     # ── manage ──
 
     async def test_breakeven_once_the_first_target_fills(self) -> None:
@@ -204,9 +240,9 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
             LONG,
             stop_steps="ladder",
             targets=[
-                Target("r", D("1"), D("40")),
-                Target("r", D("2"), D("40")),
-                Target("r", D("3"), D("20")),
+                Target("r", D("1"), D("40"), "trigger"),
+                Target("r", D("2"), D("40"), "trigger"),
+                Target("r", D("3"), D("20"), "trigger"),
             ],
             size=D("5"),
         )
@@ -385,7 +421,9 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
     async def test_a_replan_moves_the_stop_and_redraws_the_targets(self) -> None:
         job = await self._managed()
         await job.replan(
-            dataclasses.replace(LONG, stop=D("97"), targets=[Target("price", D("106"), D("100"))])
+            dataclasses.replace(
+                LONG, stop=D("97"), targets=[Target("price", D("106"), D("100"), "trigger")]
+            )
         )
         await job._halt()
         job._stop.clear()
