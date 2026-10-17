@@ -29,7 +29,7 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 | Stop | price | Required. It defines **R**. |
 | Size | size, or risk % of equity | Enter only. Attach takes the Position's size. |
 | Targets | list of (price or R multiple, % of the Position) | At least one. The %s add up to 100 or less. |
-| Breakeven | on, off | On by default. |
+| Stop steps | Off, Breakeven, Step up | Breakeven by default. |
 | Entry expiry | minutes, or none | Limit only. |
 | Slippage | % | Market entry and Market stop. The order ticket's setting, capped at 5% like every Market order. |
 
@@ -79,13 +79,14 @@ A plan that breaks a rule here does not start, and says which rule.
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
 | M1 | The stop always covers the whole open Position. It is tied to the Position, so a target fill shrinks what it closes. | | test_the_stop_goes_on_with_the_first_fill |
-| M2 | Once the first target, the one nearest entry, has filled in full, the stop moves to **Breakeven**. | `breakeven` input | test_breakeven_once_the_first_target_fills, test_breakeven_waits_while_mark_sits_on_it |
+| M2 | When a target has filled in full, the stop takes a **Stop step**. With Breakeven, TP1 (the target nearest entry) moves it to **Breakeven**. With Step up, TP1 moves it to Breakeven and each later target moves it to the price of the target before it: TP2 to TP1, TP3 to TP2. A step after which nothing would be left open is not drawn. | `stop_steps` input | test_breakeven_once_the_first_target_fills, test_step_up_moves_the_stop_to_the_target_before |
 | M3 | **Breakeven** is entry plus the round-trip taker fee per unit for a long, minus it for a short, rounded away from entry. Closing there loses nothing. | code | test_breakeven_covers_the_round_trip_fee |
-| M4 | Planner moves the stop only toward the winning side. Breakeven is the only move it makes on its own. | | test_breakeven_never_loosens_the_stop |
+| M4 | Planner moves the stop only toward the winning side. Stop steps are the only moves it makes on its own. When targets fill faster than it can step, it takes the furthest step that is due, once. | | test_breakeven_never_loosens_the_stop, test_two_targets_at_once_take_the_furthest_step |
 | M5 | The operator changes a plan through Planner. A change is checked against S1 and S2 as if it were new. Planner's Clips do not drag on the chart ([ADR 0007](adr/0007-chart-amends-tickets-only.md)). | | test_a_replan_moves_the_stop_and_redraws_the_targets |
-| M6 | When the Position's size changes by anything other than Planner's own fills, Planner pauses and says the Position changed. A paused Planner leaves its stop and targets on the venue. It stops resizing them and makes no Breakeven move until the operator re-plans or resumes. | | test_an_outside_change_pauses_the_planner |
+| M6 | When the Position's size changes by anything other than Planner's own fills, Planner pauses and says the Position changed. A paused Planner leaves its stop and targets on the venue. It stops resizing them and takes no Stop step until the operator re-plans or resumes. | | test_an_outside_change_pauses_the_planner |
 | M7 | The stop and targets are venue triggers, so they hold while the desk is down. On restore, Planner reads the fills it missed and applies M1 and M2. | | test_a_restart_applies_the_target_fill_it_missed, test_shutdown_leaves_the_stop_and_targets_on |
 | M8 | If the stop leaves the book while the Position is still open, Planner puts it back. | code | test_a_missing_stop_is_put_back |
+| M9 | If mark is already past a step when its target fills, the venue will not take the stop there. A step to Breakeven waits for mark to clear it. A step to a target's price closes what is left with a reduce-only Market order, the exit the step was there to keep. | code | test_breakeven_waits_while_mark_sits_on_it, test_a_step_mark_has_passed_closes_at_market |
 
 ## End
 

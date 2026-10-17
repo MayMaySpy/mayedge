@@ -41,6 +41,7 @@ const DRAWN: PlannerPreview = {
     breakeven: "100.1",
     stop_pct: "-5",
     warnings: [],
+    steps: [{ after: 1, price: "100.1", to: "breakeven" }],
   },
   refused: null,
   replaces: [],
@@ -91,6 +92,27 @@ describe("PlannerDialog", () => {
       expect.objectContaining({ stop: "95", entry_price: "100" })
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("sends the stop steps picked and draws each step", async () => {
+    vi.mocked(api.plannerPreview).mockResolvedValue({
+      ...DRAWN,
+      plan: {
+        ...DRAWN.plan!,
+        steps: [
+          { after: 1, price: "100.1", to: "breakeven" },
+          { after: 2, price: "110", to: "tp1" },
+        ],
+      },
+    });
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Entry price"), "100");
+    await user.type(screen.getByLabelText("Stop"), "95");
+    await user.click(screen.getByRole("radio", { name: "Step up" }));
+    await waitFor(() => expect(screen.getByText("At TP2, stop to")).toBeTruthy());
+    expect(screen.getByText(/110,00 \(TP1, −4.35% from TP2\)|110\.00 \(TP1, −4.35% from TP2\)/)).toBeTruthy();
+    const body = vi.mocked(api.plannerPreview).mock.calls.at(-1)?.[0];
+    expect(body).toMatchObject({ stop_steps: "ladder" });
   });
 
   it("shows the rule a plan breaks and will not start it", async () => {

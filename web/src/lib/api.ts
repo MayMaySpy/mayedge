@@ -273,6 +273,15 @@ export interface PlannerPlan {
   breakeven: string;
   stop_pct: string;
   warnings: string[];
+  /** Stop steps: once target `after` fills, the stop moves to `price`. */
+  steps: PlannerStep[];
+}
+
+export interface PlannerStep {
+  after: number;
+  price: string;
+  /** "breakeven" or "tp1", "tp2"… */
+  to: string;
 }
 
 export interface PlannerRefusal {
@@ -296,6 +305,8 @@ export interface PlannerRuntime {
   expected_size: string;
   stop_trigger: string | null;
   breakeven_done: boolean;
+  /** The target number of the last Stop step taken; 0 before any. */
+  steps_done?: number;
   entry_deadline_ms: number | null;
   /** client_order_index → "entry" | "stop" | "tp1"… */
   clip_roles?: Record<string, string>;

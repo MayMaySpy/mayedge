@@ -37,7 +37,8 @@ class PlannerState:
     # What the Position should be from Planner's own fills (M6).
     expected_size: Decimal = Decimal("0")
     stop_trigger: Decimal | None = None
-    breakeven_done: bool = False
+    # How far the stop has stepped: the target number of the last Stop step taken.
+    steps_done: int = 0
     entry_deadline_ms: int | None = None
 
     def runtime_json(self) -> dict[str, Any]:
@@ -48,7 +49,8 @@ class PlannerState:
             "entry_filled": fmt_decimal(self.entry_filled) or "0",
             "expected_size": fmt_decimal(self.expected_size) or "0",
             "stop_trigger": fmt_decimal(self.stop_trigger),
-            "breakeven_done": self.breakeven_done,
+            "steps_done": self.steps_done,
+            "breakeven_done": self.steps_done >= 1,
             "entry_deadline_ms": self.entry_deadline_ms,
         }
 
@@ -63,7 +65,8 @@ class PlannerState:
         self.expected_size = Decimal(str(raw.get("expected_size") or "0"))
         trigger = raw.get("stop_trigger")
         self.stop_trigger = Decimal(str(trigger)) if trigger not in (None, "") else None
-        self.breakeven_done = bool(raw.get("breakeven_done"))
+        steps = raw.get("steps_done")
+        self.steps_done = int(steps) if steps is not None else (1 if raw.get("breakeven_done") else 0)
         deadline = raw.get("entry_deadline_ms")
         self.entry_deadline_ms = int(deadline) if deadline else None
 

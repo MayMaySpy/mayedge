@@ -162,6 +162,46 @@ class PlanMathTests(unittest.TestCase):
         self.assertEqual(plan.targets[0].move_pct.quantize(D("0.01")), D("9.62"))
 
 
+class StopStepTests(unittest.TestCase):
+    def _steps(self, mode: str, pcts: list[str]) -> list[tuple[int, D, str]]:
+        targets = [Target("r", D(str(i + 1)), D(p)) for i, p in enumerate(pcts)]
+        plan = price_plan(
+            side="buy",
+            entry=D("100"),
+            stop=D("95"),
+            size=D("100"),
+            targets=targets,
+            ctx=_ctx(tick=D("0.01"), mark=D("100")),
+            stop_steps=mode,  # type: ignore[arg-type]
+        )
+        return [(s.after, s.price, s.to) for s in plan.steps]
+
+    def test_breakeven_is_one_step_after_tp1(self) -> None:
+        self.assertEqual(self._steps("breakeven", ["50", "50"]), [(1, D("100"), "breakeven")])
+
+    def test_step_up_steps_to_the_target_before(self) -> None:
+        self.assertEqual(
+            self._steps("ladder", ["40", "40", "20"]),
+            [(1, D("100"), "breakeven"), (2, D("105"), "tp1")],
+        )
+
+    def test_a_runner_keeps_the_last_step(self) -> None:
+        self.assertEqual(
+            self._steps("ladder", ["40", "40"]),
+            [(1, D("100"), "breakeven"), (2, D("105"), "tp1")],
+        )
+
+    def test_no_step_after_which_nothing_is_left(self) -> None:
+        self.assertEqual(self._steps("ladder", ["100"]), [])
+        self.assertEqual(self._steps("off", ["50", "50"]), [])
+
+    def test_a_row_from_before_steps_reads_its_breakeven_flag(self) -> None:
+        raw = _enter().to_json()
+        raw.pop("stop_steps")
+        self.assertEqual(PlannerParams.from_json({**raw, "breakeven": True}).stop_steps, "breakeven")
+        self.assertEqual(PlannerParams.from_json({**raw, "breakeven": False}).stop_steps, "off")
+
+
 class PlanRefusalTests(unittest.TestCase):
     def _refused(self, params: PlannerParams, ctx: MarketContext = ZRO) -> str:
         with self.assertRaises(PlanRefused) as caught:

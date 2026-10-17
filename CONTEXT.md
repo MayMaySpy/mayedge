@@ -163,7 +163,7 @@ An algo that slices a parent size across time into Clips.
 _Avoid_: VWAP, iceberg
 
 **Planner**:
-An algo that runs one trade from the stop out: it sends the entry (or takes over an open Position), places the stop and targets as Clips, and moves the stop to Breakeven once the first target fills. It owns the exit on its Market. The rules are in [docs/planner-rules.md](docs/planner-rules.md).
+An algo that runs one trade from the stop out: it sends the entry (or takes over an open Position), places the stop and targets as Clips, and takes a Stop step as targets fill. It owns the exit on its Market. The rules are in [docs/planner-rules.md](docs/planner-rules.md).
 _Avoid_: Planer, bracket, OCO, setup
 
 **R**:
@@ -173,6 +173,10 @@ _Avoid_: risk unit (unqualified), ATR, a second "suggested" stop
 **Breakeven**:
 A Planner stop moved to entry plus round-trip fees, so closing there loses nothing.
 _Avoid_: BE (in prose), entry (as the stop price)
+
+**Stop step**:
+A move of a Planner's stop toward profit when a target fills: to Breakeven after TP1, and with Step up to each earlier target's price after the next one fills. Proven by the fill, never by time or price alone.
+_Avoid_: trail, trailing stop (that's v2), ratchet
 
 **Runner**:
 The part of a Planner Position no target closes. It rides on the stop until the Position closes.

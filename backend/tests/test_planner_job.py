@@ -176,7 +176,7 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         amends = self.venue.sent("amend")
         self.assertEqual(len(amends), 1)
         self.assertEqual(amends[0]["trigger"], "100")
-        self.assertTrue(job.state.breakeven_done)
+        self.assertEqual(job.state.steps_done, 1)
         await self._tick(job)
         self.assertEqual(len(self.venue.sent("amend")), 1)
         self.assertEqual(job.state.expected_size, D("1"))
@@ -194,10 +194,93 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         self.venue.fill(self._coi("trigger_tp", 0), "1")
         await self._tick(job)
         self.assertEqual(self.venue.sent("amend"), [])
-        self.assertFalse(job.state.breakeven_done)
+        self.assertEqual(job.state.steps_done, 0)
         self.venue.set_mark("101")
         await self._tick(job)
         self.assertEqual(len(self.venue.sent("amend")), 1)
+
+    async def _managed_ladder(self) -> PlannerRunner:
+        params = dataclasses.replace(
+            LONG,
+            stop_steps="ladder",
+            targets=[
+                Target("r", D("1"), D("40")),
+                Target("r", D("2"), D("40")),
+                Target("r", D("3"), D("20")),
+            ],
+            size=D("5"),
+        )
+        job = await self._start(params)
+        self.venue.fill(self._coi("limit"), "5")
+        await self._tick(job)
+        self.assertEqual(job.state.phase, "managing")
+        return job
+
+    async def test_step_up_moves_the_stop_to_the_target_before(self) -> None:
+        job = await self._managed_ladder()
+        self.venue.set_mark("106")
+        self.venue.fill(self._coi("trigger_tp", 0), "2")
+        await self._tick(job)
+        self.assertEqual([a["trigger"] for a in self.venue.sent("amend")], ["100"])
+        self.venue.set_mark("111")
+        self.venue.fill(self._coi("trigger_tp", 1), "2")
+        await self._tick(job)
+        # TP1 was 105: after TP2 the stop sits there.
+        self.assertEqual([a["trigger"] for a in self.venue.sent("amend")], ["100", "105"])
+        self.assertEqual(job.state.steps_done, 2)
+        self.assertEqual(job.state.stop_trigger, D("105"))
+
+    async def test_two_targets_at_once_take_the_furthest_step(self) -> None:
+        job = await self._managed_ladder()
+        self.venue.set_mark("111")
+        self.venue.fill(self._coi("trigger_tp", 0), "2")
+        self.venue.fill(self._coi("trigger_tp", 1), "2")
+        await self._tick(job)
+        self.assertEqual([a["trigger"] for a in self.venue.sent("amend")], ["105"])
+        self.assertEqual(job.state.steps_done, 2)
+
+    async def test_a_step_mark_has_passed_closes_at_market(self) -> None:
+        job = await self._managed_ladder()
+        self.venue.set_mark("106")
+        self.venue.fill(self._coi("trigger_tp", 0), "2")
+        await self._tick(job)
+        # TP2 fills, then price falls back under TP1 before the step lands.
+        self.venue.fill(self._coi("trigger_tp", 1), "2")
+        self.venue.set_mark("104")
+        await self._tick(job)
+        close = self.venue.sent("market")
+        self.assertEqual(len(close), 1)
+        self.assertTrue(close[0]["reduce_only"])
+        self.assertEqual(close[0]["size"], "1")
+        self.assertIn("closed at market", job.state.reason or "")
+
+    async def test_breakeven_takes_no_later_step(self) -> None:
+        job = await self._managed_ladder()
+        assert job.state.params is not None
+        assert job.state.plan is not None
+        self.assertEqual([s.to for s in job.state.plan.steps], ["breakeven", "tp1"])
+        job.state.params = dataclasses.replace(job.state.params, stop_steps="breakeven")
+        job.state.plan = dataclasses.replace(job.state.plan, steps=job.state.plan.steps[:1])
+        self.venue.set_mark("111")
+        self.venue.fill(self._coi("trigger_tp", 0), "2")
+        self.venue.fill(self._coi("trigger_tp", 1), "2")
+        await self._tick(job)
+        self.assertEqual([a["trigger"] for a in self.venue.sent("amend")], ["100"])
+
+    async def test_a_planner_saved_before_steps_steps_to_breakeven(self) -> None:
+        job = await self._managed()
+        await job.drain_for_shutdown()
+        row = {**job.snapshot(), **job.state.ledger.to_persist()}
+        params = dict(row["params_json"])
+        params.pop("stop_steps")
+        params["breakeven"] = True
+        params["runtime"]["planner"]["plan"].pop("steps")
+        params["runtime"]["planner"].pop("steps_done")
+        row["params_json"] = params
+        again = PlannerRunner(self.book)
+        again.hydrate_from_row(row)
+        assert again.state.plan is not None
+        self.assertEqual([s.to for s in again.state.plan.steps], ["breakeven"])
 
     async def test_breakeven_never_loosens_the_stop(self) -> None:
         job = await self._managed()
@@ -205,7 +288,7 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         self._tp1_fills()
         await self._tick(job)
         self.assertEqual(self.venue.sent("amend"), [])
-        self.assertTrue(job.state.breakeven_done)
+        self.assertEqual(job.state.steps_done, 1)
 
     async def test_an_outside_change_pauses_the_planner(self) -> None:
         job = await self._managed()

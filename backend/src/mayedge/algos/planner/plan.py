@@ -16,6 +16,7 @@ Side = Literal["buy", "sell"]
 Mode = Literal["enter", "attach"]
 EntryType = Literal["market", "limit"]
 TargetKind = Literal["price", "r"]
+StopSteps = Literal["off", "breakeven", "ladder"]
 
 HUNDRED = Decimal("100")
 BPS = Decimal("10000")
@@ -71,7 +72,7 @@ class PlannerParams:
     entry_price: Decimal | None = None
     size: Decimal | None = None
     risk_pct: Decimal | None = None
-    breakeven: bool = True
+    stop_steps: StopSteps = "breakeven"
     expiry_min: int | None = None
     slippage: float = DEFAULT_SLIPPAGE
 
@@ -85,7 +86,7 @@ class PlannerParams:
             "entry_price": fmt_decimal(self.entry_price),
             "size": fmt_decimal(self.size),
             "risk_pct": fmt_decimal(self.risk_pct),
-            "breakeven": self.breakeven,
+            "stop_steps": self.stop_steps,
             "expiry_min": self.expiry_min,
             "slippage": self.slippage,
         }
@@ -119,7 +120,7 @@ class PlannerParams:
             entry_price=_opt_decimal(raw.get("entry_price")),
             size=_opt_decimal(raw.get("size")),
             risk_pct=_opt_decimal(raw.get("risk_pct")),
-            breakeven=bool(raw.get("breakeven", True)),
+            stop_steps=_stop_steps(raw),
             expiry_min=int(expiry) if expiry not in (None, "", 0, "0") else None,
             slippage=_clamp_slippage(raw.get("slippage")),
         )
@@ -172,6 +173,22 @@ class PlannedTarget:
 
 
 @dataclass(frozen=True)
+class PlannedStep:
+    """M2: once target ``after`` fills in full, the stop moves to ``price``."""
+
+    after: int
+    price: Decimal
+    to: str  # "breakeven" or "tp1", "tp2"…
+
+    def to_json(self) -> dict[str, Any]:
+        return {"after": self.after, "price": fmt_decimal(self.price) or "0", "to": self.to}
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> PlannedStep:
+        return cls(after=int(raw["after"]), price=Decimal(str(raw["price"])), to=str(raw["to"]))
+
+
+@dataclass(frozen=True)
 class Plan:
     side: Side
     entry: Decimal
@@ -185,6 +202,7 @@ class Plan:
     breakeven: Decimal
     stop_pct: Decimal
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    steps: tuple[PlannedStep, ...] = field(default_factory=tuple)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -200,6 +218,7 @@ class Plan:
             "breakeven": fmt_decimal(self.breakeven) or "0",
             "stop_pct": fmt_decimal(self.stop_pct) or "0",
             "warnings": list(self.warnings),
+            "steps": [step.to_json() for step in self.steps],
         }
 
     @classmethod
@@ -218,6 +237,7 @@ class Plan:
             breakeven=Decimal(str(raw.get("breakeven") or "0")),
             stop_pct=Decimal(str(raw.get("stop_pct") or "0")),
             warnings=tuple(str(w) for w in raw.get("warnings") or []),
+            steps=tuple(PlannedStep.from_json(x) for x in raw.get("steps") or []),
         )
 
 
@@ -225,6 +245,16 @@ def _opt_decimal(raw: object) -> Decimal | None:
     if raw is None or raw == "":
         return None
     return parse_decimal(str(raw))
+
+
+def _stop_steps(raw: dict[str, Any]) -> StopSteps:
+    steps = raw.get("stop_steps")
+    if steps in ("off", "breakeven", "ladder"):
+        return steps
+    if steps is not None:
+        raise ValueError("stop_steps must be off, breakeven or ladder")
+    # Rows from before Stop steps carried a breakeven flag.
+    return "breakeven" if raw.get("breakeven", True) else "off"
 
 
 def _clamp_slippage(raw: object) -> float:
@@ -367,6 +397,7 @@ def price_plan(
     targets: list[Target],
     ctx: MarketContext,
     risk_pct: Decimal | None = None,
+    stop_steps: StopSteps = "breakeven",
 ) -> Plan:
     """Draw a plan at a known entry and size. The job calls this again after the fill."""
     _check_targets_shape(targets)
@@ -396,6 +427,8 @@ def price_plan(
         for i, (price, pct, qty) in enumerate(sized)
     )
     closing = sum((t.qty for t in planned), Decimal("0"))
+    be = breakeven_price(side, entry, taker_bps=ctx.taker_bps, tick=ctx.tick)
+    steps = plan_steps(stop_steps, planned, size=size, breakeven=be)
     fee_at_stop = stop * ctx.taker_bps / BPS
     risk_usd = size * (r + fee_at_stop)
     risk_of_equity = None
@@ -411,10 +444,37 @@ def price_plan(
         runner=size - closing,
         risk_usd=risk_usd,
         risk_pct=risk_of_equity if risk_of_equity is not None else risk_pct,
-        breakeven=breakeven_price(side, entry, taker_bps=ctx.taker_bps, tick=ctx.tick),
+        breakeven=be,
         stop_pct=_move_pct(side, entry, stop),
         warnings=tuple(warnings),
+        steps=steps,
     )
+
+
+def plan_steps(
+    mode: StopSteps,
+    targets: tuple[PlannedTarget, ...],
+    *,
+    size: Decimal,
+    breakeven: Decimal,
+) -> tuple[PlannedStep, ...]:
+    """M2: the Stop steps, skipping any after which nothing is left open."""
+    if mode == "off" or not targets:
+        return ()
+    out: list[PlannedStep] = []
+    left = size
+    for i, t in enumerate(targets):
+        left -= t.qty
+        if left <= 0:
+            break
+        if i == 0:
+            out.append(PlannedStep(after=1, price=breakeven, to="breakeven"))
+        elif mode == "ladder":
+            before = targets[i - 1]
+            out.append(PlannedStep(after=t.index, price=before.price, to=f"tp{before.index}"))
+        if mode == "breakeven":
+            break
+    return tuple(out)
 
 
 def _plan_size(params: PlannerParams, ctx: MarketContext, *, entry: Decimal, stop: Decimal) -> Decimal:
@@ -469,6 +529,7 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
         targets=params.targets,
         ctx=ctx,
         risk_pct=params.risk_pct,
+        stop_steps=params.stop_steps,
     )
     check_targets_live(plan, ctx)
     return plan

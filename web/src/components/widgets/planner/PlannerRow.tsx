@@ -8,6 +8,7 @@ import type { AlgoState } from "@/lib/api";
 import {
   plannerClipLabel,
   plannerPhaseLabel,
+  stopLabel,
   plannerTargetsDone,
   rLabel,
   signedPct,
@@ -125,7 +126,7 @@ export function PlannerRow({
 
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-xs text-muted-foreground">
         <span>
-          {rt?.breakeven_done ? "BE stop" : "Stop"} <span className="text-ask">{formatPrice(stop)}</span>
+          {stopLabel(algo)} <span className="text-ask">{formatPrice(stop)}</span>
         </span>
         {targets.map((t) => (
           <span key={t.index}>

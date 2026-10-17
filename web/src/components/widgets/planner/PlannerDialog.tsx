@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { TicketField } from "@/components/widgets/orderTicket/ui";
@@ -28,6 +27,8 @@ import {
   rLabel,
   runnerPct,
   signedPct,
+  stepGapPct,
+  stepTargetLabel,
   type PlannerForm,
   type PlannerMode,
   type PlannerSide,
@@ -191,8 +192,8 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
           {replan
             ? "Move the stop or redraw the targets. Checked as if new."
             : mode === "attach"
-              ? "Takes over this Position's exit: one stop, your targets, breakeven after TP1."
-              : "Entry, stop, targets and size from one stop. Breakeven after TP1."}
+              ? "Takes over this Position's exit: one stop, your targets, and stop steps as they fill."
+              : "Entry, stop, targets and size from one stop. The stop steps up as targets fill."}
         </DialogDescription>
       </DialogHeader>
 
@@ -352,16 +353,25 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
         </div>
 
         <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
-          <FieldLabel htmlFor="planner-be" className="text-base font-normal text-muted-foreground">
-            Stop to breakeven after TP1
-          </FieldLabel>
-          <Switch
-            id="planner-be"
-            checked={form.breakeven}
-            onCheckedChange={(v) => set({ breakeven: v === true })}
-            aria-label="Stop to breakeven after TP1"
+          <FieldLabel className="text-base font-normal text-muted-foreground">Stop steps</FieldLabel>
+          <Seg
+            label="Stop steps"
+            value={form.stopSteps}
+            onChange={(v) => set({ stopSteps: v })}
+            items={[
+              { value: "off", label: "Off" },
+              { value: "breakeven", label: "Breakeven" },
+              { value: "ladder", label: "Step up" },
+            ]}
           />
         </Field>
+        <span className="-mt-2 font-mono text-xs text-muted-foreground">
+          {form.stopSteps === "off"
+            ? "The stop stays where you put it."
+            : form.stopSteps === "breakeven"
+              ? "After TP1 the stop moves to breakeven."
+              : "After TP1 to breakeven, then after each target to the one before it."}
+        </span>
 
         {mode === "enter" && !replan && form.entryType === "limit" && (
           <TicketField
@@ -408,7 +418,15 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               </Row>
             ))}
             {parseFloat(plan.runner) > 0 && <Row label="Runner">{formatSize(plan.runner)}</Row>}
-            {form.breakeven && <Row label="At TP1, stop to">{formatPrice(plan.breakeven)}</Row>}
+            {(plan.steps ?? []).map((step) => {
+              const gap = step.to === "breakeven" ? null : stepGapPct(plan, step.after, step.price);
+              return (
+                <Row key={step.after} label={`At TP${step.after}, stop to`}>
+                  {formatPrice(step.price)} ({stepTargetLabel(step.to)}
+                  {gap ? `, ${gap} from TP${step.after}` : ""})
+                </Row>
+              );
+            })}
             {plan.warnings.map((w) => (
               <span key={w} className="font-mono text-xs text-warn">
                 {w}

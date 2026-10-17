@@ -32,11 +32,13 @@ from mayedge.algos.planner.plan import (
     ALGO_ID,
     ALGO_VERSION,
     Plan,
+    PlannedStep,
     PlannerParams,
     PlanRefused,
     Side,
     check_stop_live,
     check_targets_live,
+    plan_steps,
     price_plan,
     stop_price,
 )
@@ -161,6 +163,17 @@ class PlannerRunner:
         st.load_runtime(runtime)
         if st.plan is None:
             raise ValueError(f"unrecoverable planner row {row.get('algo_id')}: no plan")
+        if not st.plan.steps and params.stop_steps != "off":
+            # Saved before Stop steps were drawn into the plan.
+            st.plan = dataclasses.replace(
+                st.plan,
+                steps=plan_steps(
+                    params.stop_steps,
+                    st.plan.targets,
+                    size=st.plan.size,
+                    breakeven=st.plan.breakeven,
+                ),
+            )
         self._state = st
 
     # ── clips ────────────────────────────────────────────────────────────
@@ -652,6 +665,7 @@ class PlannerRunner:
                 targets=p.targets,
                 ctx=ctx,
                 risk_pct=plan.risk_pct,
+                stop_steps=p.stop_steps,
             )
         except PlanRefused as e:
             st.status = ChaseStatus.PAUSED
@@ -708,24 +722,31 @@ class PlannerRunner:
         if stop is None and "stop" not in self._gave_up:
             await self._place_stop()
         await self._place_targets()
-        tp1 = self._latest("tp1")
-        if (
-            p.breakeven
-            and not st.breakeven_done
-            and tp1 is not None
-            and tp1.status == "filled"
-            and tp1.filled >= tp1.qty
-        ):
-            await self._move_to_breakeven()
+        await self._take_step()
 
-    async def _move_to_breakeven(self) -> None:
-        """M2–M4: once, and only toward the winning side."""
+    def _due_step(self) -> PlannedStep | None:
+        """The furthest Stop step whose target has filled in full and is not taken yet."""
         st = self._state
         assert st.plan is not None
-        be = st.plan.breakeven
+        due: PlannedStep | None = None
+        for step in st.plan.steps:
+            if step.after <= st.steps_done:
+                continue
+            tp = self._latest(f"tp{step.after}")
+            if tp is not None and tp.status == "filled" and tp.filled >= tp.qty:
+                due = step
+        return due
+
+    async def _take_step(self) -> None:
+        """M2–M4 and M9: step the stop toward profit, once per step, never back."""
+        st = self._state
+        assert st.plan is not None
+        step = self._due_step()
+        if step is None:
+            return
         current = st.stop_trigger if st.stop_trigger is not None else st.plan.stop
-        if (be - current) * _sign(self._side()) <= 0:
-            st.breakeven_done = True
+        if (step.price - current) * _sign(self._side()) <= 0:
+            st.steps_done = step.after
             return
         stop = self._live("stop")
         if stop is None:
@@ -737,6 +758,7 @@ class PlannerRunner:
         if ex.amend_trigger_leg is None:
             raise RuntimeError("trigger amend is not wired")
         p = st.params
+        name = "breakeven" if step.to == "breakeven" else step.to.upper()
         try:
             await ex.amend_trigger_leg(
                 st.market_index,
@@ -744,18 +766,24 @@ class PlannerRunner:
                 self._close_side(),
                 role="sl",
                 kind="market",
-                trigger=_fmt(be) or "0",
+                trigger=_fmt(step.price) or "0",
                 slippage=p.slippage if p else 0.01,
             )
         except ValueError as e:
-            if "wrong side of mark" in str(e):
+            if "wrong side of mark" not in str(e):
+                raise
+            if step.to == "breakeven":
                 st.reason = "breakeven waits for mark to clear it"
                 return
-            raise
-        stop.price = be
-        st.stop_trigger = be
-        st.breakeven_done = True
-        st.reason = "stop at breakeven"
+            # M9: price is already back through the step; take the exit it promised.
+            await self._close_at_market()
+            st.steps_done = step.after
+            st.reason = f"mark passed the step to {name}: closed at market"
+            return
+        stop.price = step.price
+        st.stop_trigger = step.price
+        st.steps_done = step.after
+        st.reason = f"stop at {name}"
 
     # ── operator ─────────────────────────────────────────────────────────
 
@@ -812,6 +840,7 @@ class PlannerRunner:
                 size=pos,
                 targets=params.targets,
                 ctx=ctx,
+                stop_steps=params.stop_steps,
             )
             check_targets_live(plan, ctx)
             live_stop = self._live("stop")
@@ -842,6 +871,8 @@ class PlannerRunner:
             st.stop_trigger = stop
             st.entry_filled = pos + self._tp_filled()
             st.expected_size = pos
+            # New targets step from the start; M4 still keeps the stop from going back.
+            st.steps_done = 0
             st.status = ChaseStatus.RUNNING
             st.error = None
             st.reason = "re-planned"

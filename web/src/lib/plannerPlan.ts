@@ -7,6 +7,7 @@ import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
 export type PlannerMode = "enter" | "attach";
 export type PlannerSide = "buy" | "sell";
 export type PlannerSizeMode = "size" | "risk";
+export type PlannerStopSteps = "off" | "breakeven" | "ladder";
 
 export interface PlannerTargetDraft {
   kind: "r" | "price";
@@ -23,7 +24,7 @@ export interface PlannerForm {
   size: string;
   riskPct: string;
   targets: PlannerTargetDraft[];
-  breakeven: boolean;
+  stopSteps: PlannerStopSteps;
   expiryMin: string;
 }
 
@@ -42,7 +43,7 @@ export function defaultPlannerForm(side: PlannerSide = "buy"): PlannerForm {
       { kind: "r", value: "2", pct: "50" },
       { kind: "r", value: "3", pct: "50" },
     ],
-    breakeven: true,
+    stopSteps: "breakeven",
     expiryMin: "",
   };
 }
@@ -93,7 +94,7 @@ export function plannerBody(
     size: enter && form.sizeMode === "size" ? dec(form.size) : null,
     risk_pct: enter && form.sizeMode === "risk" ? dec(form.riskPct) : null,
     targets: form.targets.map((t) => ({ kind: t.kind, value: dec(t.value), pct: dec(t.pct) })),
-    breakeven: form.breakeven,
+    stop_steps: form.stopSteps,
     expiry_min: enter && form.entryType === "limit" && expiry > 0 ? expiry : null,
     slippage: opts.slippage,
   };
@@ -112,7 +113,12 @@ export function formFromPlanner(algo: AlgoState): PlannerForm {
       value: String(t.value ?? ""),
       pct: String(t.pct ?? ""),
     })),
-    breakeven: p.breakeven !== false,
+    stopSteps:
+      p.stop_steps === "off" || p.stop_steps === "breakeven" || p.stop_steps === "ladder"
+        ? p.stop_steps
+        : p.breakeven === false
+          ? "off"
+          : "breakeven",
   };
 }
 
@@ -135,10 +141,7 @@ export function plannerClipLabel(
   if (!algo || coi == null) return null;
   const role = algo.planner?.clip_roles?.[String(coi)];
   if (!role) return null;
-  if (role === "stop") {
-    const be = algo.planner?.breakeven_done;
-    return be ? "BE stop" : "Stop";
-  }
+  if (role === "stop") return stopLabel(algo);
   if (role === "entry") return "Entry";
   if (role === "close") return "Close";
   if (role.startsWith("tp") && /^tp\d+$/.test(role)) return role.toUpperCase();
@@ -153,7 +156,43 @@ export function plannerPhaseLabel(algo: AlgoState): string {
   if (algo.status === "stopped") return "Stopped";
   if (!rt) return "Running";
   if (rt.phase === "entering") return "Entering";
-  return rt.breakeven_done ? "At breakeven" : "Managing";
+  const at = stepReached(algo);
+  return at ? `At ${at}` : "Managing";
+}
+
+function stepsDone(algo: AlgoState): number {
+  const rt = algo.planner;
+  if (!rt) return 0;
+  return rt.steps_done ?? (rt.breakeven_done ? 1 : 0);
+}
+
+/** Where the stop has stepped to: "breakeven", "TP1"…, or null before any step. */
+export function stepReached(algo: AlgoState): string | null {
+  const done = stepsDone(algo);
+  if (done <= 0) return null;
+  const step = algo.planner?.plan?.steps?.find((s) => s.after === done);
+  if (!step || step.to === "breakeven") return "breakeven";
+  return step.to.toUpperCase();
+}
+
+export function stopLabel(algo: AlgoState): string {
+  const at = stepReached(algo);
+  if (!at) return "Stop";
+  return at === "breakeven" ? "BE stop" : `Stop at ${at}`;
+}
+
+/** P8-style: how far a step leaves the stop below (long) the target that took it. */
+export function stepGapPct(plan: PlannerPlan, after: number, price: string): string | null {
+  const target = plan.targets.find((t) => t.index === after);
+  const tp = parseFloat(target?.price ?? "");
+  const px = parseFloat(price);
+  if (!(tp > 0) || !(px > 0)) return null;
+  const gap = ((px - tp) / tp) * 100 * (plan.side === "buy" ? 1 : -1);
+  return signedPct(String(gap), 2);
+}
+
+export function stepTargetLabel(to: string): string {
+  return to === "breakeven" ? "breakeven" : to.toUpperCase();
 }
 
 export function signedPct(raw: string | null | undefined, digits = 2): string {

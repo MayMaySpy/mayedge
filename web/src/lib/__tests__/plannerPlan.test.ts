@@ -13,6 +13,9 @@ import {
   rLabel,
   runnerPct,
   signedPct,
+  stepGapPct,
+  stepReached,
+  stopLabel,
 } from "@/lib/plannerPlan";
 
 const form = { ...defaultPlannerForm("buy"), entryPrice: "100", stop: "95" };
@@ -69,7 +72,13 @@ describe("planner form", () => {
 
   it("sends a size or a risk %, never both, and nothing an Attach does not use", () => {
     const enter = plannerBody(form, { mode: "enter", marketIndex: 1, slippage: 0.01 });
-    expect(enter).toMatchObject({ mode: "enter", entry_price: "100", risk_pct: "1", size: null });
+    expect(enter).toMatchObject({
+      mode: "enter",
+      entry_price: "100",
+      risk_pct: "1",
+      size: null,
+      stop_steps: "breakeven",
+    });
     const sized = plannerBody({ ...form, sizeMode: "size", size: "2" }, { mode: "enter", marketIndex: 1, slippage: 0.01 });
     expect(sized).toMatchObject({ size: "2", risk_pct: null });
     const attach = plannerBody(form, { mode: "attach", marketIndex: 1, slippage: 0.01 });
@@ -80,6 +89,11 @@ describe("planner form", () => {
     const f = formFromPlanner(planner());
     expect(f.stop).toBe("95");
     expect(f.targets).toEqual([{ kind: "r", value: "2", pct: "50" }]);
+    expect(f.stopSteps).toBe("breakeven");
+    const ladder = planner({ params_json: { stop: "95", stop_steps: "ladder", targets: [] } });
+    expect(formFromPlanner(ladder).stopSteps).toBe("ladder");
+    const off = planner({ params_json: { stop: "95", breakeven: false, targets: [] } });
+    expect(formFromPlanner(off).stopSteps).toBe("off");
   });
 });
 
@@ -99,6 +113,38 @@ describe("planner labels", () => {
     const at_be = planner({ planner: { ...algo.planner!, breakeven_done: true } });
     expect(plannerClipLabel(at_be, "11000000002")).toBe("BE stop");
     expect(plannerPhaseLabel(at_be)).toBe("At breakeven");
+  });
+
+  it("names where the stop has stepped to", () => {
+    const base = planner();
+    const plan = {
+      side: "buy" as const,
+      entry: "100",
+      stop: "95",
+      r: "5",
+      size: "5",
+      targets: [
+        { index: 1, price: "105", qty: "2", pct: "40", r: "1", move_pct: "5" },
+        { index: 2, price: "110", qty: "2", pct: "40", r: "2", move_pct: "10" },
+      ],
+      runner: "1",
+      risk_usd: "25",
+      risk_pct: "0.25",
+      breakeven: "100",
+      stop_pct: "-5",
+      warnings: [],
+      steps: [
+        { after: 1, price: "100", to: "breakeven" },
+        { after: 2, price: "105", to: "tp1" },
+      ],
+    };
+    const at = (n: number) =>
+      planner({ planner: { ...base.planner!, plan, steps_done: n, breakeven_done: n >= 1 } });
+    expect(stepReached(at(0))).toBeNull();
+    expect(stopLabel(at(1))).toBe("BE stop");
+    expect(stopLabel(at(2))).toBe("Stop at TP1");
+    expect(plannerPhaseLabel(at(2))).toBe("At TP1");
+    expect(stepGapPct(plan, 2, "105")).toBe("−4.55%");
   });
 
   it("formats from entry", () => {
