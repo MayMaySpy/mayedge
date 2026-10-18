@@ -272,3 +272,52 @@ describe("planner Chase entry", () => {
   });
 });
 
+describe("planner Ladder entry", () => {
+  const ladder = {
+    ...defaultPlannerForm("buy"),
+    entryType: "ladder" as const,
+    stop: "95",
+    entryLadder: { from: "99.5", to: "98", rungs: "4", strength: "even" as const },
+  };
+
+  it("needs two prices and 2 to 20 rungs", () => {
+    expect(plannerFormBlock({ ...ladder, entryLadder: { ...ladder.entryLadder, to: "" } }, "enter")).toBe(
+      "Set the Ladder's from and to"
+    );
+    expect(plannerFormBlock({ ...ladder, entryLadder: { ...ladder.entryLadder, to: "99.5" } }, "enter")).toBe(
+      "The Ladder's from and to must differ"
+    );
+    for (const rungs of ["1", "21", ""]) {
+      expect(plannerFormBlock({ ...ladder, entryLadder: { ...ladder.entryLadder, rungs } }, "enter")).toBe(
+        "A Ladder has 2 to 20 rungs"
+      );
+    }
+    expect(plannerFormBlock(ladder, "enter")).toBeNull();
+  });
+
+  it("sends its prices, rungs and Strength as the Ladder algo's skew", () => {
+    const body = plannerBody(
+      { ...ladder, expiryMin: "30", entryLadder: { ...ladder.entryLadder, strength: "low" } },
+      { mode: "enter", marketIndex: 1, slippage: 0.01 }
+    );
+    expect(body).toMatchObject({
+      entry_type: "ladder",
+      entry_price: null,
+      entry_chase: null,
+      entry_ladder: { price_from: "99.5", price_to: "98", rungs: 4, strength: "-1" },
+      expiry_min: 30,
+    });
+    expect(plannerBody(ladder, { mode: "attach", marketIndex: 1, slippage: 0.01 }).entry_ladder).toBeNull();
+  });
+
+  it("says how far a Ladder entry has filled", () => {
+    const entering = planner({
+      qty: "2",
+      filled: "0.5",
+      params_json: { entry_type: "ladder", stop: "95", targets: [] },
+      planner: { ...planner().planner!, phase: "entering" },
+    });
+    expect(plannerPhaseLabel(entering)).toBe("Laddering 0.5 / 2");
+    expect(canProtectNow(entering)).toBe(true);
+  });
+});

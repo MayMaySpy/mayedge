@@ -5,6 +5,11 @@ MAX_TARGETS = 5
 MAX_SLIPPAGE = 0.05
 DEFAULT_SLIPPAGE = 0.01
 
+# EL4: the venue's resting-order limit on one Market (Standard, docs/lighter-limits.md).
+MARKET_ORDER_CAP = 30
+# EL4: algo sends a Ladder entry leaves free for the stop when it rests its rungs.
+RUNG_TX_RESERVE = 3
+
 RATE_LIMIT_COOLDOWN_MS = 2_000
 MIN_PLACE_GAP_MS = 100
 

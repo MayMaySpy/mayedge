@@ -348,6 +348,14 @@ export interface PlannerPlan {
   warnings: string[];
   /** Stop steps: once target `after` fills, the stop moves to `price`. */
   steps: PlannerStep[];
+  /** EL1: a Ladder entry's rungs, nearest the market first. Empty once the entry ends. */
+  rungs?: PlannerRung[];
+}
+
+export interface PlannerRung {
+  index: number;
+  price: string;
+  qty: string;
 }
 
 export interface PlannerStep {

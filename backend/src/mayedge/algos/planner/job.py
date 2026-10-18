@@ -25,6 +25,7 @@ from mayedge.algos.chase.util import (
     _is_rate_limit,
     _is_would_cross,
 )
+from mayedge.algos.ladder.plan import Rung, is_passive, sort_by_closeness
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import (
@@ -35,6 +36,7 @@ from mayedge.algos.planner.config import (
     MISMATCH_GRACE_MS,
     MISSING_GRACE_MS,
     RATE_LIMIT_COOLDOWN_MS,
+    RUNG_TX_RESERVE,
 )
 from mayedge.algos.planner.plan import (
     ALGO_ID,
@@ -51,6 +53,7 @@ from mayedge.algos.planner.plan import (
     plan_size,
     plan_steps,
     price_plan,
+    round_qty,
     stop_price,
     trail_price_distance,
 )
@@ -92,7 +95,7 @@ class PlannerRunner:
         self._gave_up: set[str] = set()
         # E10: when a Chase entry's Clip last moved.
         self._entry_moved_ms = 0
-        # E13: when a Chase entry's Clip last left the book unexplained.
+        # E13, EL1: when a Chase entry's Clip or a Ladder rung last left the book unexplained.
         self._entry_vanished_ms = 0
 
     @property
@@ -580,10 +583,10 @@ class PlannerRunner:
         try:
             if params.mode == "enter":
                 check_notional(plan.size, plan.entry, settings.max_order_notional)
-                if params.entry_type in ("limit", "trail", "chase") and params.expiry_min:
+                if params.entry_type in ("limit", "trail", "chase", "ladder") and params.expiry_min:
                     st.entry_deadline_ms = st.created_at + params.expiry_min * 60_000
-                if params.entry_type == "chase":
-                    # E10: the first Clip goes on at the first look at the book.
+                if params.entry_type in ("chase", "ladder"):
+                    # E10, EL1: the first Clips go on at the first look at the book.
                     st.reason = "entry working"
                 elif params.entry_type == "trail":
                     # E9: the desk holds the entry until the price comes back.
@@ -682,6 +685,9 @@ class PlannerRunner:
         assert p is not None and plan is not None
         if p.entry_type == "chase":
             await self._work_chase(now)
+            return
+        if p.entry_type == "ladder":
+            await self._work_ladder(now)
             return
         entry = self._latest("entry")
         if entry is None:
@@ -847,7 +853,7 @@ class PlannerRunner:
             return
         assert quote.price is not None and quote.qty is not None
         if live is None:
-            await self._rest_chase(quote.price, quote.qty, now)
+            await self._rest_entry(quote.price, quote.qty, now)
             return
         if live.price == quote.price:
             st.reason = f"entry resting at {_fmt(live.price)}"
@@ -858,7 +864,11 @@ class PlannerRunner:
             return
         await self._amend_chase(live, quote.price, now)
 
-    async def _rest_chase(self, price: Decimal, qty: Decimal, now: int) -> None:
+    async def _rest_entry(self, price: Decimal, qty: Decimal, now: int) -> str | None:
+        """A post-only entry Clip: a Chase entry's (E10) or a Ladder rung (EL1).
+
+        None once sent, or why the venue refused it: "cross" or "min".
+        """
         st = self._state
         p = st.params
         assert p is not None
@@ -878,10 +888,11 @@ class PlannerRunner:
             clip.closed_at = now
             if _is_would_cross(e) or _is_min_size(e):
                 st.reason = f"entry waits: {e}"
-                return
+                return "min" if _is_min_size(e) else "cross"
             raise
         self._entry_moved_ms = now
         st.reason = f"entry resting at {_fmt(price)}"
+        return None
 
     async def _amend_chase(self, clip: Clip, price: Decimal, now: int) -> None:
         """E10: move the Clip in place as the book walks."""
@@ -906,6 +917,117 @@ class PlannerRunner:
         self._state.ledger.amend(clip, price=price, now=now)
         self._entry_moved_ms = now
         self._state.reason = f"entry resting at {_fmt(price)}"
+
+    # ── Ladder entry (EL1–EL5) ───────────────────────────────────────────
+
+    async def _work_ladder(self, now: int) -> None:
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None
+        clips = [c for c in st.ledger.clips if self._role(c) == "entry"]
+        pos, avg = self._held()
+        half = self._qty_step() / 2
+        traded = sum((min(c.filled, c.qty) for c in clips), ZERO)
+        for c in clips:
+            if c.status != "live":
+                continue
+            if not c.seen_on_book and now - c.placed_at >= ACK_GRACE_MS:
+                # Never shown on the book: the venue did not take it (post-only, say).
+                c.missing_since = c.missing_since or now - MISSING_GRACE_MS
+            if not self._gone(c, now):
+                continue
+            if pos >= traded + c.remaining - half:
+                # The Position shows more than the trades by this rung: a fill (E7).
+                traded += c.remaining
+                c.filled = c.qty
+                c.status = "filled"
+            else:
+                # Off the book and not accounted for: wait for the evidence, then rest it again (E13).
+                c.status = "cancelled"
+                self._entry_vanished_ms = now
+            c.closed_at = now
+        # E7: the trades or the Position, whichever shows more, never past the plan.
+        filled = min(plan.size, max(traded, pos, ZERO))
+        st.entry_filled = filled
+        if filled > 0 and self._live("stop") is None and "stop" not in self._gave_up:
+            await self._place_stop()  # E2
+        if st.status != ChaseStatus.RUNNING:
+            return
+        live = [c for c in clips if c.status == "live"]
+        pending = self._pending_rungs(plan.rungs, clips, half)
+        mark = self._mark()
+        over: str | None = None
+        if (not pending and not live) or filled >= plan.size - half:
+            over = "entry filled"  # EL3
+        elif mark > 0 and (mark - plan.stop) * _sign(p.side) <= 0:
+            over = "stop reached before the entry filled"  # E4
+        elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
+            over = "entry expired"  # E5
+        elif st.finish_entry:
+            over = "entry ended early"  # E14
+        if over is not None:
+            pulled = [await self._cancel_clip(c) for c in live]
+            if not all(pulled):
+                return
+            if over != "entry filled":
+                st.reason = over
+            closed = max((c.closed_at or 0 for c in clips), default=0)
+            await self._entry_over(now, filled, avg, closed_at=closed or st.created_at)
+            return
+        if self._entry_vanished_ms and now - self._entry_vanished_ms < MISSING_GRACE_MS:
+            st.reason = "entry waits for a rung's fills"  # E13
+            return
+        if not pending:
+            st.reason = f"{len(live)} rungs resting"
+            return
+        view = self._chase_view()
+        if view is None:
+            st.reason = "entry waits: book not synced"
+            return
+        # EL1: a rung that would cross waits. Nearest the market goes on first.
+        ready = sort_by_closeness(
+            [r for r in pending if is_passive(side=p.side, price=r.price, bid=view.bid, ask=view.ask)],
+            p.side,
+        )
+        # EL4: from the algo rate budget, leaving room for the stop.
+        room = budget.tx_room("algo") - RUNG_TX_RESERVE
+        placed = 0
+        for r in ready[: max(0, room)]:
+            try:
+                refused = await self._rest_entry(r.price, r.qty, now)
+            except Exception as e:
+                if isinstance(e, BudgetRefused) or _is_rate_limit(e):
+                    self._backoff_until = now + RATE_LIMIT_COOLDOWN_MS
+                    break
+                raise
+            if refused is None:
+                placed += 1
+            elif refused == "min":
+                # Under the venue minimum: the rung is as full as it gets.
+                self._gave_up.add(f"rung {_fmt(r.price)}")
+        resting = len(live) + placed
+        waiting = len(pending) - placed
+        st.reason = f"{resting} rungs resting, {waiting} waiting" if waiting else f"{resting} rungs resting"
+
+    def _pending_rungs(self, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal) -> list[Rung]:
+        """EL1: rungs with nothing resting and something left to fill, at what is left."""
+        ctx, _ = venue.market_context(self._exec(), self._state.market_index)
+        out: list[Rung] = []
+        for r in rungs:
+            if f"rung {_fmt(r.price)}" in self._gave_up:
+                continue
+            mine = [c for c in clips if c.price == r.price]
+            if any(c.status == "live" for c in mine):
+                continue
+            # A filled rung is not refilled.
+            if any(c.status == "filled" for c in mine):
+                continue
+            got = sum((min(c.filled, c.qty) for c in mine), ZERO)
+            left = round_qty(r.qty - got, ctx.qty_step)
+            if left <= half or left < ctx.min_qty:
+                continue
+            out.append(dataclasses.replace(r, qty=left))
+        return out
 
     def _end(self, reason: str) -> None:
         st = self._state
@@ -1469,13 +1591,19 @@ class PlannerRunner:
             self._publish()
 
     async def drain_for_shutdown(self) -> None:
-        """M7: the stop and targets stay on the venue while the desk is down. E15: a Chase entry's Clip does not."""
+        """M7: the stop and targets stay on the venue while the desk is down.
+
+        E15, EL5: a Chase entry's Clip and a Ladder entry's rungs do not.
+        """
         await self._halt()
         self._stop.clear()
         p = self._state.params
-        live = self._live("entry")
-        if p is not None and p.entry_type == "chase" and live is not None:
+        if p is None or p.entry_type not in ("chase", "ladder") or self._state.phase != "entering":
+            return
+        for clip in self._state.ledger.live_clips():
+            if self._role(clip) != "entry":
+                continue
             try:
-                await self._cancel_clip(live)
+                await self._cancel_clip(clip)
             except Exception:
-                logger.exception("planner %s: chase entry not pulled at shutdown", self._state.algo_id)
+                logger.exception("planner %s: entry not pulled at shutdown", self._state.algo_id)

@@ -10,7 +10,8 @@ export type PlannerSizeMode = "size" | "risk";
 export type PlannerStopSteps = "off" | "breakeven" | "ladder";
 
 export type PlannerTargetOrder = "limit" | "trigger" | "trail";
-export type PlannerEntryType = "market" | "limit" | "trail" | "chase";
+export type PlannerEntryType = "market" | "limit" | "trail" | "chase" | "ladder";
+export type PlannerLadderStrength = "even" | "low" | "high";
 export type PlannerTrailUnit = "r" | "pct";
 export type PlannerTrailStopStart = "off" | "target" | "last" | "r";
 
@@ -41,6 +42,21 @@ export interface PlannerEntryChaseDraft {
   clip: string;
 }
 
+/** EL1: a Ladder entry, every rung resting at once from one price to another. */
+export interface PlannerEntryLadderDraft {
+  from: string;
+  to: string;
+  rungs: string;
+  /** Like the Ladder algo's skew: more size toward the low or the high price. */
+  strength: PlannerLadderStrength;
+}
+
+/** EL4: the desk's cap of live algo orders on one Market. */
+export const PLANNER_LADDER_MIN_RUNGS = 2;
+export const PLANNER_LADDER_MAX_RUNGS = 20;
+
+const STRENGTH_SKEW: Record<PlannerLadderStrength, string> = { even: "0", low: "-1", high: "1" };
+
 /** M10: when the stop starts to trail, and how far behind the best price. */
 export interface PlannerTrailStopDraft {
   start: PlannerTrailStopStart;
@@ -55,6 +71,7 @@ export interface PlannerForm {
   entryType: PlannerEntryType;
   entryTrail: PlannerEntryTrailDraft;
   entryChase: PlannerEntryChaseDraft;
+  entryLadder: PlannerEntryLadderDraft;
   trailStop: PlannerTrailStopDraft;
   reference: "mark" | "last";
   entryPrice: string;
@@ -75,6 +92,7 @@ export function defaultPlannerForm(side: PlannerSide = "buy"): PlannerForm {
     entryType: "limit",
     entryTrail: { distance: "1", distanceKind: "pct", activation: "" },
     entryChase: { low: "", high: "", offsetBps: "4", clip: "" },
+    entryLadder: { from: "", to: "", rungs: "5", strength: "even" },
     trailStop: { start: "off", after: "1", atR: "2", distance: "1", unit: "r" },
     reference: "mark",
     entryPrice: "",
@@ -115,6 +133,16 @@ export function plannerFormBlock(form: PlannerForm, mode: PlannerMode): string |
       if (!(low > 0) || !(high > 0)) return "Set the Chase band";
       if (!(high > low)) return "The band's low must be under its high";
       if (!(num(form.entryChase.offsetBps) >= 0)) return "Set the offset";
+    }
+    if (form.entryType === "ladder") {
+      const from = num(form.entryLadder.from);
+      const to = num(form.entryLadder.to);
+      if (!(from > 0) || !(to > 0)) return "Set the Ladder's from and to";
+      if (from === to) return "The Ladder's from and to must differ";
+      const rungs = Number(form.entryLadder.rungs);
+      if (!Number.isInteger(rungs) || rungs < PLANNER_LADDER_MIN_RUNGS || rungs > PLANNER_LADDER_MAX_RUNGS) {
+        return `A Ladder has ${PLANNER_LADDER_MIN_RUNGS} to ${PLANNER_LADDER_MAX_RUNGS} rungs`;
+      }
     }
     if (form.sizeMode === "size" && !(num(form.size) > 0)) return "Set a size";
     if (form.sizeMode === "risk" && !(num(form.riskPct) > 0)) return "Set the risk %";
@@ -191,6 +219,15 @@ export function plannerBody(
             high: dec(form.entryChase.high),
             offset_bps: dec(form.entryChase.offsetBps),
             clip: canonicalDecimal(form.entryChase.clip) ?? null,
+          }
+        : null,
+    entry_ladder:
+      enter && form.entryType === "ladder"
+        ? {
+            price_from: dec(form.entryLadder.from),
+            price_to: dec(form.entryLadder.to),
+            rungs: parseInt(form.entryLadder.rungs, 10),
+            strength: STRENGTH_SKEW[form.entryLadder.strength],
           }
         : null,
     reference: form.reference,
@@ -293,11 +330,12 @@ export function plannerPhaseLabel(algo: AlgoState): string {
   return at ? `At ${at}` : "Managing";
 }
 
-/** "Entering", or "Chasing 0.6 / 2" while a Chase entry fills in pieces. */
+/** "Entering", or "Chasing 0.6 / 2" while a Chase or Ladder entry fills in pieces. */
 export function entryLabel(algo: AlgoState): string {
   const p = (algo.params_json ?? {}) as Record<string, unknown>;
-  if (p.entry_type !== "chase") return "Entering";
-  return `Chasing ${algo.filled ?? "0"} / ${algo.qty ?? "—"}`;
+  const verb = p.entry_type === "chase" ? "Chasing" : p.entry_type === "ladder" ? "Laddering" : null;
+  if (!verb) return "Entering";
+  return `${verb} ${algo.filled ?? "0"} / ${algo.qty ?? "—"}`;
 }
 
 /** E14: the entry can be ended early while it is still working. */

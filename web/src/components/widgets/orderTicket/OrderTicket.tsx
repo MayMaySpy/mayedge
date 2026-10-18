@@ -27,12 +27,13 @@ import {
   useLiveAlgos,
   useLiveBbo,
 } from "@/lib/liveData";
-import { livePlannerFor } from "@/lib/plannerPlan";
+import { livePlannerFor, type PlannerLadderStrength } from "@/lib/plannerPlan";
 import { PlannerDialog } from "@/components/widgets/planner/PlannerDialog";
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
 import type { ChaseParamsState } from "./kinds/ChaseParamsSheet";
+import type { LadderParamsState } from "./kinds/LadderParamsSheet";
 import { LimitParams } from "./kinds/LimitParams";
 import { MarketParams } from "./kinds/MarketParams";
 import { LeverageModal } from "./LeverageModal";
@@ -219,11 +220,22 @@ export function OrderTicket({
     ? snapReduceOnlySize(sizeNum, absPos, decimals)
     : sizeNum;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
-  // Planner E16: a ticket set to Chase opens Planner with a Chase entry from its fields.
+  // Planner E16, EL6: a ticket set to Chase or Ladder opens Planner with that entry from its fields.
   const plannerFromTicket = (() => {
-    if (kind !== "algo" || algo !== "chase-iceberg") return undefined;
-    const c = pluginState as ChaseParamsState;
+    if (kind !== "algo" || (algo !== "chase-iceberg" && algo !== "ladder")) return undefined;
     const qty = trimQty(sizeNum, decimals);
+    if (algo === "ladder") {
+      const l = pluginState as LadderParamsState;
+      // The ticket's skew is only in play under Advanced; its window and variance stay behind.
+      const strength: PlannerLadderStrength =
+        l.advanced && (l.sizeSkew === "low" || l.sizeSkew === "high") ? l.sizeSkew : "even";
+      return {
+        entryType: "ladder" as const,
+        entryLadder: { from: l.priceFrom, to: l.priceTo, rungs: l.orders, strength },
+        ...(qty ? { sizeMode: "size" as const, size: qty } : {}),
+      };
+    }
+    const c = pluginState as ChaseParamsState;
     return {
       entryType: "chase" as const,
       entryChase: {

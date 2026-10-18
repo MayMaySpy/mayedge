@@ -158,4 +158,39 @@ describe("PlannerDialog", () => {
       entry_chase: { low: "99", high: "100.5", offset_bps: "4", clip: "1" },
     });
   });
+
+  it("sends a Ladder entry's prices, rungs and Strength, drawn with every rung filled", async () => {
+    vi.mocked(api.plannerPreview).mockResolvedValue({
+      ...DRAWN,
+      plan: {
+        ...DRAWN.plan!,
+        entry: "98.75",
+        rungs: [
+          { index: 0, price: "99.5", qty: "0.5" },
+          { index: 1, price: "99", qty: "0.5" },
+          { index: 2, price: "98.5", qty: "0.5" },
+          { index: 3, price: "98", qty: "0.5" },
+        ],
+      },
+    });
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Ladder" }));
+    expect(screen.queryByLabelText("Entry price")).toBeNull();
+    await user.type(screen.getByLabelText("Ladder from"), "99.5");
+    await user.type(screen.getByLabelText("Ladder to"), "98");
+    await user.clear(screen.getByLabelText("Ladder rungs"));
+    await user.type(screen.getByLabelText("Ladder rungs"), "4");
+    const strength = screen.getByRole("radiogroup", { name: "Ladder Strength" });
+    await user.click(within(strength).getByRole("radio", { name: "High" }));
+    await user.type(screen.getByLabelText("Stop"), "95");
+    await waitFor(() => expect(screen.getByText("Entry, all rungs filled")).toBeTruthy());
+    expect(screen.getByText("Rungs · 4")).toBeTruthy();
+    const body = vi.mocked(api.plannerPreview).mock.calls.at(-1)?.[0];
+    expect(body).toMatchObject({
+      entry_type: "ladder",
+      entry_price: null,
+      entry_chase: null,
+      entry_ladder: { price_from: "99.5", price_to: "98", rungs: 4, strength: "1" },
+    });
+  });
 });

@@ -24,10 +24,13 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 |---|---|---|
 | Mode | Enter, Attach | Enter sends the entry. Attach takes over a Position already open. |
 | Side | long, short | Attach takes it from the Position. |
-| Entry type | Market, Limit, Trail, Chase | Enter only. A Trail entry also takes an Activation (optional) and a distance (% or price). A Chase entry takes a band, an offset and a clip (E10). Ladder is planned, not built (EL1–EL4). |
+| Entry type | Market, Limit, Trail, Chase, Ladder | Enter only. A Trail entry also takes an Activation (optional) and a distance (% or price). A Chase entry takes a band, an offset and a clip (E10). A Ladder entry takes from, to, rungs and Strength (EL1). |
 | Chase band | low, high | Chase only. The prices the entry works between. |
 | Chase offset | bps | Chase only. How far behind the touch the Clip rests. 4 by default. |
 | Chase clip | size, or none | Chase only. The most one Clip shows. None works the whole size at once. |
+| Ladder from, to | price, price | Ladder only. The first rung rests at from, the last at to. Either way round: a buy ladder runs down from its higher price, a sell ladder up from its lower. |
+| Ladder rungs | 2 to 20 | Ladder only (EL4). |
+| Ladder Strength | Even, Low, High | Ladder only. **Strength**: even sizes, or more size toward the low or the high price, 3:1 at the ends, like the **Ladder** algo. Even by default. |
 | Entry price | price | Limit only. A Market entry plans from mark at send. |
 | Stop | price | Required. It defines **R**. |
 | Size | size, or risk % of equity | Enter only. Attach takes the Position's size. |
@@ -35,14 +38,14 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 | Stop steps | Off, Breakeven, Step up | Breakeven by default. |
 | Trail stop | Off, after a target, after the last target, or at an R multiple; distance in R or % | Off by default. |
 | Reference | Mark, Last | What every Trail part of the plan follows ([trail-rules.md](trail-rules.md)). Mark by default. |
-| Entry expiry | minutes, or none | Limit, Trail or Chase. |
+| Entry expiry | minutes, or none | Limit, Trail, Chase or Ladder. |
 | Slippage | % | Market entry and Market stop. The order ticket's setting, capped at 5% like every Market order. |
 
 ## Plan
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| P1 | **R** is the distance from entry to the stop. Before the fill, entry is the Limit price, mark for a Market entry, or a Chase entry's worst fill (E12). After it, entry is the Position's average entry. | code | test_r_targets_reprice_from_the_actual_entry |
+| P1 | **R** is the distance from entry to the stop. Before the fill, entry is the Limit price, mark for a Market entry, a Chase entry's worst fill (E12), or a Ladder entry's average with every rung filled (EL2). After it, entry is the Position's average entry. | code | test_r_targets_reprice_from_the_actual_entry |
 | P2 | Size from risk is equity × risk % ÷ (R + the taker fee per unit at the stop), rounded down to the lot. Equity is the Portfolio margin the header shows at send. Size is fixed once sent. A Trail entry is sent when it fires, so its size is worked out from the price it fires at. | code | test_size_from_risk_rounds_down_to_the_lot, test_size_from_risk_pays_the_taker_fee_at_the_stop |
 | P3 | After the fill, the plan shows the risk at its actual entry. Slippage can make it differ from P2. | | test_targets_go_on_once_the_entry_is_complete_from_its_actual_price |
 | P4 | A target given in R is priced from the entry, and moves to the actual entry once filled. A target given as a price stays where it was put. | | test_r_targets_reprice_from_the_actual_entry, test_targets_go_on_once_the_entry_is_complete_from_its_actual_price |
@@ -94,14 +97,16 @@ A Chase or Ladder entry fills in pieces. The stop goes on with the first piece (
 | E15 | On shutdown a Chase entry's Clip comes off, like the Chase algo's. On restart the entry carries on from what filled. A stop already on stays on (M7). | | test_shutdown_pulls_a_chase_entry |
 | E16 | Picking Planner from the order ticket while it is set to Chase opens a Chase entry with the ticket's size, band (floor and ceiling), offset and clip. The side is picked in Planner: the ticket has none until Chase buy or Chase sell. | | `starts a Chase entry from the ticket's Chase` |
 
-Ladder is planned, not built. These are the rules it will be built to:
+A Ladder entry rests all its rungs at once and the Position grows as price walks through them. Its rungs and sizes are the **Ladder** algo's own.
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| EL1 | A Ladder entry rests N post-only rungs evenly from one price to another, sized by Strength like the **Ladder** algo. A filled rung is not refilled. | | |
-| EL2 | The stop is past the furthest rung. Size from risk is the size at which every rung filling loses the risk % at the stop. Fewer rungs filling loses less. | | |
-| EL3 | The targets go on once every rung has filled, the entry expires, mark reaches the stop (E4), or **Protect now** (E14). | | |
-| EL4 | Rungs count against the venue's open order limits ([lighter-limits.md](lighter-limits.md)). A ladder that would not fit refuses to start. | | |
+| EL1 | A Ladder entry rests N post-only rungs evenly from one price to another, sized by Strength like the **Ladder** algo, all at once. A rung that would cross waits until it would rest. A filled rung is not refilled. A rung that leaves the book counts only what the trades or the Position show (E7); one they do not account for goes back on for what is left after 3s more (E13). | | test_a_ladder_entry_rests_its_rungs_like_the_ladder_algo, test_a_ladder_rung_under_the_venue_minimum_is_refused, test_a_ladder_entry_rests_every_rung, test_a_filled_ladder_rung_is_not_refilled, test_a_ladder_rung_that_would_cross_waits, test_a_vanished_ladder_rung_waits_for_evidence_then_goes_back_on |
+| EL2 | The stop is past the furthest rung. Until the entry ends, the plan is drawn from the average with every rung filled, and size from risk (P2) is the size at which every rung filling loses the risk % at the stop: each rung's size × its distance to the stop, plus the taker fee at the stop, rounded down to the lot. Fewer rungs filling loses less. Once the entry ends, E3 redraws the plan from the actual average. | | test_a_ladder_entry_is_sized_so_every_rung_filling_loses_the_risk, test_a_stop_inside_the_ladder_is_refused |
+| EL3 | The targets go on once every rung has filled, the entry expires (E5), mark reaches the stop (E4), or **Protect now** (E14). What is left of the rungs comes off first. | | test_a_filled_ladder_rung_is_not_refilled, test_an_expired_ladder_entry_protects_what_filled, test_mark_through_the_stop_ends_a_ladder_entry, test_protect_now_ends_a_ladder_entry |
+| EL4 | Rungs count against the venue's open order limits ([lighter-limits.md](lighter-limits.md)). A ladder has 2 to 20 rungs, the desk's cap of live algo orders on one Market, and with the orders already resting on the Market it must fit under the venue's 30 a Market (Standard). One that would not fit refuses to start. Rungs go on from the algo rate budget and leave 3 sends of it free for the stop; the rest go on at the next look. | 20, 30 and 3 are code | test_a_ladder_that_would_not_fit_the_open_order_limits_is_refused, test_ladder_rungs_leave_the_rate_budget_room_for_the_stop, test_a_ladder_entry_refused_by_the_rate_budget_backs_off, `needs two prices and 2 to 20 rungs` |
+| EL5 | On shutdown a Ladder entry's rungs come off, like a Chase entry's Clip (E15). On restart the rungs that have not filled go back on. A stop already on stays on (M7). | | test_shutdown_pulls_a_ladder_entry |
+| EL6 | Picking Planner from the order ticket while it is set to Ladder opens a Ladder entry with the ticket's size, from, to, orders as rungs, and skew as Strength. Its live window and variance are not carried: a Planner ladder rests every rung, evenly spaced. | | `starts a Ladder entry from the ticket's Ladder` |
 
 ## Manage
 

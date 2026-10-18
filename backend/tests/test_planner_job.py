@@ -11,9 +11,15 @@ from mayedge.algos.chase import util
 from mayedge.algos.chase.config import MIN_REQUOTE_MS
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.planner import venue as planner_venue
-from mayedge.algos.planner.config import MISMATCH_GRACE_MS, MISSING_GRACE_MS, PLANNER_COI_BASE
+from mayedge.algos.planner.config import (
+    MISMATCH_GRACE_MS,
+    MISSING_GRACE_MS,
+    PLANNER_COI_BASE,
+    RUNG_TX_RESERVE,
+)
 from mayedge.algos.planner.job import PlannerRunner
-from mayedge.algos.planner.plan import EntryChase, PlannerParams, Target, build_plan
+from mayedge.algos.planner.plan import EntryChase, EntryLadder, PlannerParams, Target, build_plan
+from mayedge.lighter.budget import TX_CEILING, BudgetRefused, budget
 
 # Allow `from planner_harness import ...` when discover runs from backend/
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -42,6 +48,14 @@ CHASE = dataclasses.replace(
     entry_type="chase",
     entry_price=None,
     entry_chase=EntryChase(low=D("99"), high=D("100.5"), offset_bps=D("4"), clip=D("1")),
+)
+
+# EL1: rests 2 in four rungs of 0.5, from 99.5 down to 98. Every rung filled averages 98.75.
+LADDER = dataclasses.replace(
+    LONG,
+    entry_type="ladder",
+    entry_price=None,
+    entry_ladder=EntryLadder(price_from=D("99.5"), price_to=D("98"), rungs=4),
 )
 
 
@@ -533,3 +547,160 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(self.venue.sent("cancel")), 1)
         self.assertEqual(self.venue.orders, {})
         self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+
+    # ── Ladder entry ──
+
+    async def _laddering(self, params: PlannerParams = LADDER) -> PlannerRunner:
+        budget.reset()
+        self.addCleanup(budget.reset)
+        job = await self._start(params)
+        await self._tick(job)
+        await self._tick(job)  # the feed shows them
+        return job
+
+    def _rung(self, price: str) -> int:
+        """The latest rung Clip sent at this price."""
+        return int([kw for kw in self.venue.sent("limit") if kw["price"] == price][-1]["client_order_index"])
+
+    async def _rung_fills(self, job: PlannerRunner, price: str, qty: str = "0.5") -> None:
+        self.venue.fill(self._rung(price), qty)
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+
+    async def test_a_ladder_entry_rests_every_rung(self) -> None:
+        job = await self._laddering()
+        plan = job.state.plan
+        assert plan is not None
+        self.assertEqual(plan.entry, D("98.75"))  # EL2: every rung filled
+        rungs = self.venue.sent("limit")
+        self.assertEqual([r["price"] for r in rungs], ["99.5", "99", "98.5", "98"])
+        self.assertEqual({r["size"] for r in rungs}, {"0.5"})
+        self.assertEqual({r["time_in_force"] for r in rungs}, {"post_only"})
+        self.assertTrue(all(r["client_order_index"] > PLANNER_COI_BASE for r in rungs))
+        self.assertEqual(job.state.reason, "4 rungs resting")
+
+    async def test_a_filled_ladder_rung_is_not_refilled(self) -> None:
+        job = await self._laddering()
+        await self._rung_fills(job, "99.5")
+        # The stop goes on with the first rung (E2), and the rung stays filled.
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 1)
+        self.assertEqual(job.state.entry_filled, D("0.5"))
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("limit")), 4)
+        self.assertEqual(self.venue.sent("trigger_tp"), [])
+        # EL3: every rung filled, the targets go on from the actual average.
+        for price in ("99", "98.5"):
+            self.venue.fill(self._rung(price), "0.5")
+        self.venue.fill(self._rung("98"), "0.5", price="97.9")
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(job.state.phase, "managing")
+        self.assertEqual(len(self.venue.sent("limit")), 4)
+        plan = job.state.plan
+        assert plan is not None
+        self.assertEqual(plan.entry, D("98.725"))
+        self.assertEqual(plan.rungs, ())
+        self.assertEqual([t["size"] for t in self.venue.sent("trigger_tp")], ["1", "1"])
+
+    async def test_a_ladder_rung_that_would_cross_waits(self) -> None:
+        self.venue.bid, self.venue.ask = "99.3", "99.4"
+        job = await self._laddering()
+        self.assertEqual([r["price"] for r in self.venue.sent("limit")], ["99", "98.5", "98"])
+        self.assertEqual(job.state.reason, "3 rungs resting, 1 waiting")
+        self.venue.bid, self.venue.ask = "99.9", "100.1"
+        await self._tick(job)
+        self.assertEqual(self.venue.sent("limit")[-1]["price"], "99.5")
+        self.assertEqual(len(self.venue.resting()), 4)
+
+    async def test_a_vanished_ladder_rung_waits_for_evidence_then_goes_back_on(self) -> None:
+        job = await self._laddering()
+        del self.venue.orders[self._rung("98")]  # gone, with no trade and no Position
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("limit")), 4)
+        self.assertIn("waits for a rung's fills", job.state.reason or "")
+        await self._tick(job, MISSING_GRACE_MS)
+        again = self.venue.sent("limit")
+        self.assertEqual(len(again), 5)
+        self.assertEqual((again[-1]["price"], again[-1]["size"]), ("98", "0.5"))
+        self.assertEqual(job.state.entry_filled, D("0"))  # E7: a vanished rung is not a fill
+
+    async def _ends_with_one_rung(self, job: PlannerRunner, reason: str) -> None:
+        self.assertEqual(len(self.venue.sent("cancel")), 3)
+        self.assertEqual(self.venue.resting(), [])
+        self.assertEqual(job.state.phase, "managing")
+        self.assertEqual(job.state.reason, reason)
+        self.assertEqual(sum(D(t["size"]) for t in self.venue.sent("trigger_tp")), D("0.5"))
+
+    async def test_an_expired_ladder_entry_protects_what_filled(self) -> None:
+        job = await self._laddering(dataclasses.replace(LADDER, expiry_min=5))
+        await self._rung_fills(job, "99.5")
+        await self._tick(job, 5 * 60_000)
+        await self._ends_with_one_rung(job, "entry expired")
+
+    async def test_mark_through_the_stop_ends_a_ladder_entry(self) -> None:
+        job = await self._laddering()
+        await self._rung_fills(job, "99.5")
+        self.venue.set_mark("95")
+        await self._tick(job)
+        await self._ends_with_one_rung(job, "stop reached before the entry filled")
+
+    async def test_protect_now_ends_a_ladder_entry(self) -> None:
+        job = await self._laddering()
+        await self._rung_fills(job, "99.5")
+        await job.finish_entry()
+        await job._halt()
+        await self._ends_with_one_rung(job, "entry ended early")
+
+    async def test_ladder_rungs_leave_the_rate_budget_room_for_the_stop(self) -> None:
+        budget.reset()
+        self.addCleanup(budget.reset)
+        # Two sends free past what the stop needs.
+        self.assertTrue(budget.try_acquire(TX_CEILING["algo"] - RUNG_TX_RESERVE - 2, tx=True, lane="algo"))
+        job = await self._start(LADDER)
+        await self._tick(job)
+        self.assertEqual([r["price"] for r in self.venue.sent("limit")], ["99.5", "99"])
+        self.assertEqual(job.state.reason, "2 rungs resting, 2 waiting")
+        budget.reset()
+        await self._tick(job)
+        self.assertEqual(len(self.venue.resting()), 4)
+
+    async def test_a_ladder_entry_refused_by_the_rate_budget_backs_off(self) -> None:
+        job = await self._laddering()
+        self.assertEqual(len(self.venue.resting()), 4)
+        sent = self.venue.create_limit_order
+        calls = 0
+
+        async def refuse_second(**kw):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise BudgetRefused(429, "rate limited")
+            return await sent(**kw)
+
+        self.venue.create_limit_order = refuse_second  # type: ignore[method-assign]
+        for coi in [self._rung(px) for px in ("99", "98.5", "98")]:
+            del self.venue.orders[coi]
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(calls, 2)
+        self.assertGreater(job._backoff_until, self.clock.now_ms)
+        self.assertEqual(len(self.venue.resting()), 2)
+
+    async def test_shutdown_pulls_a_ladder_entry(self) -> None:
+        job = await self._laddering()
+        await self._rung_fills(job, "99.5")
+        await job.drain_for_shutdown()
+        self.assertEqual(len(self.venue.sent("cancel")), 3)
+        self.assertEqual(self.venue.resting(), [])
+        self.assertEqual(len(self.venue.resting("stop-loss")), 1)  # M7: the stop stays on
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        # On restart the rungs that have not filled go back on.
+        row = {**job.snapshot(), **job.state.ledger.to_persist()}
+        again = PlannerRunner(self.book)
+        again.hydrate_from_row(row)
+        await again.resume()
+        await again._halt()
+        self.assertEqual([r["price"] for r in self.venue.sent("limit")[4:]], ["99", "98.5", "98"])
+        self.assertEqual(again.state.entry_filled, D("0.5"))

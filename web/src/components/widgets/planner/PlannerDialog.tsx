@@ -258,6 +258,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
                 { value: "market", label: "Market" },
                 { value: "trail", label: "Trail" },
                 { value: "chase", label: "Chase" },
+                { value: "ladder", label: "Ladder" },
               ]}
             />
           </div>
@@ -310,6 +311,60 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
             <span className="font-mono text-xs text-muted-foreground">
               Works post-only behind the touch inside the band. The stop goes on with the first
               fill; targets once the entry ends. Sized from the band&apos;s worst fill.
+            </span>
+          </div>
+        )}
+
+        {mode === "enter" && !replan && form.entryType === "ladder" && (
+          <div className="flex flex-col gap-1">
+            <FieldGroup className="grid grid-cols-2 items-start gap-3">
+              <TicketField
+                id="planner-ladder-from"
+                label="Ladder from"
+                shortLabel="From"
+                value={form.entryLadder.from}
+                inputMode="decimal"
+                placeholder="First rung"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryLadder: { ...form.entryLadder, from: v } })}
+              />
+              <TicketField
+                id="planner-ladder-to"
+                label="Ladder to"
+                shortLabel="To"
+                value={form.entryLadder.to}
+                inputMode="decimal"
+                placeholder="Last rung"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryLadder: { ...form.entryLadder, to: v } })}
+              />
+              <TicketField
+                id="planner-ladder-rungs"
+                label="Ladder rungs"
+                shortLabel="Rungs"
+                value={form.entryLadder.rungs}
+                inputMode="numeric"
+                placeholder="5"
+                sanitize={(raw) => raw.replace(/[^\d]/g, "")}
+                onChange={(v) => set({ entryLadder: { ...form.entryLadder, rungs: v } })}
+              />
+              <Field className="gap-1">
+                <FieldLabel className="text-base font-normal text-muted-foreground">Strength</FieldLabel>
+                <Seg
+                  label="Ladder Strength"
+                  value={form.entryLadder.strength}
+                  onChange={(v) => set({ entryLadder: { ...form.entryLadder, strength: v } })}
+                  items={[
+                    { value: "even", label: "Even" },
+                    { value: "low", label: "Low" },
+                    { value: "high", label: "High" },
+                  ]}
+                />
+              </Field>
+            </FieldGroup>
+            <span className="font-mono text-xs text-muted-foreground">
+              Rests every rung post-only at once. The stop goes on with the first fill; targets once
+              every rung has filled. Sized so every rung filling loses the risk at the stop.
             </span>
           </div>
         )}
@@ -676,11 +731,18 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
                     ? "Entry, at the trigger now"
                     : form.entryType === "chase"
                       ? "Entry, worst fill"
-                      : "Entry"
+                      : form.entryType === "ladder"
+                        ? "Entry, all rungs filled"
+                        : "Entry"
               }
             >
               {formatPrice(plan.entry)}
             </Row>
+            {mode === "enter" && plan.rungs && plan.rungs.length > 0 && (
+              <Row label={`Rungs · ${plan.rungs.length}`}>
+                {formatPrice(plan.rungs[0].price)} → {formatPrice(plan.rungs[plan.rungs.length - 1].price)}
+              </Row>
+            )}
             <Row label="Stop" tone="ask">
               {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)})
             </Row>

@@ -5,9 +5,12 @@ from dataclasses import replace
 from decimal import Decimal as D
 from typing import Any
 
+from mayedge.algos.ladder.plan import build_rungs
 from mayedge.algos.planner.plan import (
     EntryChase,
+    EntryLadder,
     MarketContext,
+    Plan,
     PlannerParams,
     PlanRefused,
     Target,
@@ -339,3 +342,85 @@ class ChaseEntryTests(unittest.TestCase):
         again = PlannerParams.from_json(params.to_json())
         self.assertEqual(again.entry_chase, params.entry_chase)
 
+
+class LadderEntryTests(unittest.TestCase):
+    def _ladder(self, rungs: int = 5, strength: str = "0", **kw: Any) -> PlannerParams:
+        ladder = EntryLadder(price_from=D("2.19"), price_to=D("2.15"), rungs=rungs, strength=D(strength))
+        return _enter(entry_type="ladder", entry_price=None, entry_ladder=ladder, **kw)
+
+    @staticmethod
+    def _loss_at_stop(plan: Any, ctx: MarketContext) -> D:
+        fee = plan.stop * ctx.taker_bps / D("10000")
+        return sum((r.qty * (abs(r.price - plan.stop) + fee) for r in plan.rungs), D("0"))
+
+    def test_a_ladder_entry_rests_its_rungs_like_the_ladder_algo(self) -> None:
+        plan = build_plan(self._ladder(strength="1"), ZRO)
+        # Strength high: 3:1 from the high rung to the low one.
+        self.assertEqual([r.price for r in plan.rungs], [D("2.19"), D("2.18"), D("2.17"), D("2.16"), D("2.15")])
+        self.assertEqual([r.qty for r in plan.rungs], [D("30"), D("25"), D("20"), D("15"), D("10")])
+        same = build_rungs(
+            side="buy", qty=D("100"), price_from=D("2.19"), price_to=D("2.15"), rungs=5,
+            tick=ZRO.tick, qty_step=ZRO.qty_step, min_qty=ZRO.min_qty, size_skew=D("1"),
+        )
+        self.assertEqual(list(plan.rungs), same)
+        # Either way round: a buy ladder runs down from its higher price.
+        flipped = replace(self._ladder(strength="1"), entry_ladder=EntryLadder(D("2.15"), D("2.19"), 5, D("1")))
+        self.assertEqual(build_plan(flipped, ZRO).rungs, plan.rungs)
+
+    def test_a_ladder_entry_is_sized_so_every_rung_filling_loses_the_risk(self) -> None:
+        plan = build_plan(self._ladder(size=None, risk_pct=D("1")), ZRO)
+        # Drawn from the average with every rung filled (EL2), R 2.17 − 2.0854.
+        self.assertEqual(plan.entry, D("2.17"))
+        # 55.37 ÷ 0.0846 = 654.5: every rung filled loses at most 1%, one lot more would not.
+        self.assertEqual(plan.size, D("654"))
+        self.assertEqual(sum((r.qty for r in plan.rungs), D("0")), D("654"))
+        self.assertLessEqual(self._loss_at_stop(plan, ZRO), D("55.37"))
+        self.assertGreater(D("655") * (plan.entry - plan.stop), D("55.37"))
+        # Fewer rungs filling loses less.
+        self.assertLess(self._loss_at_stop(replace(plan, rungs=plan.rungs[:2]), ZRO), D("55.37"))
+        # With the taker fee at the stop, on a skewed ladder.
+        fee = _ctx(taker_bps=D("5"))
+        skewed = build_plan(self._ladder(strength="-1", size=None, risk_pct=D("1")), fee)
+        self.assertEqual(skewed.entry, D("2.165"))
+        self.assertLessEqual(self._loss_at_stop(skewed, fee), D("55.37"))
+        per_unit = skewed.r + skewed.stop * D("5") / D("10000")
+        self.assertLessEqual(skewed.size * per_unit, D("55.37"))
+        self.assertGreater((skewed.size + 1) * per_unit, D("55.37"))
+
+    def test_a_stop_inside_the_ladder_is_refused(self) -> None:
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(self._ladder(stop=D("2.16")), ZRO)
+        self.assertEqual(e.exception.rule, "EL2")
+        short = self._ladder(side="sell", stop=D("2.18"), targets=[Target("r", D("2"), D("100"))])
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(short, _ctx(mark=D("2.14")))
+        self.assertEqual(e.exception.rule, "EL2")
+
+    def test_a_ladder_that_would_not_fit_the_open_order_limits_is_refused(self) -> None:
+        for rungs in (1, 21):
+            with self.assertRaises(PlanRefused) as e:
+                build_plan(self._ladder(rungs=rungs), ZRO)
+            self.assertEqual(e.exception.rule, "EL4")
+        twenty = self._ladder(rungs=20, size=D("200"), stop=D("2.1"))
+        self.assertEqual(len(build_plan(twenty, _ctx(resting_orders=10)).rungs), 20)
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(twenty, _ctx(resting_orders=11))
+        self.assertEqual(e.exception.rule, "EL4")
+
+    def test_a_ladder_rung_under_the_venue_minimum_is_refused(self) -> None:
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(self._ladder(size=D("20")), ZRO)
+        self.assertEqual(e.exception.rule, "EL1")
+
+    def test_a_ladder_entry_survives_a_save(self) -> None:
+        params = self._ladder(strength="-1")
+        again = PlannerParams.from_json(params.to_json())
+        self.assertEqual(again.entry_ladder, params.entry_ladder)
+        plan = build_plan(params, ZRO)
+        self.assertEqual(Plan.from_json(plan.to_json()).rungs, plan.rungs)
+        with self.assertRaises(PlanRefused) as e:
+            PlannerParams.from_json(
+                {"side": "buy", "stop": "1", "entry_type": "ladder",
+                 "entry_ladder": {"price_from": "2", "price_to": "2", "rungs": 5}, "targets": []}
+            )
+        self.assertEqual(e.exception.rule, "EL1")

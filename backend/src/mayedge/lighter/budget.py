@@ -96,6 +96,18 @@ class RestBudget:
         self._hits.extend((now, tx) for _ in range(n))
         return True
 
+    def tx_room(self, lane: str | None = None) -> int:
+        """How many sendTx this lane could still spend now."""
+        name = lane or _lane.get()
+        now = time.monotonic()
+        self._prune(now)
+        sent = sum(1 for _at, is_tx in self._hits if is_tx)
+        if name == KILL_LANE:
+            return max(0, TX_CAP - sent)
+        if now < self._cool_until:
+            return 0
+        return max(0, min(CEILING[name] - len(self._hits), TX_CEILING.get(name, TX_CAP) - sent))
+
     def try_acquire(self, n: int = 1, *, tx: bool = False, lane: str | None = None) -> bool:
         return self._grant(lane or _lane.get(), n, tx=tx)
 

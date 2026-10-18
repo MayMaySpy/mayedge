@@ -66,6 +66,18 @@ def ticket_protects(ex: ChaseExecution, market_index: int) -> list[dict[str, Any
     return out
 
 
+def resting_orders(ex: ChaseExecution, market_index: int) -> int:
+    """EL4: limit orders on the Market's book. Stops and Take Profits wait off it."""
+    n = 0
+    for o in open_orders(ex):
+        if int(o.get("market_index") or -1) != market_index:
+            continue
+        kind = str(o.get("order_type") or "limit")
+        if protect_role_kind(kind) is None and "twap" not in kind.lower():
+            n += 1
+    return n
+
+
 def market_context(ex: ChaseExecution, market_index: int) -> tuple[MarketContext, str]:
     """The numbers a plan is drawn from, and the Market's symbol."""
     meta = ex.get_market_by_index(market_index)
@@ -93,5 +105,6 @@ def market_context(ex: ChaseExecution, market_index: int) -> tuple[MarketContext
         liq_price=held.liq_price,
         position_size=held.size,
         position_entry=held.entry,
+        resting_orders=resting_orders(ex, market_index),
     )
     return ctx, str(meta.symbol)

@@ -7,7 +7,14 @@ from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, Literal
 
-from mayedge.algos.planner.config import DEFAULT_SLIPPAGE, MAX_SLIPPAGE, MAX_TARGETS
+from mayedge.algos.ladder.config import MAX_WINDOW, MIN_RUNGS
+from mayedge.algos.ladder.plan import Rung, build_rungs
+from mayedge.algos.planner.config import (
+    DEFAULT_SLIPPAGE,
+    MARKET_ORDER_CAP,
+    MAX_SLIPPAGE,
+    MAX_TARGETS,
+)
 from mayedge.algos.trail import engine
 from mayedge.numbers import fmt_decimal, parse_decimal
 
@@ -16,7 +23,7 @@ ALGO_VERSION = "1"
 
 Side = Literal["buy", "sell"]
 Mode = Literal["enter", "attach"]
-EntryType = Literal["market", "limit", "trail", "chase"]
+EntryType = Literal["market", "limit", "trail", "chase", "ladder"]
 TargetKind = Literal["price", "r"]
 StopSteps = Literal["off", "breakeven", "ladder"]
 # P9: a resting reduce-only limit, a Take Profit Limit that waits off the book, or a Trail.
@@ -180,6 +187,50 @@ class EntryChase:
 
 
 @dataclass(frozen=True)
+class EntryLadder:
+    """EL1: a Ladder entry rests its rungs evenly from one price to another."""
+
+    price_from: Decimal
+    price_to: Decimal
+    rungs: int
+    # The Ladder algo's size skew: -1 more size at the low price, 0 even, +1 at the high.
+    strength: Decimal = Decimal("0")
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "price_from": fmt_decimal(self.price_from) or "0",
+            "price_to": fmt_decimal(self.price_to) or "0",
+            "rungs": self.rungs,
+            "strength": fmt_decimal(self.strength) or "0",
+        }
+
+    @classmethod
+    def from_json(cls, raw: Any) -> EntryLadder:
+        if not isinstance(raw, dict):
+            raise PlanRefused("EL1", "Set the Ladder entry's prices and rungs")
+        try:
+            price_from = parse_decimal(str(raw.get("price_from") or ""))
+            price_to = parse_decimal(str(raw.get("price_to") or ""))
+        except ValueError:
+            raise PlanRefused("EL1", "Set the Ladder entry's from and to prices") from None
+        if price_from <= 0 or price_to <= 0 or price_from == price_to:
+            raise PlanRefused("EL1", "The Ladder's from and to are two prices above 0")
+        try:
+            rungs = int(str(raw.get("rungs") or ""))
+        except ValueError:
+            raise PlanRefused("EL4", "Set the number of rungs") from None
+        strength = _opt_decimal(raw.get("strength")) or Decimal("0")
+        if strength < -1 or strength > 1:
+            raise PlanRefused("EL1", "Strength is even, low or high")
+        return cls(price_from=price_from, price_to=price_to, rungs=rungs, strength=strength)
+
+    def ends(self, side: Side) -> tuple[Decimal, Decimal]:
+        """The first rung and the last: a buy runs down from the higher price, a sell up."""
+        lo, hi = sorted((self.price_from, self.price_to))
+        return (hi, lo) if side == "buy" else (lo, hi)
+
+
+@dataclass(frozen=True)
 class TrailStop:
     """M10: when the stop starts to trail, and how far behind the best price."""
 
@@ -243,11 +294,13 @@ class PlannerParams:
     trail_stop: TrailStop | None = None
     reference: Reference = "mark"
     entry_chase: EntryChase | None = None
+    entry_ladder: EntryLadder | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "entry_trail": self.entry_trail.to_json() if self.entry_trail else None,
             "entry_chase": self.entry_chase.to_json() if self.entry_chase else None,
+            "entry_ladder": self.entry_ladder.to_json() if self.entry_ladder else None,
             "trail_stop": self.trail_stop.to_json() if self.trail_stop else None,
             "reference": self.reference,
             "mode": self.mode,
@@ -273,8 +326,8 @@ class PlannerParams:
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
         entry_type = raw.get("entry_type") or "limit"
-        if entry_type not in ("market", "limit", "trail", "chase"):
-            raise ValueError("entry_type must be market, limit, trail or chase")
+        if entry_type not in ("market", "limit", "trail", "chase", "ladder"):
+            raise ValueError("entry_type must be market, limit, trail, chase or ladder")
         reference = raw.get("reference") or "mark"
         if reference not in ("mark", "last"):
             raise ValueError("reference must be mark or last")
@@ -300,6 +353,9 @@ class PlannerParams:
             slippage=_clamp_slippage(raw.get("slippage")),
             entry_trail=EntryTrail.from_json(raw.get("entry_trail")) if entry_type == "trail" else None,
             entry_chase=EntryChase.from_json(raw.get("entry_chase")) if entry_type == "chase" else None,
+            entry_ladder=(
+                EntryLadder.from_json(raw.get("entry_ladder")) if entry_type == "ladder" else None
+            ),
             trail_stop=TrailStop.from_json(raw.get("trail_stop")),
             reference=reference,
         )
@@ -326,6 +382,8 @@ class MarketContext:
     liq_price: Decimal | None = None
     position_size: Decimal = Decimal("0")
     position_entry: Decimal | None = None
+    # EL4: limit orders already resting on this Market.
+    resting_orders: int = 0
 
 
 @dataclass(frozen=True)
@@ -400,6 +458,8 @@ class Plan:
     stop_pct: Decimal
     warnings: tuple[str, ...] = field(default_factory=tuple)
     steps: tuple[PlannedStep, ...] = field(default_factory=tuple)
+    # EL1: a Ladder entry's rungs, nearest the market first. Empty once the entry ends.
+    rungs: tuple[Rung, ...] = field(default_factory=tuple)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -416,6 +476,10 @@ class Plan:
             "stop_pct": fmt_decimal(self.stop_pct) or "0",
             "warnings": list(self.warnings),
             "steps": [step.to_json() for step in self.steps],
+            "rungs": [
+                {"index": r.index, "price": fmt_decimal(r.price) or "0", "qty": fmt_decimal(r.qty) or "0"}
+                for r in self.rungs
+            ],
         }
 
     @classmethod
@@ -435,6 +499,10 @@ class Plan:
             stop_pct=Decimal(str(raw.get("stop_pct") or "0")),
             warnings=tuple(str(w) for w in raw.get("warnings") or []),
             steps=tuple(PlannedStep.from_json(x) for x in raw.get("steps") or []),
+            rungs=tuple(
+                Rung(index=int(x["index"]), price=Decimal(str(x["price"])), qty=Decimal(str(x["qty"])))
+                for x in raw.get("rungs") or []
+            ),
         )
 
 
@@ -515,6 +583,8 @@ def entry_price(params: PlannerParams, ctx: MarketContext) -> Decimal:
         return trail_entry_now(params, ctx)
     if params.entry_type == "chase":
         return chase_worst_fill(params, ctx.tick)
+    if params.entry_type == "ladder":
+        return ladder_full_fill(params, ctx.tick)
     if params.entry_price is None or params.entry_price <= 0:
         raise PlanRefused("S1", "Set the Limit entry price")
     # A buy rests at or below what was typed, a sell at or above.
@@ -529,6 +599,51 @@ def chase_worst_fill(params: PlannerParams, tick: Decimal) -> Decimal:
     if params.side == "buy":
         return round_price(ec.high, tick, up=False)
     return round_price(ec.low, tick, up=True)
+
+
+def _entry_ladder(params: PlannerParams) -> EntryLadder:
+    el = params.entry_ladder
+    if el is None:
+        raise PlanRefused("EL1", "Set the Ladder entry's prices and rungs")
+    if el.rungs < MIN_RUNGS or el.rungs > MAX_WINDOW:
+        raise PlanRefused("EL4", f"A Ladder entry has {MIN_RUNGS} to {MAX_WINDOW} rungs")
+    return el
+
+
+def ladder_rungs(
+    params: PlannerParams, *, size: Decimal, tick: Decimal, qty_step: Decimal, min_qty: Decimal
+) -> list[Rung]:
+    """EL1: the Ladder algo's rungs for this size. qty_step 0 gives the exact weights."""
+    el = _entry_ladder(params)
+    first, last = el.ends(params.side)
+    try:
+        return build_rungs(
+            side=params.side,
+            qty=size,
+            price_from=first,
+            price_to=last,
+            rungs=el.rungs,
+            tick=tick,
+            qty_step=qty_step,
+            min_qty=min_qty,
+            size_skew=el.strength,
+        )
+    except ValueError as e:
+        raise PlanRefused("EL1", str(e)) from None
+
+
+def ladder_full_fill(params: PlannerParams, tick: Decimal) -> Decimal:
+    """EL2: the average with every rung filled."""
+    weights = ladder_rungs(params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0"))
+    avg = sum((r.price * r.qty for r in weights), Decimal("0"))
+    # Rounded the worse way, so R is never drawn smaller than the rungs make it.
+    return round_price(avg, tick, up=params.side == "buy")
+
+
+def ladder_furthest(params: PlannerParams, tick: Decimal) -> Decimal:
+    """EL2: the rung nearest the stop."""
+    weights = ladder_rungs(params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0"))
+    return weights[-1].price
 
 
 def entry_follow(params: PlannerParams, tick: Decimal) -> engine.Follow:
@@ -815,11 +930,25 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
     # E11: past the whole band, not just its worst edge.
     if ec is not None and ((ec.low if params.side == "buy" else ec.high) - stop) * sign <= 0:
         raise PlanRefused("E11", "The stop must be past the whole Chase band")
+    if params.entry_type == "ladder" and (ladder_furthest(params, ctx.tick) - stop) * sign <= 0:
+        raise PlanRefused("EL2", "The stop must be past the furthest rung")
     et = params.entry_trail
     act = et.activation if params.entry_type == "trail" and et is not None else None
     if act is not None and (act - stop) * sign <= 0:
         raise PlanRefused("E9", "The Activation is past the stop")
     size = plan_size(params, ctx, entry=entry, stop=stop)
+    rungs: tuple[Rung, ...] = ()
+    if params.entry_type == "ladder":
+        rungs = tuple(
+            ladder_rungs(params, size=size, tick=ctx.tick, qty_step=ctx.qty_step, min_qty=ctx.min_qty)
+        )
+        # EL4: the venue counts every resting order on the Market against one limit.
+        if ctx.resting_orders + len(rungs) > MARKET_ORDER_CAP:
+            raise PlanRefused(
+                "EL4",
+                f"{len(rungs)} rungs and the {ctx.resting_orders} orders resting on this Market "
+                f"are over the venue's {MARKET_ORDER_CAP}",
+            )
     plan = price_plan(
         side=params.side,
         entry=entry,
@@ -833,7 +962,7 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
     )
     check_targets_live(plan, ctx)
     check_trail_stop(params.trail_stop, plan, ctx)
-    return plan
+    return dataclasses.replace(plan, rungs=rungs) if rungs else plan
 
 
 def check_trail_stop(ts: TrailStop | None, plan: Plan, ctx: MarketContext) -> None:

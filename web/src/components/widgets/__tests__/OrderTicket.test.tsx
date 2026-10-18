@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@/test/dom";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderTicket } from "@/components/widgets/orderTicket/OrderTicket";
@@ -306,6 +306,32 @@ describe("OrderTicket", () => {
     expect((screen.getByLabelText("Chase band low") as HTMLInputElement).value).toBe("99");
     expect((screen.getByLabelText("Chase band high") as HTMLInputElement).value).toBe("100.5");
     expect((screen.getByLabelText("Chase clip ETH") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("Size ETH") as HTMLInputElement).value).toBe("2");
+  });
+
+  it("starts a Ladder entry from the ticket's Ladder", async () => {
+    const { user } = setup();
+    await user.click(button("Chase"));
+    await user.click(await screen.findByRole("menuitem", { name: "Ladder" }));
+    await user.type(screen.getByLabelText("Size"), "2");
+    await user.type(screen.getByLabelText("From"), "99.5");
+    await user.type(screen.getByLabelText("To"), "98");
+    const orders = screen.getByRole("textbox", { name: "Orders" });
+    await user.clear(orders);
+    await user.type(orders, "4");
+    await user.click(screen.getByRole("switch", { name: "Advanced" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "Size skew" })).getByRole("radio", { name: "Low" }));
+    await user.click(button("Ladder"));
+    await user.click(await screen.findByRole("menuitem", { name: "Planner…" }));
+
+    const ladder = await screen.findByRole("radio", { name: "Ladder" });
+    expect(ladder.getAttribute("aria-checked") ?? ladder.getAttribute("data-state")).toMatch(/true|on|checked/);
+    expect((screen.getByLabelText("Ladder from") as HTMLInputElement).value).toBe("99.5");
+    expect((screen.getByLabelText("Ladder to") as HTMLInputElement).value).toBe("98");
+    expect((screen.getByLabelText("Ladder rungs") as HTMLInputElement).value).toBe("4");
+    const strength = screen.getByRole("radiogroup", { name: "Ladder Strength" });
+    const low = within(strength).getByRole("radio", { name: "Low" });
+    expect(low.getAttribute("aria-checked") ?? low.getAttribute("data-state")).toMatch(/true|on|checked/);
     expect((screen.getByLabelText("Size ETH") as HTMLInputElement).value).toBe("2");
   });
 });

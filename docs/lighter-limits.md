@@ -110,3 +110,4 @@ Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap 
 - Refill is **1 tx per fill** — well under 40 tx/min unless many simultaneous fills.
 - Each rung must pass maker min size at plan time.
 - Would-cross rungs stay unplaced until passive (post-only + book check).
+- Planner's Ladder entry rests every rung at once (no window): 2–20 rungs, and refused when its rungs plus the orders already resting on the market pass 30 ([planner-rules.md](planner-rules.md) EL4). It leaves 3 algo sends free for the stop while placing rungs.

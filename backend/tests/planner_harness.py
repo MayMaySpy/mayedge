@@ -93,6 +93,10 @@ class FakeVenue:
 
     async def create_limit_order(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("limit", kw))
+        px = Decimal(kw["price"])
+        crosses = px >= Decimal(self.ask) if kw["side"] == "buy" else px <= Decimal(self.bid)
+        if kw.get("time_in_force") == "post_only" and crosses:
+            raise ValueError("post-only order would cross")
         self._rest(
             kw["client_order_index"],
             side=kw["side"],
@@ -184,6 +188,10 @@ class FakeVenue:
 
     def sent(self, kind: str) -> list[dict[str, Any]]:
         return [kw for k, kw in self.calls if k == kind]
+
+    def resting(self, kind: str = "limit") -> list[dict[str, Any]]:
+        """Orders on the book now, by type, in the order they went on."""
+        return [row for row in self.orders.values() if row["order_type"] == kind]
 
     def execution(self) -> ChaseExecution:
         return ChaseExecution(
