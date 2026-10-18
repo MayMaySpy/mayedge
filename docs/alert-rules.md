@@ -6,7 +6,7 @@ Knobs are keys in `backend/config/alerts.yaml`. "code" means the number is not a
 
 An alert is a fact, shown fast, for the operator to act on by feel. No row says what it means ([ADR 0013](adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)).
 
-Last checked against the code: 2026-10-12.
+Last checked against the code: 2026-10-18.
 
 ## Gate
 
@@ -74,7 +74,7 @@ A row is one alert in the panel. Each rule that fires has a size: how many times
 |---|---|---|---|
 | F1 | Funding is extreme when the hourly rate is at least 3 sigma from the market's own 24h median. | `funding.sigma`, `funding.sigma_floor` | `test_funding_far_from_its_own_day_is_extreme` |
 | F2 | The strip above the alerts lists every liquid or Held market whose funding is extreme now, furthest first. It raises no row and no toast. | | `test_the_strip_lists_what_is_extreme_now` |
-| F3 | The desk writes each perp's funding rate at every UTC minute close and keeps 3 days. At boot it loads the last 24h, so a restart does not forget what is normal. | `funding.retention_days` | `test_funding_survives_a_restart` |
+| F3 | The desk writes each perp's **Funding estimate** at every UTC minute close and keeps 30 days. Settled **Funding prints** are kept for the life of the desk. At boot it loads the last 24h, so a restart does not forget what is normal. | `funding.retention_days` | `test_funding_survives_a_restart` |
 
 ## Scan boards
 
