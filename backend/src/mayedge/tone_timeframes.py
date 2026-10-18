@@ -1,4 +1,4 @@
-"""Native timeframes a tone alert is allowed to follow."""
+"""Native timeframes the Tones board is allowed to follow."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def tone_timeframes_path() -> Path:
 
 
 def normalize_tone_timeframes(raw: object) -> tuple[str, ...]:
-    """Accept a list of native labels. Empty turns alerts off. At most two."""
+    """Accept a list of native labels. Empty empties the board. At most two."""
     if not isinstance(raw, list):
         raise ValueError("timeframes must be a list")
     chosen: list[str] = []

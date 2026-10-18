@@ -9,19 +9,43 @@ export type PlannerSide = "buy" | "sell";
 export type PlannerSizeMode = "size" | "risk";
 export type PlannerStopSteps = "off" | "breakeven" | "ladder";
 
-export type PlannerTargetOrder = "limit" | "trigger";
+export type PlannerTargetOrder = "limit" | "trigger" | "trail";
+export type PlannerTrailUnit = "r" | "pct";
+export type PlannerTrailStopStart = "off" | "target" | "last" | "r";
 
 export interface PlannerTargetDraft {
   kind: "r" | "price";
-  /** P9: a resting reduce-only Limit, or a Trigger that waits off the book. */
+  /** P9: a resting reduce-only Limit, a Trigger that waits off the book, or a Trail. */
   order: PlannerTargetOrder;
   value: string;
   pct: string;
+  /** A Trail target: how far behind the best price it follows once its price is reached. */
+  trailDistance?: string;
+  trailUnit?: PlannerTrailUnit;
+}
+
+/** E9: a Trail entry, held by the desk until the price comes back. */
+export interface PlannerEntryTrailDraft {
+  distance: string;
+  distanceKind: "pct" | "price";
+  activation: string;
+}
+
+/** M10: when the stop starts to trail, and how far behind the best price. */
+export interface PlannerTrailStopDraft {
+  start: PlannerTrailStopStart;
+  after: string;
+  atR: string;
+  distance: string;
+  unit: PlannerTrailUnit;
 }
 
 export interface PlannerForm {
   side: PlannerSide;
-  entryType: "market" | "limit";
+  entryType: "market" | "limit" | "trail";
+  entryTrail: PlannerEntryTrailDraft;
+  trailStop: PlannerTrailStopDraft;
+  reference: "mark" | "last";
   entryPrice: string;
   stop: string;
   sizeMode: PlannerSizeMode;
@@ -38,6 +62,9 @@ export function defaultPlannerForm(side: PlannerSide = "buy"): PlannerForm {
   return {
     side,
     entryType: "limit",
+    entryTrail: { distance: "1", distanceKind: "pct", activation: "" },
+    trailStop: { start: "off", after: "1", atR: "2", distance: "1", unit: "r" },
+    reference: "mark",
     entryPrice: "",
     stop: "",
     sizeMode: "risk",
@@ -67,18 +94,44 @@ export function plannerFormBlock(form: PlannerForm, mode: PlannerMode): string |
   if (!(num(form.stop) > 0)) return "Set a stop";
   if (mode === "enter") {
     if (form.entryType === "limit" && !(num(form.entryPrice) > 0)) return "Set the entry price";
+    if (form.entryType === "trail" && !(num(form.entryTrail.distance) > 0)) {
+      return "Set the Trail entry's distance";
+    }
     if (form.sizeMode === "size" && !(num(form.size) > 0)) return "Set a size";
     if (form.sizeMode === "risk" && !(num(form.riskPct) > 0)) return "Set the risk %";
   }
-  if (form.targets.length === 0) return "Add a target";
+  const trailing = form.trailStop.start !== "off";
+  if (trailing) {
+    if (!(num(form.trailStop.distance) > 0)) return "Set the trail stop's distance";
+    if (form.trailStop.start === "r" && !(num(form.trailStop.atR) > 0)) {
+      return "Set the R the stop starts trailing at";
+    }
+    if (form.trailStop.start === "target") {
+      const n = parseInt(form.trailStop.after, 10);
+      if (!(n >= 1 && n <= form.targets.length)) return "Pick the target the stop trails after";
+    }
+  }
+  if (form.targets.length === 0 && !trailing) return "Add a target, or trail the stop";
   for (const t of form.targets) {
     if (!(num(t.value) > 0)) return t.kind === "r" ? "Set each target's R" : "Set each target's price";
     if (!(num(t.pct) > 0)) return "Each target closes more than 0%";
+    if (t.order === "trail" && !(num(t.trailDistance ?? "") > 0)) {
+      return "Set each Trail target's distance";
+    }
   }
   if (form.targets.reduce((s, t) => s + num(t.pct), 0) > 100 + 1e-9) {
     return "Targets add up to more than 100%";
   }
   return null;
+}
+
+/** Does any part of this plan follow the price? */
+export function plannerTrails(form: PlannerForm): boolean {
+  return (
+    form.entryType === "trail" ||
+    form.trailStop.start !== "off" ||
+    form.targets.some((t) => t.order === "trail")
+  );
 }
 
 export function plannerBody(
@@ -94,6 +147,25 @@ export function plannerBody(
     side: form.side,
     entry_type: form.entryType,
     entry_price: enter && form.entryType === "limit" ? dec(form.entryPrice) : null,
+    entry_trail:
+      enter && form.entryType === "trail"
+        ? {
+            distance: dec(form.entryTrail.distance),
+            distance_kind: form.entryTrail.distanceKind,
+            activation: canonicalDecimal(form.entryTrail.activation) ?? null,
+          }
+        : null,
+    trail_stop:
+      form.trailStop.start === "off"
+        ? null
+        : {
+            start: form.trailStop.start,
+            after: parseInt(form.trailStop.after, 10) || 1,
+            at_r: form.trailStop.start === "r" ? dec(form.trailStop.atR) : null,
+            distance: dec(form.trailStop.distance),
+            unit: form.trailStop.unit,
+          },
+    reference: form.reference,
     stop: dec(form.stop),
     size: enter && form.sizeMode === "size" ? dec(form.size) : null,
     risk_pct: enter && form.sizeMode === "risk" ? dec(form.riskPct) : null,
@@ -102,9 +174,12 @@ export function plannerBody(
       value: dec(t.value),
       pct: dec(t.pct),
       order: t.order,
+      ...(t.order === "trail"
+        ? { trail_distance: dec(t.trailDistance ?? ""), trail_unit: t.trailUnit ?? "r" }
+        : {}),
     })),
     stop_steps: form.stopSteps,
-    expiry_min: enter && form.entryType === "limit" && expiry > 0 ? expiry : null,
+    expiry_min: enter && form.entryType !== "market" && expiry > 0 ? expiry : null,
     slippage: opts.slippage,
   };
 }
@@ -114,14 +189,34 @@ export function formFromPlanner(algo: AlgoState): PlannerForm {
   const p = (algo.params_json ?? {}) as Record<string, unknown>;
   const targets = Array.isArray(p.targets) ? (p.targets as Record<string, unknown>[]) : [];
   const stop = algo.planner?.stop_trigger ?? (typeof p.stop === "string" ? p.stop : "");
+  const base = defaultPlannerForm(algo.side === "sell" ? "sell" : "buy");
+  const ts = (p.trail_stop ?? null) as Record<string, unknown> | null;
+  const start = ts?.start;
   return {
-    ...defaultPlannerForm(algo.side === "sell" ? "sell" : "buy"),
+    ...base,
     stop: stop ?? "",
+    reference: p.reference === "last" ? "last" : "mark",
+    trailStop:
+      ts && (start === "target" || start === "last" || start === "r")
+        ? {
+            start,
+            after: String(ts.after ?? "1"),
+            atR: String(ts.at_r ?? "2"),
+            distance: String(ts.distance ?? "1"),
+            unit: ts.unit === "pct" ? "pct" : "r",
+          }
+        : base.trailStop,
     targets: targets.map((t) => ({
       kind: t.kind === "price" ? "price" : "r",
       value: String(t.value ?? ""),
       pct: String(t.pct ?? ""),
-      order: t.order === "limit" ? "limit" : "trigger",
+      order: t.order === "limit" ? "limit" : t.order === "trail" ? "trail" : "trigger",
+      ...(t.order === "trail"
+        ? {
+            trailDistance: String(t.trail_distance ?? ""),
+            trailUnit: t.trail_unit === "pct" ? ("pct" as const) : ("r" as const),
+          }
+        : {}),
     })),
     stopSteps:
       p.stop_steps === "off" || p.stop_steps === "breakeven" || p.stop_steps === "ladder"

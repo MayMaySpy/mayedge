@@ -32,22 +32,52 @@ _Avoid_: Watchlist, stars, bookmarks
 
 ### Alerts
 
+The rules are in [docs/alert-rules.md](docs/alert-rules.md).
+
+**Alert**:
+A row the desk raises for the operator to act on by feel: a Spike, Liquidations, a Board move, or Near liquidation. It states a fact. It does not say what comes next.
+_Avoid_: signal, setup, Tone alert
+
+**Spike**:
+A minute at least N times the biggest minute of the last hour, in price, volume or open interest. The biggest minute of the hour is not a Spike.
+_Avoid_: outlier, sigma, surge, unusual
+
+**Day range**:
+A Market's 24h high less its 24h low, in percent of the low, as the venue prints them.
+_Avoid_: ATR, volatility, sigma
+
 **Broad move**:
-The median move across liquid perps, in percent. One row when that move is shared by the board.
-_Avoid_: Relative Strength, BTC, the market (unqualified)
+The median 5m move of the liquid perps going the same way, when at least ten are and they are most of the perps that moved. One row, named Market.
+_Avoid_: Relative Strength, BTC, the market (unqualified), the median of all perps
 
 **Excess move**:
-A Market's move minus its beta times the Broad move. The part the rest of the board does not explain.
-_Avoid_: alpha, Relative Strength, residual (unqualified)
+A Market's move less the Broad move, while one is on and the Market goes the same way. The part the rest of the board does not explain.
+_Avoid_: alpha, Relative Strength, beta, residual (unqualified)
 
-**Follow-through**:
-The signed Excess move at +5m and +15m, in the alert's direction. Positive means the move continued.
-_Avoid_: hit rate (unqualified), PnL, return
+**Held market**:
+A Market with a Position or a working order on it. Every alert on it raises a toast.
+_Avoid_: Favorites, Watchlist, exposure
+
+**Funding strip**:
+The line above the alerts naming every Market whose funding is far from its own day. It says an extreme exists. It raises nothing.
+_Avoid_: funding alert, Crowded longs, Crowded shorts
+
+**Left**:
+The furthest the price went an alert's way in the 15 minutes after it, from the price it fired at.
+_Avoid_: Follow-through, hit rate, PnL, return
+
+**Against**:
+The furthest the price went the other way in the same 15 minutes.
+_Avoid_: drawdown, stop, loss
+
+**Opened**:
+An alert the operator opened from the panel. The count of these is how the desk learns which alerts were worth raising.
+_Avoid_: clicked, viewed, read
 
 ### Chart views
 
 **Scan**:
-The chart-panel view of cross-market boards (Relative Strength, liquidations). Not a price chart.
+The chart-panel view of cross-market boards (Relative Strength, liquidations, Activity, Tones). Not a price chart. Nothing on it alerts.
 _Avoid_: RS (as a chart mode), analytics, mosaic
 
 **Watch**:
@@ -82,12 +112,16 @@ _Avoid_: indicator, Pine, signal, overlay, study
 The named color of one candle under MayRekt. Absent when the bar has no state.
 _Avoid_: barcolor, signal, alert
 
-**Tone alert**:
-A desk alert that a closed bar on any perp is blue or orange. The forming bar does not alert.
-_Avoid_: Tone, signal
+**Activity**:
+The Scan board of every liquid perp and what its tape shows now: the 5m move and its share of the Day range, volume, open interest, funding and premium.
+_Avoid_: Live, outliers, signals
+
+**Tones board**:
+The Scan board of liquid perps whose last closed bar on a Tone timeframe is blue or orange. The forming bar is never on it.
+_Avoid_: Tone alert, signal
 
 **Tone timeframes**:
-The native Timeframes whose closed bars can raise a Tone alert. At most two. Default is 30m and 4h.
+The native Timeframes the Tones board follows. At most two. Default is 30m and 4h.
 _Avoid_: Pinned timeframe, the chart's Timeframe
 
 **Path**:
@@ -176,11 +210,35 @@ _Avoid_: BE (in prose), entry (as the stop price)
 
 **Stop step**:
 A move of a Planner's stop toward profit when a target fills: to Breakeven after TP1, and with Step up to each earlier target's price after the next one fills. Proven by the fill, never by time or price alone.
-_Avoid_: trail, trailing stop (that's v2), ratchet
+_Avoid_: trail (that's a **Trail**), trailing stop, ratchet
 
 **Runner**:
 The part of a Planner Position no target closes. It rides on the stop until the Position closes.
-_Avoid_: remainder (unqualified), moonbag, trail (that's v2)
+_Avoid_: remainder (unqualified), moonbag, trail (that's a **Trail**)
+
+**Trail**:
+A desk algo that keeps a trigger a set distance behind the **best price** and fires when price comes back by that distance. It is an Entry, a Stop or a Take Profit. Its orders are Clips, not Tickets. It follows only while the desk is running. The rules are in [docs/trail-rules.md](docs/trail-rules.md).
+_Avoid_: trailing stop (unless it is a Stop), TSL, ratchet, Stop step (that's Planner's move on a target fill)
+
+**Best price**:
+The most favourable price of a Trail's Reference since activation: the highest for a long exit or a short entry, the lowest for a short exit or a long entry.
+_Avoid_: high-water mark, HWM, peak, high (that's a candle's high)
+
+**Trail distance**:
+How far a Trail's trigger stays behind the best price: a %, or a price distance.
+_Avoid_: offset, callback
+
+**Activation**:
+The price a Trail must reach before it starts following. Until then it waits. "Trigger" stays the word for the venue's trigger price.
+_Avoid_: trigger (for this), arm price
+
+**Reference**:
+What a Trail follows: Mark, or Last (each public trade print).
+_Avoid_: source, price type
+
+**Backstop**:
+The venue Stop a Trail on Last keeps one step behind its trigger, so the exit holds while the desk is down.
+_Avoid_: safety stop, hard stop
 
 **Kill**:
 Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied. Each step is sent whatever the one before it did, and none waits on the rate budget.
@@ -242,9 +300,35 @@ _Avoid_: one-sided OI, base size, resting size
 A perp's open interest at the end of a UTC minute. Kept for 30 days.
 _Avoid_: tick, trade, candle
 
-**OI day**:
-A perp's high, low, and last open interest for one UTC day older than 30 days. Kept for the life of the desk. Last is the final sample of that day.
-_Avoid_: sum, Liquidation day, candle
+**OI hour**:
+A perp's high, low, and last open interest for one UTC hour older than 30 days. Kept for the life of the desk. Last is the final sample of that hour. 1h, 4h and 1d charts read OI hours past 30 days; 1m-15m charts stop at 30 days.
+_Avoid_: OI day, sum, Liquidation day, candle
+
+### Funding
+
+**Funding estimate**:
+The venue's 1h funding rate for the hour in progress. It moves until the hour settles. Sampled each UTC minute and kept for 30 days.
+_Avoid_: funding print, paid rate
+
+**Funding print**:
+The 1h rate a perp settled for one hour, filed under the hour it paid for. Kept for the life of the desk.
+_Avoid_: funding estimate, funding sample
+
+**Funding backfill**:
+Funding prints, then Funding days, for the last year, read from the venue's funding history once per perp. The venue keeps about 62 days of hours. Each writes only when the venue's latest rows match the desk's own Funding prints under one reading, and never replaces a print the desk recorded live.
+_Avoid_: import, sync
+
+**Funding day**:
+A perp's mean 1h funding rate for one finished UTC day, from the venue's daily history. Used only for a day without all 24 Funding prints. Kept for the life of the desk. Never fills an hourly or 4h bucket.
+_Avoid_: daily print, day sum
+
+**Funding average**:
+The mean of a perp's Funding prints over 7 days, 30 days, or a year, in APR. A Funding day counts as 24 hours. A window named by its length holds at least 95% of its hours; a shorter history is named by the span it holds.
+_Avoid_: average estimate, mean funding (unqualified)
+
+**Fund pane**:
+The chart pane of a perp's funding in APR, one bar per bucket. A bucket with Funding prints is their mean; a 1d bucket short of 24 prints shows its Funding day. A bucket with none shows the last Funding estimate in it, drawn faint.
+_Avoid_: funding line, funding alert
 
 ### Explorer
 

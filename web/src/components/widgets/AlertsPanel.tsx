@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BellOff, X } from "lucide-react";
-import { notifyDesk, notifyErr } from "@/lib/notify";
+import { notifyDesk } from "@/lib/notify";
 import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -9,59 +9,45 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { api, type AlertStats } from "@/lib/api";
+import { api, type AlertStats, type FundingExtremeRow } from "@/lib/api";
 import {
-  boardLine,
   directionArrow,
   directionClass,
   eventLine,
   eventMs,
   formatClock,
-  recentEvents,
-  setupShort,
+  ruleName,
   severityBorder,
-  severityText,
+  shownAlerts,
   toastCopy,
   type AlertLine,
 } from "@/lib/alertFormat";
-import {
-  DEFAULT_TONE_TIMEFRAMES,
-  TONE_TIMEFRAME_CAP,
-  TONE_TIMEFRAME_CHOICES,
-  toggleToneTimeframe,
-} from "@/lib/toneTimeframes";
 import { useFavorites } from "@/lib/favorites";
-import { useLiveAlertBoard, useLiveAlerts } from "@/lib/liveData";
+import { useFundingExtremes, useLiveAlerts } from "@/lib/liveData";
+import { formatFundingPct } from "@/lib/marketPicker";
 import { pairLabel } from "@/lib/venuePair";
 import { cn } from "@/lib/utils";
 
 const MIN_SEV_KEY = "mayedge-alerts-min-sev";
 const FAV_ONLY_KEY = "mayedge-alerts-fav-only";
 const MUTE_KEY = "mayedge-alerts-muted";
-const DEFAULT_MIN_SEV = 2;
+const NOTABLE = 2;
+const URGENT = 3;
 const MAX_ROWS = 80;
-const LIVE_ROWS = 5;
-const TOAST_SEV = 3;
 const TOAST_MAX = 2;
 const TOAST_MAX_AGE_MS = 8_000;
-
-function hitPct(rate: number | null): string {
-  if (rate == null) return "—";
-  return `${Math.round(rate * 100)}%`;
-}
+const STRIP_MAX = 8;
 
 const SEV_CHOICES = [
-  { value: 1, label: "All" },
-  { value: 2, label: "Notable" },
-  { value: 3, label: "Urgent" },
+  { value: NOTABLE, label: "All" },
+  { value: URGENT, label: "Urgent" },
 ] as const;
 
 function loadMinSev(): number {
   try {
-    const n = parseInt(localStorage.getItem(MIN_SEV_KEY) ?? "", 10);
-    return Number.isFinite(n) && n >= 1 && n <= 3 ? n : DEFAULT_MIN_SEV;
+    return parseInt(localStorage.getItem(MIN_SEV_KEY) ?? "", 10) >= URGENT ? URGENT : NOTABLE;
   } catch {
-    return DEFAULT_MIN_SEV;
+    return NOTABLE;
   }
 }
 
@@ -90,58 +76,49 @@ function persist(key: string, value: string) {
   }
 }
 
-function SectionHead({ label, count }: { label: string; count: number }) {
-  return (
-    <div className="sticky top-0 z-10 flex items-center justify-between bg-panel px-2 pt-1.5 pb-0.5 font-mono text-xs tracking-wide text-muted-foreground uppercase">
-      <span>{label}</span>
-      <span className="tabular-nums">{count}</span>
-    </div>
-  );
+function pct(value: number | null): string {
+  return value == null ? "—" : `${value.toFixed(2)}%`;
 }
 
 function AlertLineRow({
   line,
-  time,
   onOpen,
   onMute,
 }: {
   line: AlertLine;
-  time?: string;
-  onOpen?: (symbol: string) => void;
+  onOpen: (line: AlertLine) => void;
   onMute: (symbol: string) => void;
 }) {
   const arrow = directionArrow(line.direction);
-  const open = () => onOpen?.(line.symbol);
   return (
     <div
       role="button"
       tabIndex={0}
       title={line.tooltip}
-      onClick={open}
+      onClick={() => onOpen(line)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          open();
+          onOpen(line);
         }
       }}
       className={cn(
-        "group grid cursor-pointer items-baseline gap-x-1.5 border-l-2 py-1 pr-2 pl-1.5 outline-none hover:bg-accent/40 focus-visible:bg-accent/40",
-        time != null ? "grid-cols-[2.25rem_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]",
+        "group grid cursor-pointer grid-cols-[2.25rem_minmax(0,1fr)_auto] items-baseline gap-x-1.5 border-l-2 py-1 pr-2 pl-1.5 outline-none hover:bg-accent/40 focus-visible:bg-accent/40",
         severityBorder(line.severity)
       )}
     >
-      {time != null && (
-        <span className="font-mono text-xs text-muted-foreground tabular-nums">{time}</span>
-      )}
+      <span className="font-mono text-xs text-muted-foreground tabular-nums">
+        {formatClock(line.atMs)}
+      </span>
       <span className="flex min-w-0 items-baseline gap-1.5">
         <span className={cn("shrink-0 font-semibold", directionClass(line.direction))}>
           {arrow && <span className="mr-0.5 text-xs">{arrow}</span>}
           {line.name}
         </span>
-        <span className="truncate text-muted-foreground">{line.label}</span>
+        <span className="truncate font-mono tabular-nums">{line.label}</span>
       </span>
       <span className="flex items-center gap-1">
-        {line.mutable && (
+        {line.mutable && !line.held && (
           <button
             type="button"
             aria-label={`Mute ${line.name}`}
@@ -155,20 +132,57 @@ function AlertLineRow({
             <BellOff className="size-3" />
           </button>
         )}
-        {line.score != null && (
-          <span className={cn("font-mono tabular-nums", severityText(line.severity))}>
-            {line.score.toFixed(1)}
-          </span>
-        )}
       </span>
       {line.detail && (
-        <span
-          className={cn(
-            "col-span-2 truncate font-mono text-xs text-muted-foreground",
-            time != null && "col-start-2"
-          )}
-        >
+        <span className="col-span-2 col-start-2 truncate font-mono text-xs text-muted-foreground">
           {line.detail}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Funding that is far from a market's own day. A standing note: it raises nothing. */
+function FundingStrip({
+  rows,
+  onOpen,
+}: {
+  rows: readonly FundingExtremeRow[];
+  onOpen?: (symbol: string) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-baseline gap-x-2 overflow-hidden border-b border-rule px-2 py-1 font-mono text-xs">
+      <span className="shrink-0 tracking-wide text-muted-foreground uppercase">Funding</span>
+      {rows.length === 0 ? (
+        <span className="text-muted-foreground">none extreme</span>
+      ) : (
+        <span className="flex min-w-0 flex-wrap gap-x-2">
+          {rows.slice(0, STRIP_MAX).map((row) => (
+            <button
+              key={row.market_index}
+              type="button"
+              title={`${pairLabel(row.symbol)} funding is ${Math.abs(row.z).toFixed(1)} sigma from its own 24h`}
+              className="tabular-nums hover:underline"
+              onClick={() => onOpen?.(row.symbol)}
+            >
+              <span className="text-foreground">{row.symbol}</span>{" "}
+              {/* Positive funding is longs paying, as on the Scan tables. */}
+              <span className={row.funding > 0 ? "text-ask" : "text-bid"}>
+                {formatFundingPct(row.funding)}
+              </span>
+            </button>
+          ))}
+          {rows.length > STRIP_MAX && (
+            <span
+              className="text-muted-foreground"
+              title={rows
+                .slice(STRIP_MAX)
+                .map((row) => `${row.symbol} ${formatFundingPct(row.funding)}`)
+                .join("\n")}
+            >
+              +{rows.length - STRIP_MAX}
+            </span>
+          )}
         </span>
       )}
     </div>
@@ -182,37 +196,20 @@ interface AlertsPanelProps {
 
 export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: AlertsPanelProps) {
   const all = useLiveAlerts();
-  const board = useLiveAlertBoard();
+  const funding = useFundingExtremes();
   const [favorites] = useFavorites();
   const [minSev, setMinSev] = useState(loadMinSev);
   const [favOnly, setFavOnly] = useState(loadFavOnly);
   const [muted, setMuted] = useState(loadMuted);
-  const [toneTfs, setToneTfs] = useState<readonly string[]>(DEFAULT_TONE_TIMEFRAMES);
-  const [toneCap, setToneCap] = useState(TONE_TIMEFRAME_CAP);
-  const [toneChoices, setToneChoices] = useState<readonly string[]>(TONE_TIMEFRAME_CHOICES);
   const [stats, setStats] = useState<AlertStats | null>(null);
   const seenToastRef = useRef<Set<string>>(new Set());
   const mountedAtRef = useRef(0);
 
-  const isShown = useCallback(
-    (symbol: string) => !muted.has(symbol) && (!favOnly || favorites.includes(symbol)),
-    [muted, favOnly, favorites]
+  const shown = useMemo(
+    () => shownAlerts(all, { minSeverity: minSev, favoritesOnly: favOnly, favorites, muted }),
+    [all, minSev, favOnly, favorites, muted]
   );
-
-  const live = useMemo(
-    () =>
-      board
-        .filter((r) => (r.severity ?? 1) >= minSev && isShown(r.symbol))
-        .slice(0, LIVE_ROWS),
-    [board, minSev, isShown]
-  );
-
-  const recent = useMemo(() => {
-    const liveMarkets = new Set(live.map((r) => r.market_index));
-    const boardAt = Math.max(0, ...live.map((r) => eventMs(r.ts)));
-    const shown = all.filter((e) => e.severity >= minSev && isShown(e.symbol));
-    return recentEvents(shown, liveMarkets, boardAt).slice(0, MAX_ROWS);
-  }, [all, live, minSev, isShown]);
+  const rows = useMemo(() => shown.slice(0, MAX_ROWS), [shown]);
 
   useEffect(() => {
     let cancel = false;
@@ -233,28 +230,12 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
   }, []);
 
   useEffect(() => {
-    let cancel = false;
-    api
-      .toneTimeframes()
-      .then((row) => {
-        if (cancel) return;
-        setToneTfs(row.timeframes);
-        setToneCap(row.cap);
-        if (row.choices.length) setToneChoices(row.choices);
-      })
-      .catch(() => {});
-    return () => {
-      cancel = true;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!mountedAtRef.current) mountedAtRef.current = Date.now();
     const now = Date.now();
     let n = 0;
-    for (const ev of all) {
+    for (const ev of shown) {
       if (n >= TOAST_MAX) break;
-      if (ev.severity < TOAST_SEV || seenToastRef.current.has(ev.id) || !isShown(ev.symbol)) continue;
+      if (ev.severity < URGENT || seenToastRef.current.has(ev.id)) continue;
       const at = eventMs(ev.ts);
       if (now - at < 0 || now - at > TOAST_MAX_AGE_MS || at < mountedAtRef.current - 1_000) continue;
       seenToastRef.current.add(ev.id);
@@ -268,24 +249,20 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
     if (seenToastRef.current.size > 400) {
       seenToastRef.current = new Set([...seenToastRef.current].slice(-200));
     }
-  }, [all, isShown]);
+  }, [shown]);
 
-  const setTone = (label: string) => {
-    const next = toggleToneTimeframe(toneTfs, label);
-    if (next === toneTfs) return;
-    setToneTfs(next);
-    api
-      .setToneTimeframes([...next])
-      .then((row) => setToneTfs(row.timeframes))
-      .catch((err: unknown) => {
-        setToneTfs(toneTfs);
-        notifyErr(err instanceof Error ? err.message : "Could not save timeframes");
-      });
-  };
+  // Which rows get opened is the most honest measure of which were worth raising.
+  const open = useCallback(
+    (line: AlertLine) => {
+      onOpenPair?.(line.symbol);
+      api.alertOpened(line.key).catch(() => {});
+    },
+    [onOpenPair]
+  );
 
   const setMin = (raw: string) => {
     const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 1 || n > 3) return;
+    if (n !== NOTABLE && n !== URGENT) return;
     setMinSev(n);
     persist(MIN_SEV_KEY, String(n));
   };
@@ -359,52 +336,36 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
                   </div>
                 </Field>
               )}
-              <Field>
-                <FieldLabel>Tone timeframes</FieldLabel>
-                <div className="grid grid-cols-4 gap-1">
-                  {toneChoices.map((label) => {
-                    const on = toneTfs.includes(label);
-                    return (
-                      <Button
-                        key={label}
-                        type="button"
-                        size="sm"
-                        variant={on ? "default" : "outline"}
-                        aria-pressed={on}
-                        disabled={!on && toneTfs.length >= toneCap}
-                        onClick={() => setTone(label)}
-                      >
-                        {label}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </Field>
               {stats && (
                 <Field>
-                  <FieldLabel>Follow-through (24h)</FieldLabel>
-                  {stats.setups.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No resolved alerts yet.</p>
+                  <FieldLabel>Last 24h</FieldLabel>
+                  {stats.rules.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No alerts yet.</p>
                   ) : (
                     <div className="flex flex-col gap-0.5 font-mono text-sm">
-                      <div className="grid grid-cols-[minmax(0,1fr)_1.25rem_2rem_2rem] gap-x-1 text-muted-foreground">
+                      <div className="grid grid-cols-[minmax(0,1fr)_1.5rem_2.75rem_2.75rem_2.5rem] gap-x-1 text-muted-foreground">
                         <span />
                         <span className="text-right">n</span>
-                        <span className="text-right">5m</span>
-                        <span className="text-right">15m</span>
+                        <span className="text-right" title="Median furthest move the alert's way in the next 15 minutes">
+                          left
+                        </span>
+                        <span className="text-right" title="Median furthest move the other way in the next 15 minutes">
+                          agst
+                        </span>
+                        <span className="text-right" title="Alerts you opened">
+                          open
+                        </span>
                       </div>
-                      {stats.setups.slice(0, 8).map((row) => (
+                      {stats.rules.map((row) => (
                         <div
-                          key={row.setup}
-                          title={`5m excess ${row.avg_ex_5m.toFixed(2)}%${
-                            row.avg_ex_15m == null ? "" : ` · 15m ${row.avg_ex_15m.toFixed(2)}%`
-                          }`}
-                          className="grid grid-cols-[minmax(0,1fr)_1.25rem_2rem_2rem] gap-x-1"
+                          key={row.rule}
+                          className="grid grid-cols-[minmax(0,1fr)_1.5rem_2.75rem_2.75rem_2.5rem] gap-x-1"
                         >
-                          <span className="truncate">{setupShort(row.setup)}</span>
+                          <span className="truncate">{ruleName(row.rule)}</span>
                           <span className="text-right text-muted-foreground">{row.n}</span>
-                          <span className="text-right">{hitPct(row.hit_5m)}</span>
-                          <span className="text-right">{hitPct(row.hit_15m)}</span>
+                          <span className="text-right">{pct(row.left)}</span>
+                          <span className="text-right">{pct(row.against)}</span>
+                          <span className="text-right text-muted-foreground">{row.opened}</span>
                         </div>
                       ))}
                     </div>
@@ -415,49 +376,21 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
           </FilterPopover>
         }
       />
+      <FundingStrip rows={funding} onOpen={onOpenPair} />
       <ScrollArea className="min-h-0 flex-1">
-        {live.length === 0 && recent.length === 0 ? (
+        {rows.length === 0 ? (
           <Empty className="py-8">
             <EmptyHeader>
               <EmptyTitle>Quiet</EmptyTitle>
               <EmptyDescription>
-                Nothing unusual right now. Baselines take about 30 minutes after a restart.
+                No spike in the last hour's terms. The rest is under Scan.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
-          <>
-            {live.length > 0 && (
-              <section aria-label="Live outliers">
-                <SectionHead label="Live" count={live.length} />
-                {live.map((row) => (
-                  <AlertLineRow
-                    key={row.market_index}
-                    line={boardLine(row)}
-                    onOpen={onOpenPair}
-                    onMute={toggleMute}
-                  />
-                ))}
-              </section>
-            )}
-            {recent.length > 0 && (
-              <section aria-label="Recent alerts">
-                <SectionHead label="Recent" count={recent.length} />
-                {recent.map((ev) => {
-                  const line = eventLine(ev);
-                  return (
-                    <AlertLineRow
-                      key={ev.id}
-                      line={line}
-                      time={formatClock(line.atMs ?? 0)}
-                      onOpen={onOpenPair}
-                      onMute={toggleMute}
-                    />
-                  );
-                })}
-              </section>
-            )}
-          </>
+          rows.map((ev) => (
+            <AlertLineRow key={ev.id} line={eventLine(ev)} onOpen={open} onMute={toggleMute} />
+          ))
         )}
       </ScrollArea>
     </div>

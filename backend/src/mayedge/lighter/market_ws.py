@@ -13,6 +13,7 @@ import websockets
 from mayedge import feed_health
 from mayedge.config import settings
 from mayedge.lighter.channels import message_market_index, parse_channel_market, split_ws_type
+from mayedge.lighter.errors import venue_down_reason
 from mayedge.lighter.liquidations import LiquidationFeed, taker_side
 from mayedge.lighter.models import Trade
 from mayedge.tone_timeframes import candle_channel_resolution
@@ -32,11 +33,14 @@ _TRADE_CHANNEL_STR = re.compile(r'"channel"\s*:\s*"trade(?:_fe)?(?:@[A-Za-z0-9]+
 _TRADE_CHANNEL_BYTES = re.compile(_TRADE_CHANNEL_STR.pattern.encode())
 
 
-def skip_idle_trade(raw: str | bytes, focus: int | None) -> bool:
+def skip_idle_trade(
+    raw: str | bytes, focus: int | None, keep: set[int] | frozenset[int] = frozenset()
+) -> bool:
     """Drop a non-focused trade frame before ``json.loads``.
 
-    Liquidations and deleverages stay, and so does the market on screen.
-    Books, stats, and candles do not match the trade channel.
+    Liquidations and deleverages stay, and so do the market on screen and ``keep``
+    (the Markets a Trail on Last follows). Books, stats, and candles do not match
+    the trade channel.
     """
     if isinstance(raw, str):
         if "liquidation" in raw or "deleverage" in raw:
@@ -48,7 +52,8 @@ def skip_idle_trade(raw: str | bytes, focus: int | None) -> bool:
         match = _TRADE_CHANNEL_BYTES.search(raw)
     if match is None:
         return False
-    return int(match.group(1)) != focus
+    mi = int(match.group(1))
+    return mi != focus and mi not in keep
 
 
 class SendPacer:
@@ -76,6 +81,15 @@ async def ws_send(ws: Any, payload: dict[str, Any]) -> None:
     await ws.send(json.dumps(payload))
 
 
+def _log_ws_error(err: BaseException, what: str) -> None:
+    reason = venue_down_reason(err)
+    if reason is None:
+        logger.exception(what)
+        return
+    feed_health.note_venue_down(reason)
+    logger.warning("%s: Lighter unavailable (%s)", what, reason)
+
+
 async def run_ws_loop(gw: LighterGateway) -> None:
     while True:
         try:
@@ -89,8 +103,8 @@ async def run_ws_loop(gw: LighterGateway) -> None:
         except asyncio.CancelledError:
             feed_health.set_market_ws("down", trade_subs=0)
             break
-        except Exception:
-            logger.exception("ws loop error, reconnecting in 3s")
+        except Exception as e:
+            _log_ws_error(e, "ws loop error, reconnecting in 3s")
             feed_health.set_market_ws("reconnecting", trade_subs=0)
             gw.unbind_market_ws()
             gw._trade_subs.clear()
@@ -138,7 +152,7 @@ async def connect_and_stream(gw: LighterGateway) -> None:
             async for raw in ws:
                 gw._last_msg_at = time.monotonic()
                 feed_health.touch_market_msg()
-                if skip_idle_trade(raw, gw._current_market_index):
+                if skip_idle_trade(raw, gw._current_market_index, gw._print_watch):
                     continue
                 try:
                     msg = json.loads(raw)
@@ -286,6 +300,18 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bo
             snapshot=snapshot,
         )
 
+    if not snapshot and market_index in gw._print_watch:
+        prints = [
+            t
+            for t in trades_raw
+            if isinstance(t, dict) and str(t.get("type") or "trade") not in liq_kinds
+        ]
+        prints.sort(key=lambda t: int(t.get("timestamp", t.get("time", 0)) or 0))
+        prices = [str(t.get("price")) for t in prints if t.get("price") not in (None, "")]
+        if prices:
+            # Trail F9: every print, for the desk only; the web has its own tape.
+            gw.emit_internal({"type": "prints", "market_index": market_index, "prices": prices})
+
     if market_index != gw._current_market_index:
         return
 
@@ -402,8 +428,8 @@ async def run_tone_ws(gw: LighterGateway) -> None:
             await _tone_session(gw, epoch)
         except asyncio.CancelledError:
             break
-        except Exception:
-            logger.exception("tone ws error, reconnecting in 3s")
+        except Exception as e:
+            _log_ws_error(e, "tone ws error, reconnecting in 3s")
             await asyncio.sleep(3)
         if gw._tone_epoch == epoch:
             gw._request_tone_fill("stale")

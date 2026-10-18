@@ -11,7 +11,10 @@ import {
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { trimQty } from "@/components/widgets/orderTicket/math";
-import { isLongPosition, type OpenOrder, type Position } from "@/lib/api";
+import { TrailExitSection } from "@/components/widgets/trail/TrailExitSection";
+import { isAlgoClientOrder } from "@/lib/algoPlugins";
+import { isLongPosition, type AlgoState, type OpenOrder, type Position } from "@/lib/api";
+import { defaultTrailExitDraft, TRAIL_KIND_LABEL, trailBody, trailExitProblem } from "@/lib/trail";
 import { canonicalDecimal, decimalInput, parseDecimal, stripFractionalZeros } from "@/lib/numbers";
 import {
   pnlAtTrigger,
@@ -29,6 +32,7 @@ import {
 import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
 
 type SizeMode = "full" | "partial";
+type ExitMode = "fixed" | "trail";
 type MoneyUnit = "$" | "%";
 
 const TP_SLIDER_MAX = 150;
@@ -51,6 +55,10 @@ function emptyForm(seed?: { tp?: string; sl?: string }) {
     slLimit: "",
     gainUnit: "$" as MoneyUnit,
     lossUnit: "$" as MoneyUnit,
+    tpMode: "fixed" as ExitMode,
+    slMode: "fixed" as ExitMode,
+    tpTrail: defaultTrailExitDraft(),
+    slTrail: defaultTrailExitDraft(),
   };
 }
 
@@ -65,7 +73,12 @@ export function PositionProtectPopover({
   onPlace,
   onCancel,
   lockedBy,
+  trails = [],
+  onStartTrail,
 }: {
+  /** Live Trails on this Market (trail-rules.md). A Trail Stop is the Position's stop. */
+  trails?: AlgoState[];
+  onStartTrail?: (body: Record<string, unknown>) => Promise<void>;
   /** ADR 0015: an algo owns this exit, so the editor shows it and changes nothing. */
   lockedBy?: string | null;
   position: Position;
@@ -100,10 +113,30 @@ export function PositionProtectPopover({
   const tpRoe = tpPnl != null ? roeFromPnl(tpPnl, margin, notional) : null;
   const slRoe = slPnl != null ? roeFromPnl(slPnl, margin, notional) : null;
 
-  const tpOk = tpTrig > 0 && triggerOnCorrectSide("tp", closeIsAsk, tpTrig, mark);
-  const slOk = slTrig > 0 && triggerOnCorrectSide("sl", closeIsAsk, slTrig, mark);
+  const closeSide = closeIsAsk ? "sell" : "buy";
+  const liq = n(position.liquidation_price);
+  const trailStop = trails.find((t) => t.trail?.kind === "stop") ?? null;
+  const tpTrailing = form.tpMode === "trail";
+  const slTrailing = form.slMode === "trail";
+  const tpOk =
+    !tpTrailing && tpTrig > 0 && triggerOnCorrectSide("tp", closeIsAsk, tpTrig, mark);
+  const slOk =
+    !slTrailing && !trailStop && slTrig > 0 && triggerOnCorrectSide("sl", closeIsAsk, slTrig, mark);
+  const tpTrailProblem = tpTrailing
+    ? trailExitProblem("tp", form.tpTrail, closeSide, mark, liq, priceDecimals)
+    : null;
+  const slTrailProblem = slTrailing
+    ? trailExitProblem("stop", form.slTrail, closeSide, mark, liq, priceDecimals)
+    : null;
+  const tpTrailOk = tpTrailing && !tpTrailProblem && !!onStartTrail;
+  const slTrailOk = slTrailing && !trailStop && !slTrailProblem && !!onStartTrail;
   const sizeOk = form.sizeMode === "full" || qtyNum > 0;
-  const canPlace = tradingEnabled && !busy && !sending && sizeOk && (tpOk || slOk);
+  const canPlace =
+    tradingEnabled && !busy && !sending && sizeOk && (tpOk || slOk || tpTrailOk || slTrailOk);
+  // TS4: the Stop Tickets a Trail Stop takes over.
+  const replacedStops = working
+    .filter((o) => stopTakeKind(o.order_type) === "sl" && !isAlgoClientOrder(o.client_order_index))
+    .map((o) => protectOrderLabel(o.order_type, o.trigger_price));
 
   const applyPnl = (kind: "tp" | "sl", pnl: number) => {
     const trigger = triggerFromPnl(entry, signedClose, pnl);
@@ -141,7 +174,29 @@ export function PositionProtectPopover({
     }
     setSending(true);
     try {
-      await onPlace(body);
+      if (tpOk || slOk) await onPlace(body);
+      const pct =
+        form.sizeMode === "full" || posAbs <= 0 ? 100 : Math.min(100, (qtyNum / posAbs) * 100);
+      if (slTrailOk && onStartTrail) {
+        await onStartTrail(
+          trailBody(form.slTrail, {
+            kind: "stop",
+            market_index: position.market_index,
+            start: canonicalDecimal(form.slTrail.start) ?? null,
+            slippage: 0.01,
+          })
+        );
+      }
+      if (tpTrailOk && onStartTrail) {
+        await onStartTrail(
+          trailBody(form.tpTrail, {
+            kind: "tp",
+            market_index: position.market_index,
+            size_pct: String(Number(pct.toFixed(4))),
+            slippage: 0.01,
+          })
+        );
+      }
       setOpen(false);
     } catch {
       // The caller has already reported it. Stay open so the entry is not lost.
@@ -250,7 +305,24 @@ export function PositionProtectPopover({
             <SummaryRow label="TP/SL Slippage" value="Max: 1%" />
           </div>
 
+          {tpTrailing ? (
+            <ExitHead title="Take Profit" mode={form.tpMode} onMode={(tpMode) => setForm((f) => ({ ...f, tpMode }))}>
+              <TrailExitSection
+                kind="tp"
+                draft={form.tpTrail}
+                closeSide={closeSide}
+                mark={mark}
+                priceDecimals={priceDecimals}
+                problem={tpTrailProblem}
+                replaces={[]}
+                partial={form.sizeMode === "partial"}
+                onChange={(tpTrail) => setForm((f) => ({ ...f, tpTrail }))}
+              />
+            </ExitHead>
+          ) : (
           <ProtectSection
+            mode={form.tpMode}
+            onMode={(tpMode) => setForm((f) => ({ ...f, tpMode }))}
             title="Take Profit"
             triggerLabel="TP Trigger Price"
             moneyLabel="Gain"
@@ -290,8 +362,34 @@ export function PositionProtectPopover({
               if (pnl != null) applyPnl("tp", pnl);
             }}
           />
+          )}
 
+          {trailStop ? (
+            <ExitHead title="Stop Loss">
+              <p className="border-t border-rule px-3 py-2.5 text-sm text-muted-foreground">
+                {TRAIL_KIND_LABEL.stop} {trailStop.algo_id} is this Position&apos;s stop
+                {trailStop.trail?.trigger ? ` at ${formatPrice(trailStop.trail.trigger, priceDecimals)}` : ""}.
+                Stop it from Algos to set another.
+              </p>
+            </ExitHead>
+          ) : slTrailing ? (
+            <ExitHead title="Stop Loss" mode={form.slMode} onMode={(slMode) => setForm((f) => ({ ...f, slMode }))}>
+              <TrailExitSection
+                kind="stop"
+                draft={form.slTrail}
+                closeSide={closeSide}
+                mark={mark}
+                priceDecimals={priceDecimals}
+                problem={slTrailProblem}
+                replaces={replacedStops}
+                partial={false}
+                onChange={(slTrail) => setForm((f) => ({ ...f, slTrail }))}
+              />
+            </ExitHead>
+          ) : (
           <ProtectSection
+            mode={form.slMode}
+            onMode={(slMode) => setForm((f) => ({ ...f, slMode }))}
             title="Stop Loss"
             triggerLabel="SL Trigger Price"
             moneyLabel="Loss"
@@ -331,6 +429,7 @@ export function PositionProtectPopover({
               if (mag != null) applyPnl("sl", -Math.abs(mag));
             }}
           />
+          )}
 
           {working.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-rule px-3 py-2">
@@ -344,16 +443,20 @@ export function PositionProtectPopover({
                   >
                     {protectOrderLabel(o.order_type, o.trigger_price)}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1.5 text-xs"
-                    disabled={!tradingEnabled || sending}
-                    onClick={() => void onCancel(o.order_index)}
-                  >
-                    Cancel
-                  </Button>
+                  {isAlgoClientOrder(o.client_order_index) ? (
+                    <span className="text-xs uppercase tracking-wide text-muted-foreground">Algo</span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-xs"
+                      disabled={!tradingEnabled || sending}
+                      onClick={() => void onCancel(o.order_index)}
+                    >
+                      Cancel
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
@@ -403,7 +506,54 @@ function SummaryRow({
   );
 }
 
+function ModeToggle({ mode, onMode }: { mode: ExitMode; onMode: (mode: ExitMode) => void }) {
+  return (
+    <ToggleGroup
+      type="single"
+      variant="seg"
+      size="sm"
+      spacing={0}
+      value={mode}
+      onValueChange={(v) => {
+        if (v === "fixed" || v === "trail") onMode(v);
+      }}
+      aria-label="Fixed or Trail"
+    >
+      <ToggleGroupItem value="fixed" className="h-6 px-2">
+        Fixed
+      </ToggleGroupItem>
+      <ToggleGroupItem value="trail" className="h-6 px-2">
+        Trail
+      </ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
+
+function ExitHead({
+  title,
+  mode,
+  onMode,
+  children,
+}: {
+  title: string;
+  mode?: ExitMode;
+  onMode?: (mode: ExitMode) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t border-rule">
+      <div className="flex items-center justify-between px-3 pt-2 pb-1.5">
+        <p className="text-base">{title}</p>
+        {mode && onMode ? <ModeToggle mode={mode} onMode={onMode} /> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function ProtectSection({
+  mode,
+  onMode,
   title,
   triggerLabel,
   moneyLabel,
@@ -422,6 +572,8 @@ function ProtectSection({
   onMoney,
   onSlider,
 }: {
+  mode: ExitMode;
+  onMode: (mode: ExitMode) => void;
   title: string;
   triggerLabel: string;
   moneyLabel: string;
@@ -442,7 +594,10 @@ function ProtectSection({
 }) {
   return (
     <div className="border-t border-rule">
-      <p className="px-3 pt-2.5 pb-1 text-base">{title}</p>
+      <div className="flex items-center justify-between px-3 pt-2 pb-1.5">
+        <p className="text-base">{title}</p>
+        <ModeToggle mode={mode} onMode={onMode} />
+      </div>
       <div className="grid grid-cols-2 border-t border-rule">
         <CellInput label={triggerLabel} value={trigger} placeholder="0.0000" onChange={onTrigger} />
         <CellInput

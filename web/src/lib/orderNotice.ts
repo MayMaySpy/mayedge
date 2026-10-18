@@ -9,6 +9,7 @@ export type OrderNoticeInput = {
     | "grid"
     | "ladder"
     | "planner"
+    | "trail"
     | "leverage"
     | "fill"
     | "desk";
@@ -48,7 +49,9 @@ export function orderNotice(input: OrderNoticeInput): {
             ? "Grid failed"
             : input.kind === "planner"
               ? "Planner refused"
-              : input.title || "Order failed";
+              : input.kind === "trail"
+                ? "Trail refused"
+                : input.title || "Order failed";
     return { title, description: input.note ?? "", tone: "err" };
   }
   const tone: NoticeTone = input.side === "sell" ? "ask" : input.side === "buy" ? "bid" : "ok";
@@ -104,6 +107,9 @@ export function orderNotice(input: OrderNoticeInput): {
         .join(" "),
       tone,
     };
+  }
+  if (input.kind === "trail") {
+    return { title: input.title || "Trail started", description: leg(input), tone };
   }
   if (input.kind === "twap") {
     if (input.status === "active") {

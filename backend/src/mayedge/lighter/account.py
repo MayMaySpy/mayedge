@@ -22,7 +22,7 @@ from mayedge.lighter.equity import (
     portfolio_margin_usd,
     trade_available_usd,
 )
-from mayedge.lighter.errors import VenueBlocked, http_block, venue_client_error
+from mayedge.lighter.errors import VenueBlocked, http_block, venue_client_error, venue_down_reason
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
@@ -249,6 +249,11 @@ class AccountService:
         if isinstance(err, BudgetRefused):
             logger.info("%s: %s", what, err)
             return True
+        down = venue_down_reason(err)
+        if down is not None:
+            feed_health.note_venue_down(down)
+            logger.warning("%s: Lighter unavailable (%s)", what, down)
+            return True
         mapped = venue_client_error(err)
         if not mapped:
             return False
@@ -369,8 +374,13 @@ class AccountService:
             except asyncio.CancelledError:
                 feed_health.set_account_ws("down")
                 break
-            except Exception:
-                logger.exception("account ws error, reconnecting in 3s")
+            except Exception as e:
+                reason = venue_down_reason(e)
+                if reason is None:
+                    logger.exception("account ws error, reconnecting in 3s")
+                else:
+                    feed_health.note_venue_down(reason)
+                    logger.warning("account ws error, reconnecting in 3s: Lighter unavailable (%s)", reason)
                 feed_health.set_account_ws("reconnecting")
                 await asyncio.sleep(3)
 

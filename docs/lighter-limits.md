@@ -100,6 +100,7 @@ We do **not** use `sendTxBatch` today — each child is one transaction.
 | Ladder | `[9e9, 10e9)` |
 | Chase-grid | `[10e9, 11e9)` |
 | Planner | `[11e9, 12e9)` |
+| Trail | `[12e9, 13e9)` |
 
 Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap each other.
 

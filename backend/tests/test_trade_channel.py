@@ -59,6 +59,8 @@ class TestTradeSnapshotIsolation(unittest.IsolatedAsyncioTestCase):
         self.out: list[dict] = []
         gw = LighterGateway.__new__(LighterGateway)
         gw._current_market_index = 120
+        gw._print_watch = set()
+        gw._internal = []
         gw._recent_trades = {120: [Trade(price="1", size="1", side="buy", timestamp=1)]}
         gw._candles_1s = {}
         gw._max_1s = 3600
@@ -240,6 +242,8 @@ class TestSkipIdleTrade(unittest.IsolatedAsyncioTestCase):
         self.out: list[dict] = []
         gw = LighterGateway.__new__(LighterGateway)
         gw._current_market_index = 120
+        gw._print_watch = set()
+        gw._internal = []
         gw._recent_trades = {}
         gw._candles_1s = {}
         gw._max_1s = 3600
@@ -258,6 +262,31 @@ class TestSkipIdleTrade(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             skip_idle_trade('{"channel":"market_stats/all","last_trade_price":"1"}', 120)
         )
+
+    def test_a_watched_market_is_kept(self) -> None:
+        """Trail F9: a Trail on Last keeps its Market's prints off screen too."""
+        raw = '{"type":"update/trade","channel":"trade/1","trades":[{"price":"999","size":"1"}]}'
+        self.assertFalse(skip_idle_trade(raw, 120, {1}))
+
+    async def test_a_watched_market_emits_every_print_to_the_desk(self) -> None:
+        got: list[dict] = []
+        self.gw._internal = [got.append]
+        self.gw._print_watch = {1}
+        msg = {
+            "type": "update/trade",
+            "channel": "trade/1",
+            "trades": [
+                {"price": "11", "size": "1", "timestamp": 2},
+                {"price": "10", "size": "1", "timestamp": 1},
+            ],
+        }
+        await handle_ws_message(self.gw, msg)
+        self.assertEqual(got, [{"type": "prints", "market_index": 1, "prices": ["10", "11"]}])
+        # The web's tape is for the Market on screen only.
+        self.assertFalse(any(m.get("type") == "trades" for m in self.out))
+        got.clear()
+        await handle_ws_message(self.gw, {**msg, "type": "subscribed/trade"})
+        self.assertEqual(got, [])
 
     async def test_liquidation_frame_still_ingests(self) -> None:
         raw = (

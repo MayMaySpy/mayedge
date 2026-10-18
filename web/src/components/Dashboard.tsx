@@ -31,6 +31,7 @@ import {
 import { api, isLongPosition, type Market } from "@/lib/api";
 import { chartOrderPrice, stopTakeKind } from "@/lib/positionsTable";
 import { algoIsLive, algoOrderKind, preferPerpMarket } from "@/lib/algos";
+import { TRAIL_KIND_LABEL, trailDistanceLabel } from "@/lib/trail";
 import { theme } from "@/lib/theme";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { buildQuickLimit } from "@/lib/quickTrade";
@@ -212,6 +213,33 @@ function ChartPanel({
     for (const algo of algoBook.working) {
       if (!algoIsLive(algo.status) || algo.symbol !== symbol) continue;
       const id = algo.algo_id ?? "chase";
+      const rt = algo.trail;
+      if (rt) {
+        // A Trail's venue Stop is drawn with the orders. What only the desk holds goes here.
+        const name = `${TRAIL_KIND_LABEL[rt.kind]} ${trailDistanceLabel(rt.distance, rt.distance_kind)}`;
+        const act = parseFloat(rt.activation ?? "");
+        if (!rt.active && act > 0) {
+          lines.push({
+            id: `${id}-act`,
+            kind: "band",
+            price: act,
+            color: `${theme.muted}cc`,
+            label: `${name} STARTS`,
+          });
+        }
+        const trig = parseFloat(rt.trigger ?? "");
+        const deskHeld = rt.kind === "entry" || rt.reference === "last";
+        if (deskHeld && trig > 0) {
+          lines.push({
+            id: `${id}-trig`,
+            kind: "band",
+            price: trig,
+            color: rt.side === "buy" ? theme.bid : theme.ask,
+            label: `${name} FIRES`,
+          });
+        }
+        continue;
+      }
       const floor = parseFloat(algo.price_floor ?? "");
       const ceil = parseFloat(algo.price_ceiling ?? "");
       if (floor > 0) {

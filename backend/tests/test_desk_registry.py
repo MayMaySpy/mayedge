@@ -8,11 +8,26 @@ from mayedge.algos.book import find_book, find_book_by_algo_id
 
 
 class DeskRegistryTests(unittest.TestCase):
-    def test_books_include_chase_twap_ladder_grid_and_planner(self) -> None:
+    def test_books_include_chase_twap_ladder_grid_planner_and_trail(self) -> None:
         types = {book.algo_type for book in desk.books}
         self.assertEqual(
-            types, {"chase-iceberg", "advanced-twap", "ladder", "chase-grid", "planner"}
+            types,
+            {"chase-iceberg", "advanced-twap", "ladder", "chase-grid", "planner", "trail"},
         )
+
+    def test_trail_refuses_beside_planner_or_grid(self) -> None:
+        """Trail S1, both ways; Chase beside it is fine."""
+        conflict = desk.trail_book._market_conflict
+        assert conflict is not None
+        with patch.object(desk.planner_book, "live_on_market", return_value=True):
+            self.assertTrue(conflict(1))
+        with patch.object(desk.grid_book, "live_on_market", return_value=True):
+            self.assertTrue(conflict(1))
+        with patch.object(desk.chase_book, "live_on_market", return_value=True):
+            self.assertFalse(conflict(1))
+        with patch.object(desk.trail_book, "live_on_market", return_value=True):
+            self.assertTrue(desk._market_has_other_desk_algo(desk.planner_book)(1))
+            self.assertTrue(desk._market_has_other_desk_algo(desk.grid_book)(1))
 
     def test_grid_and_planner_each_refuse_beside_another_algo(self) -> None:
         with patch.object(desk.planner_book, "live_on_market", return_value=True):
@@ -27,6 +42,7 @@ class DeskRegistryTests(unittest.TestCase):
         self.assertIs(desk.get_book("ladder"), desk.ladder_book)
         self.assertIs(desk.get_book("chase-grid"), desk.grid_book)
         self.assertIs(desk.get_book("planner"), desk.planner_book)
+        self.assertIs(desk.get_book("trail"), desk.trail_book)
         self.assertIsNone(desk.get_book("unknown-algo"))
 
     def test_find_book_helpers(self) -> None:

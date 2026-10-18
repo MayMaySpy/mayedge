@@ -61,7 +61,7 @@ describe("planner form", () => {
     expect(plannerFormBlock({ ...form, entryPrice: "" }, "enter")).toBe("Set the entry price");
     expect(plannerFormBlock({ ...form, entryPrice: "", entryType: "market" }, "enter")).toBeNull();
     expect(plannerFormBlock({ ...form, entryPrice: "" }, "attach")).toBeNull();
-    expect(plannerFormBlock({ ...form, targets: [] }, "enter")).toBe("Add a target");
+    expect(plannerFormBlock({ ...form, targets: [] }, "enter")).toBe("Add a target, or trail the stop");
     expect(
       plannerFormBlock(
         { ...form, targets: [{ kind: "r", value: "2", pct: "60", order: "limit" }, { kind: "r", value: "3", pct: "50", order: "limit" }] },
@@ -84,6 +84,46 @@ describe("planner form", () => {
     expect(sized).toMatchObject({ size: "2", risk_pct: null });
     const attach = plannerBody(form, { mode: "attach", marketIndex: 1, slippage: 0.01 });
     expect(attach).toMatchObject({ entry_price: null, size: null, risk_pct: null, expiry_min: null });
+  });
+
+  it("sends a Trail entry, a Trail stop and a Trail target (E9, M10, P9)", () => {
+    const form = {
+      ...defaultPlannerForm("buy"),
+      stop: "95",
+      entryType: "trail" as const,
+      entryTrail: { distance: "1", distanceKind: "price" as const, activation: "98" },
+      trailStop: { start: "target" as const, after: "1", atR: "2", distance: "1", unit: "r" as const },
+      reference: "last" as const,
+      targets: [
+        { kind: "r" as const, value: "1", pct: "50", order: "trigger" as const },
+        { kind: "r" as const, value: "2", pct: "50", order: "trail" as const, trailDistance: "0.5", trailUnit: "pct" as const },
+      ],
+      expiryMin: "30",
+    };
+    expect(plannerFormBlock(form, "enter")).toBeNull();
+    const body = plannerBody(form, { mode: "enter", marketIndex: 1, slippage: 0.01 });
+    expect(body).toMatchObject({
+      entry_type: "trail",
+      entry_price: null,
+      entry_trail: { distance: "1", distance_kind: "price", activation: "98" },
+      trail_stop: { start: "target", after: 1, at_r: null, distance: "1", unit: "r" },
+      reference: "last",
+      expiry_min: 30,
+    });
+    expect((body.targets as Record<string, unknown>[])[1]).toMatchObject({
+      order: "trail",
+      trail_distance: "0.5",
+      trail_unit: "pct",
+    });
+  });
+
+  it("allows no targets only with a Trail stop (P5)", () => {
+    const form = { ...defaultPlannerForm("buy"), entryPrice: "100", stop: "95", targets: [] };
+    expect(plannerFormBlock(form, "enter")).toMatch(/trail the stop/);
+    const trailing = { ...form, trailStop: { ...form.trailStop, start: "last" as const } };
+    expect(plannerFormBlock(trailing, "enter")).toBeNull();
+    const bad = { ...trailing, trailStop: { ...trailing.trailStop, start: "target" as const, after: "1" } };
+    expect(plannerFormBlock(bad, "enter")).toMatch(/Pick the target/);
   });
 
   it("re-plans from the running Planner", () => {

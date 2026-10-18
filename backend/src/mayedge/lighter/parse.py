@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from mayedge.config import settings
@@ -257,6 +257,15 @@ def _as_int(value: Any, default: int = 0) -> int:
             return default
 
 
+def _hourly_funding_pct(raw_rate: Any) -> str:
+    """positionFunding ``rate`` is a fraction of notional. Desk hourly rates are already percent."""
+    text = str(raw_rate if raw_rate not in (None, "") else "0")
+    try:
+        return format((Decimal(text) * 100).normalize(), "f")
+    except (InvalidOperation, ValueError):
+        return text
+
+
 def desk_position_funding(raw: Any) -> dict[str, Any]:
     mi = _as_int(g(raw, "market_id", g(raw, "market_index", 0)))
     meta = gateway.get_market_by_index(mi)
@@ -268,7 +277,7 @@ def desk_position_funding(raw: Any) -> dict[str, Any]:
         "symbol": symbol,
         "side": "short" if side_raw.startswith("short") else "long",
         "position_size": str(g(raw, "position_size", "0") or "0"),
-        "rate": str(g(raw, "rate", "0") or "0"),
+        "rate": _hourly_funding_pct(g(raw, "rate", "0")),
         "change": str(g(raw, "change", "0") or "0"),
         "discount": str(g(raw, "discount", "0") or "0"),
         "timestamp": _as_int(g(raw, "timestamp", 0)),
@@ -326,11 +335,27 @@ def position_items(raw: Any) -> list[tuple[int, Any]]:
     return pairs
 
 
+def _has_value(raw: Any, name: str) -> bool:
+    if isinstance(raw, dict):
+        if name not in raw:
+            return False
+        value = raw.get(name)
+    else:
+        value = getattr(raw, name, None)
+    return value not in (None, "")
+
+
 def merge_positions(existing: list[Position], raw: Any, *, snapshot: bool) -> list[Position]:
-    by_mi: dict[int, Position] = {} if snapshot else {p.market_index: p for p in existing}
+    prior = {p.market_index: p for p in existing}
+    by_mi: dict[int, Position] = {} if snapshot else dict(prior)
     for mi, item in position_items(raw):
         pos = parse_position(item)
         if pos:
+            # Venue updates omit total_funding_paid_out when it did not change.
+            if not _has_value(item, "total_funding_paid_out"):
+                old = prior.get(mi)
+                if old is not None:
+                    pos.funding_paid = old.funding_paid
             by_mi[mi] = pos
         else:
             by_mi.pop(mi, None)

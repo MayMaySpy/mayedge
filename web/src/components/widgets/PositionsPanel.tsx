@@ -5,6 +5,7 @@ import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
 import { PositionPlanButton } from "@/components/widgets/planner/PositionPlanButton";
 import { livePlannerFor } from "@/lib/plannerPlan";
+import { liveTrailsFor } from "@/lib/trail";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
 import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
@@ -28,7 +29,7 @@ import { useTradingReady } from "@/hooks/useTradingReady";
 import { formatUsdNotional, trimQty } from "@/components/widgets/orderTicket/math";
 import { api, isLongPosition, type Market, type OpenOrder, type Position } from "@/lib/api";
 import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
-import { useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
+import { setAlgo, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   nextPosSort,
   positionNotional,
@@ -542,6 +543,7 @@ export function PositionsPanel({
                     const liq = n(p.liquidation_price);
                     const m = markets.find((x) => x.market_index === p.market_index) ?? market;
                     const planner = livePlannerFor(algoBook, p.market_index);
+                    const trails = liveTrailsFor(algoBook, p.market_index);
                     return (
                       <TableRow
                         key={p.market_index}
@@ -629,6 +631,15 @@ export function PositionsPanel({
                               }}
                               onCancel={async (orderIndex) => {
                                 await cancelOrder(p.market_index, orderIndex);
+                              }}
+                              trails={trails}
+                              onStartTrail={async (body) => {
+                                const ok = await run(
+                                  `trail-${p.market_index}`,
+                                  async () => setAlgo(await api.algoStart("trail", body)),
+                                  `${p.symbol} ${body.kind === "tp" ? "Trail Take Profit" : "Trail Stop"} started`
+                                );
+                                if (!ok) throw new Error("not started");
                               }}
                             />
                             <PositionPlanButton

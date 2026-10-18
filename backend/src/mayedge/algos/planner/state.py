@@ -10,6 +10,7 @@ from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.ledger import Ledger
 from mayedge.algos.planner.plan import Plan, PlannerParams
+from mayedge.algos.trail.engine import Point
 from mayedge.numbers import fmt_decimal
 
 if TYPE_CHECKING:
@@ -40,6 +41,11 @@ class PlannerState:
     # How far the stop has stepped: the target number of the last Stop step taken.
     steps_done: int = 0
     entry_deadline_ms: int | None = None
+    # Where each trailing part is (E9, M10, P9 Trail): "entry", "stop", "tp2"…
+    trails: dict[str, Point] = field(default_factory=dict)
+    trail_moves: dict[str, int] = field(default_factory=dict)
+    # Trail targets on Last the desk has fired (L1).
+    trail_fired: set[str] = field(default_factory=set)
 
     def runtime_json(self) -> dict[str, Any]:
         return {
@@ -52,6 +58,16 @@ class PlannerState:
             "steps_done": self.steps_done,
             "breakeven_done": self.steps_done >= 1,
             "entry_deadline_ms": self.entry_deadline_ms,
+            "trails": {
+                k: {
+                    "active": p.active,
+                    "best": fmt_decimal(p.best),
+                    "trigger": fmt_decimal(p.trigger),
+                }
+                for k, p in self.trails.items()
+            },
+            "trail_moves": dict(self.trail_moves),
+            "trail_fired": sorted(self.trail_fired),
         }
 
     def load_runtime(self, raw: dict[str, Any]) -> None:
@@ -69,9 +85,29 @@ class PlannerState:
         self.steps_done = int(steps) if steps is not None else (1 if raw.get("breakeven_done") else 0)
         deadline = raw.get("entry_deadline_ms")
         self.entry_deadline_ms = int(deadline) if deadline else None
+        trails = raw.get("trails") or {}
+        self.trails = {
+            str(k): Point(
+                active=bool(v.get("active")),
+                best=_dec(v.get("best")),
+                trigger=_dec(v.get("trigger")),
+            )
+            for k, v in (trails.items() if isinstance(trails, dict) else [])
+            if isinstance(v, dict)
+        }
+        moves = raw.get("trail_moves") or {}
+        self.trail_moves = {str(k): int(v) for k, v in moves.items()} if isinstance(moves, dict) else {}
+        self.trail_fired = {str(x) for x in raw.get("trail_fired") or []}
+
+
+def _dec(raw: object) -> Decimal | None:
+    if raw in (None, ""):
+        return None
+    return Decimal(str(raw))
 
 
 class PlannerBookView(Protocol):
+    def take_amend(self, market_index: int, now_ms: int) -> bool: ...
     def publish(self) -> None: ...
     def finish(self, job: PlannerRunner) -> None: ...
     def alloc_coi(self) -> int: ...

@@ -13,7 +13,13 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { TicketField } from "@/components/widgets/orderTicket/ui";
-import { api, type AlgoState, type Market, type PlannerPreview } from "@/lib/api";
+import {
+  api,
+  type AlgoState,
+  type Market,
+  type PlannerPreview,
+  type PlannerTargetPlan,
+} from "@/lib/api";
 import { setAlgo } from "@/lib/liveData";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { decimalInput } from "@/lib/numbers";
@@ -25,6 +31,7 @@ import {
   plannerFormBlock,
   replacedLine,
   rLabel,
+  plannerTrails,
   runnerPct,
   signedPct,
   stepGapPct,
@@ -36,6 +43,37 @@ import {
 import { cn, formatPrice, formatSize } from "@/lib/utils";
 
 const PREVIEW_DEBOUNCE_MS = 250;
+
+function trailedBy(t: PlannerTargetPlan): string {
+  const d = t.trail_distance ?? "";
+  return t.trail_kind === "pct" ? `${d}%` : formatPrice(d);
+}
+
+function entryTrailLine(form: PlannerForm, symbol: string): string {
+  const et = form.entryTrail;
+  const dist = et.distanceKind === "pct" ? `${et.distance}%` : et.distance;
+  const ref = form.reference === "last" ? "Last" : "Mark";
+  const long = form.side === "buy";
+  const wait = et.activation
+    ? `Waits for ${symbol} at or ${long ? "below" : "above"} ${et.activation}. Then `
+    : "";
+  return `${wait}${long ? "buys" : "sells"} when ${ref} ${long ? "rises" : "falls"} ${dist} off its ${long ? "low" : "high"}. Size is worked out from the price it fires at.`;
+}
+
+function trailStopLine(form: PlannerForm): string {
+  const ts = form.trailStop;
+  const dist = ts.unit === "r" ? `${ts.distance}R` : `${ts.distance}%`;
+  const from =
+    ts.start === "target"
+      ? `After TP${ts.after || "?"} fills`
+      : ts.start === "last"
+        ? form.targets.length
+          ? "After the last target fills"
+          : "From the fill"
+        : `From ${ts.atR || "?"}R`;
+  const floor = form.stopSteps === "off" ? "never below where it is" : "never below its stop step";
+  return `${from}, the stop follows ${dist} behind the best price, ${floor}.`;
+}
 
 function Row({ label, children, tone }: { label: string; children: React.ReactNode; tone?: "bid" | "ask" }) {
   return (
@@ -216,8 +254,50 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               items={[
                 { value: "limit", label: "Limit" },
                 { value: "market", label: "Market" },
+                { value: "trail", label: "Trail" },
               ]}
             />
+          </div>
+        )}
+
+        {mode === "enter" && !replan && form.entryType === "trail" && (
+          <div className="flex flex-col gap-1">
+            <FieldGroup className="grid grid-cols-2 items-start gap-3">
+              <TicketField
+                id="planner-entry-activation"
+                label="Entry Activate at"
+                shortLabel="Activate"
+                value={form.entryTrail.activation}
+                inputMode="decimal"
+                placeholder="Now"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryTrail: { ...form.entryTrail, activation: v } })}
+              />
+              <TicketField
+                id="planner-entry-distance"
+                label="Entry trail distance"
+                shortLabel="Distance"
+                value={form.entryTrail.distance}
+                inputMode="decimal"
+                placeholder="1"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryTrail: { ...form.entryTrail, distance: v } })}
+                addon={
+                  <Seg
+                    label="Entry distance unit"
+                    value={form.entryTrail.distanceKind}
+                    onChange={(v) => set({ entryTrail: { ...form.entryTrail, distanceKind: v } })}
+                    items={[
+                      { value: "pct", label: "%" },
+                      { value: "price", label: "Price" },
+                    ]}
+                  />
+                }
+              />
+            </FieldGroup>
+            <span className="font-mono text-xs text-muted-foreground">
+              {entryTrailLine(form, market.symbol)}
+            </span>
           </div>
         )}
 
@@ -310,10 +390,18 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
                 <Seg
                   label={`Target ${i + 1} order type`}
                   value={t.order}
-                  onChange={(v) => setTarget(i, { order: v })}
+                  onChange={(v) =>
+                    setTarget(
+                      i,
+                      v === "trail"
+                        ? { order: v, trailDistance: t.trailDistance || "0.5", trailUnit: t.trailUnit ?? "r" }
+                        : { order: v }
+                    )
+                  }
                   items={[
                     { value: "limit", label: "Limit" },
                     { value: "trigger", label: "Trigger" },
+                    { value: "trail", label: "Trail" },
                   ]}
                 />
                 <TicketField
@@ -339,6 +427,30 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
                   <X />
                 </Button>
               </div>
+              {t.order === "trail" && (
+                <div className="flex w-full items-start gap-2 pl-11">
+                  <TicketField
+                    id={`planner-tp${i}-trail`}
+                    label={`Target ${i + 1} trail distance`}
+                    shortLabel="Then trails"
+                    value={t.trailDistance ?? ""}
+                    inputMode="decimal"
+                    placeholder="0.5"
+                    sanitize={decimalInput}
+                    onChange={(v) => setTarget(i, { trailDistance: v })}
+                    className="min-w-24 flex-1"
+                  />
+                  <Seg
+                    label={`Target ${i + 1} trail unit`}
+                    value={t.trailUnit ?? "r"}
+                    onChange={(v) => setTarget(i, { trailUnit: v })}
+                    items={[
+                      { value: "r", label: "R" },
+                      { value: "pct", label: "%" },
+                    ]}
+                  />
+                </div>
+              )}
             </div>
           ))}
           <div className="flex items-center justify-between">
@@ -357,6 +469,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
             </Button>
             <span className="font-mono text-xs text-muted-foreground">
               Runner {Number(runner.toFixed(2))}% rides on the stop
+              {form.trailStop.start !== "off" ? ", which trails" : ""}
             </span>
           </div>
         </div>
@@ -382,7 +495,99 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
               : "After TP1 to breakeven, then after each target to the one before it."}
         </span>
 
-        {mode === "enter" && !replan && form.entryType === "limit" && (
+        <div className="flex flex-col gap-2">
+          <Field orientation="horizontal" className="w-full flex-wrap items-center justify-between gap-2">
+            <FieldLabel className="text-base font-normal text-muted-foreground">Trail stop</FieldLabel>
+            <Seg
+              label="Trail stop"
+              value={form.trailStop.start}
+              onChange={(v) => set({ trailStop: { ...form.trailStop, start: v } })}
+              items={[
+                { value: "off", label: "Off" },
+                { value: "target", label: "After TP" },
+                { value: "last", label: "After last" },
+                { value: "r", label: "At R" },
+              ]}
+            />
+          </Field>
+          {form.trailStop.start !== "off" && (
+            <div className="flex flex-wrap items-start gap-2">
+              {form.trailStop.start === "target" && (
+                <TicketField
+                  id="planner-trail-after"
+                  label="Trail after target number"
+                  shortLabel="After TP"
+                  value={form.trailStop.after}
+                  inputMode="numeric"
+                  placeholder="1"
+                  sanitize={(raw) => raw.replace(/[^\d]/g, "")}
+                  onChange={(v) => set({ trailStop: { ...form.trailStop, after: v } })}
+                  className="w-32"
+                />
+              )}
+              {form.trailStop.start === "r" && (
+                <TicketField
+                  id="planner-trail-at-r"
+                  label="Trail from R multiple"
+                  shortLabel="At"
+                  value={form.trailStop.atR}
+                  inputMode="decimal"
+                  placeholder="2"
+                  addon="R"
+                  sanitize={decimalInput}
+                  onChange={(v) => set({ trailStop: { ...form.trailStop, atR: v } })}
+                  className="w-32"
+                />
+              )}
+              <TicketField
+                id="planner-trail-distance"
+                label="Trail stop distance"
+                shortLabel="Distance"
+                value={form.trailStop.distance}
+                inputMode="decimal"
+                placeholder="1"
+                sanitize={decimalInput}
+                onChange={(v) => set({ trailStop: { ...form.trailStop, distance: v } })}
+                className="min-w-28 flex-1"
+              />
+              <Seg
+                label="Trail stop unit"
+                value={form.trailStop.unit}
+                onChange={(v) => set({ trailStop: { ...form.trailStop, unit: v } })}
+                items={[
+                  { value: "r", label: "R" },
+                  { value: "pct", label: "%" },
+                ]}
+              />
+            </div>
+          )}
+          {form.trailStop.start !== "off" && (
+            <span className="font-mono text-xs text-muted-foreground">{trailStopLine(form)}</span>
+          )}
+        </div>
+
+        {plannerTrails(form) && (
+          <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
+            <FieldLabel className="text-base font-normal text-muted-foreground">Trails follow</FieldLabel>
+            <Seg
+              label="Trails follow"
+              value={form.reference}
+              onChange={(v) => set({ reference: v })}
+              items={[
+                { value: "mark", label: "Mark" },
+                { value: "last", label: "Last" },
+              ]}
+            />
+          </Field>
+        )}
+        {plannerTrails(form) && (
+          <span className="-mt-2 font-mono text-xs text-muted-foreground">
+            Trail parts follow only while the desk is running.
+            {form.reference === "last" ? " On Last the desk closes on a print; a venue backstop sits one step behind." : ""}
+          </span>
+        )}
+
+        {mode === "enter" && !replan && form.entryType !== "market" && (
           <TicketField
             id="planner-expiry"
             label="Cancel the entry after minutes"
@@ -409,7 +614,9 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
           </span>
         ) : plan ? (
           <>
-            <Row label="Entry">{formatPrice(plan.entry)}</Row>
+            <Row label={form.entryType === "trail" && mode === "enter" ? "Entry, at the trigger now" : "Entry"}>
+              {formatPrice(plan.entry)}
+            </Row>
             <Row label="Stop" tone="ask">
               {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)})
             </Row>
@@ -424,7 +631,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
             {plan.targets.map((t) => (
               <Row
                 key={t.index}
-                label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}% · ${t.order === "trigger" ? "trigger" : "limit"}`}
+                label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}% · ${t.order === "trail" ? `trail ${trailedBy(t)}` : t.order === "trigger" ? "trigger" : "limit"}`}
                 tone="bid"
               >
                 {formatPrice(t.price)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}

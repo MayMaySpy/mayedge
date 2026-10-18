@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AlgoRow } from "@/components/widgets/algo/AlgoRow";
 import { PlannerRow } from "@/components/widgets/planner/PlannerRow";
+import { TrailRow } from "@/components/widgets/trail/TrailRow";
 import { algoBlotter, algoResumeNotice } from "@/lib/algos";
 import { api, type AlgoState } from "@/lib/api";
 import { setAlgo, useLiveAlgos } from "@/lib/liveData";
@@ -33,7 +34,7 @@ function AlgoList({
   tradingEnabled: boolean;
   busyId: string | null;
   showControls: boolean;
-  onStop: (algoId: string) => void;
+  onStop: (algoId: string, keepStop?: boolean) => void;
   onPause: (algoId: string) => void;
   onResume: (algoId: string) => void;
 }) {
@@ -48,7 +49,19 @@ function AlgoList({
   return (
     <>
       {rows.map((algo) =>
-        algo.algo_type === "planner" ? (
+        algo.algo_type === "trail" ? (
+          <TrailRow
+            key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
+            algo={algo}
+            busy={busyId === algo.algo_id || busyId === "*"}
+            emphasize={!!symbol && algo.symbol === symbol}
+            tradingEnabled={tradingEnabled}
+            onStop={
+              showControls && algo.algo_id ? (keep) => onStop(algo.algo_id!, keep) : undefined
+            }
+            onResume={showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined}
+          />
+        ) : algo.algo_type === "planner" ? (
           <PlannerRow
             key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
             algo={algo}
@@ -92,11 +105,12 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
   const workingRows = filterSym ? working.filter((a) => a.symbol === filterSym) : working;
   const historyRows = filterSym ? history.filter((a) => a.symbol === filterSym) : history;
 
-  const stopOne = async (algoId: string) => {
+  const stopOne = async (algoId: string, keepStop?: boolean) => {
     if (!tradingEnabled || busyId) return;
     setBusyId(algoId);
     try {
-      const book = await api.algoStop(algoId);
+      const book =
+        keepStop != null ? await api.trailStop(algoId, keepStop) : await api.algoStop(algoId);
       setAlgo(book);
       const still = (book.working ?? []).find((a) => a.algo_id === algoId);
       if (still?.status === "error") {
@@ -214,7 +228,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
               tradingEnabled={tradingEnabled}
               busyId={busyId}
               showControls
-              onStop={(id) => void stopOne(id)}
+              onStop={(id, keep) => void stopOne(id, keep)}
               onPause={(id) => void pauseOne(id)}
               onResume={(id) => void resumeOne(id)}
             />

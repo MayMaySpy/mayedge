@@ -15,6 +15,8 @@ export interface AlgoBlockContext {
   maxSize?: number;
   spot?: number | null;
   slipFrac?: number;
+  reduceOnly?: boolean;
+  priceDecimals?: number;
 }
 
 export interface AlgoSubmitContext {

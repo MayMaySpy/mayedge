@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "@/test/dom";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
-import type { OpenOrder, Position } from "@/lib/api";
+import type { AlgoState, OpenOrder, Position } from "@/lib/api";
 
 const LONG: Position = {
   market_index: 1,
@@ -172,5 +172,67 @@ describe("PositionProtectPopover", () => {
     await openDialog(user);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledWith("77");
+  });
+});
+
+describe("PositionProtectPopover Trail mode", () => {
+  const trailSetup = (over: Partial<Parameters<typeof PositionProtectPopover>[0]> = {}) => {
+    const onStartTrail = vi.fn(async (_body: Record<string, unknown>) => {});
+    const out = setup({ onStartTrail, ...over });
+    return { ...out, onStartTrail };
+  };
+  // The Take Profit section comes first, the Stop Loss second.
+  const modeGroup = (i: number) => screen.getAllByLabelText("Fixed or Trail")[i]!;
+
+  it("starts a Trail Stop and names the Stop Ticket it replaces (TS4)", async () => {
+    const { onPlace, onStartTrail, user } = trailSetup({ orders: [LIVE_STOP] });
+    const submit = await openDialog(user);
+    await user.click(within(modeGroup(1)).getByText("Trail"));
+    expect(screen.getByText(/Replaces SL 90/)).toBeTruthy();
+    expect(screen.getByText(/Stop now 99.00/)).toBeTruthy();
+    expect(submit.disabled).toBe(false);
+    await user.click(submit);
+    expect(onPlace).not.toHaveBeenCalled();
+    expect(onStartTrail).toHaveBeenCalledWith({
+      distance: "1",
+      distance_kind: "pct",
+      reference: "mark",
+      activation: null,
+      kind: "stop",
+      market_index: 1,
+      start: null,
+      slippage: 0.01,
+    });
+  });
+
+  it("needs an Activation above mark for a long's Trail Take Profit (TT1)", async () => {
+    const { onStartTrail, user } = trailSetup();
+    const submit = await openDialog(user);
+    await user.click(within(modeGroup(0)).getByText("Trail"));
+    expect(submit.disabled).toBe(true);
+    await user.type(screen.getByLabelText("Activate at"), "99");
+    expect(screen.getByText("Activate at must be above mark")).toBeTruthy();
+    await user.clear(screen.getByLabelText("Activate at"));
+    await user.type(screen.getByLabelText("Activate at"), "105");
+    await user.click(submit);
+    expect(onStartTrail.mock.calls[0]![0]).toMatchObject({
+      kind: "tp",
+      activation: "105",
+      size_pct: "100",
+    });
+  });
+
+  it("shows a live Trail Stop as the Position's stop and offers no other", async () => {
+    const trail = {
+      algo_id: "TR-0001",
+      algo_type: "trail",
+      status: "running",
+      market_index: 1,
+      trail: { kind: "stop", trigger: "99" },
+    } as unknown as AlgoState;
+    const { user } = trailSetup({ trails: [trail] });
+    await openDialog(user);
+    expect(screen.getByText(/TR-0001 is this Position's stop at 99.00/)).toBeTruthy();
+    expect(screen.queryByLabelText("SL Trigger Price")).toBeNull();
   });
 });

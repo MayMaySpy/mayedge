@@ -4,6 +4,7 @@ import {
   HistogramSeries,
   LineSeries,
   CrosshairMode,
+  LineStyle,
   type IChartApi,
   type ISeriesApi,
   type CandlestickData,
@@ -63,10 +64,17 @@ import {
   useLiveCandles1s,
   useLiveMinuteCandles,
   useLiveOpenInterest,
+  useLiveFundingRate,
   useLiveTopOfBook,
   useLiveAccountTrades,
 } from "@/lib/liveData";
 import { bucketOpen, buildOiLine, type OiLinePoint } from "@/lib/openInterest";
+import {
+  buildFundingBars,
+  isSettled,
+  type FundingBar,
+  type FundingSample,
+} from "@/lib/funding";
 import { fillMarks, type FillMark } from "@/lib/fillMarks";
 import { FillMarksPrimitive, type FillSpot } from "@/lib/fillMarkPrimitive";
 import { theme } from "@/lib/theme";
@@ -80,7 +88,7 @@ import {
   showsSeconds,
   supportsOpenInterest,
 } from "@/lib/timeframe";
-import { cn, formatPct, formatPrice, formatSize, formatUsdCompact } from "@/lib/utils";
+import { cn, formatApr, formatPct, formatPrice, formatSize, formatUsdCompact } from "@/lib/utils";
 import {
   WATCH_WINDOWS,
   WATCH_WINDOW_SEC,
@@ -94,6 +102,7 @@ export type { ChartOverlay, OverlayAction, TicketAmend, TicketPlace };
 
 const VOL_KEY = "mayedge-chart-vol";
 const OI_KEY = "mayedge-chart-oi";
+const FUND_KEY = "mayedge-chart-fund";
 const BBO_KEY = "mayedge-chart-bbo";
 const MAYREKT_KEY = "mayedge-chart-mayrekt";
 const MODE_KEY = "mayedge-chart-mode";
@@ -102,7 +111,7 @@ const RIGHT_OFFSET = 8;
 
 const CHART_MODES = ["price", "scan", "watch"] as const;
 type ChartMode = (typeof CHART_MODES)[number];
-const SCAN_TABS = ["rel", "liqs"] as const;
+const SCAN_TABS = ["rel", "liqs", "act", "tones"] as const;
 
 type QtyEditState = {
   overlayId: string;
@@ -231,6 +240,14 @@ function loadOi(): boolean {
   }
 }
 
+function loadFund(): boolean {
+  try {
+    return localStorage.getItem(FUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function loadBbo(): boolean {
   try {
     return localStorage.getItem(BBO_KEY) === "1";
@@ -271,7 +288,7 @@ function loadMode(): ChartMode {
 function loadScanTab(): ScanTab {
   try {
     const raw = localStorage.getItem(SCAN_TAB_KEY);
-    if (raw === "rel" || raw === "liqs") return raw;
+    if ((SCAN_TABS as readonly string[]).includes(raw ?? "")) return raw as ScanTab;
   } catch {
     /* ignore */
   }
@@ -283,6 +300,10 @@ const EMPTY_FILLS: FillMark[] = [];
 const EMPTY_SPOTS: FillSpot[] = [];
 const EMPTY_OI: OpenInterestSample[] = [];
 const EMPTY_OI_LINE: OiLinePoint[] = [];
+const EMPTY_FUNDING: FundingSample[] = [];
+const EMPTY_FUND_BARS: FundingBar[] = [];
+/** Each indicator pane's height against the price pane's 1. */
+const INDICATOR_STRETCH = 0.28;
 
 type Ohlc = { open: number; high: number; low: number; close: number; volume?: number };
 
@@ -317,6 +338,8 @@ function OhlcReadout({
   showVolume,
   showOi,
   oi,
+  showFund,
+  fund,
   fills,
 }: {
   bar: Ohlc | null;
@@ -324,6 +347,8 @@ function OhlcReadout({
   showVolume?: boolean;
   showOi?: boolean;
   oi?: number | null;
+  showFund?: boolean;
+  fund?: { apr: number; settled: boolean } | null;
   fills?: FillMark[];
 }) {
   if (!bar) {
@@ -349,6 +374,26 @@ function OhlcReadout({
         <span className="inline-flex shrink-0 items-baseline gap-1">
           <span className="text-muted-foreground">OI</span>
           <span className="text-muted-foreground">{formatUsdCompact(oi) || "—"}</span>
+        </span>
+      ) : null}
+      {showFund ? (
+        <span
+          className="inline-flex shrink-0 items-baseline gap-1"
+          title={fund && !fund.settled ? "Estimate for an hour that has not settled" : undefined}
+        >
+          <span className="text-muted-foreground">Fund</span>
+          <span
+            className={
+              fund == null || fund.apr === 0
+                ? "text-muted-foreground"
+                : fund.apr > 0
+                  ? "text-ask"
+                  : "text-bid"
+            }
+          >
+            {fund ? formatApr(fund.apr) : "—"}
+          </span>
+          {fund && !fund.settled ? <span className="text-muted-foreground">est</span> : null}
         </span>
       ) : null}
       {fills?.map((mark) => (
@@ -431,6 +476,7 @@ export const ChartWidget = memo(function ChartWidget({
   );
   const [volOn, setVolOn] = useState(loadVol);
   const [oiOn, setOiOn] = useState(loadOi);
+  const [fundOn, setFundOn] = useState(loadFund);
   const [bboOn, setBboOn] = useState(loadBbo);
   const [mayRektOn, setMayRektOn] = useState(loadMayRekt);
   const [mode, setMode] = useState<ChartMode>(loadMode);
@@ -449,10 +495,15 @@ export const ChartWidget = memo(function ChartWidget({
     key: string;
     bar: Ohlc;
     oi: number | null;
+    fund: { apr: number; settled: boolean } | null;
     time: number | null;
   } | null>(null);
   const [qtyEdit, setQtyEdit] = useState<QtyEditState | null>(null);
   const [oiHist, setOiHist] = useState<{ key: string; points: OpenInterestSample[] }>({
+    key: "",
+    points: [],
+  });
+  const [fundHist, setFundHist] = useState<{ key: string; points: FundingSample[] }>({
     key: "",
     points: [],
   });
@@ -468,6 +519,7 @@ export const ChartWidget = memo(function ChartWidget({
   const fillMarksRef = useRef<FillMarksPrimitive | null>(null);
   const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const oiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const fundSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const tradingLinesRef = useRef<TradingLinesPrimitive | null>(null);
   const topOfBookRef = useRef<TopOfBookPrimitive | null>(null);
   const overlaysRef = useRef(overlays);
@@ -499,6 +551,8 @@ export const ChartWidget = memo(function ChartWidget({
   const hoverBar = hover?.key === seriesKey ? hover.bar : null;
   const showOi = isPrice && oiOn && supportsOpenInterest(bar);
   const oiSamples = oiHist.key === seriesKey ? oiHist.points : EMPTY_OI;
+  const showFund = isPrice && fundOn && supportsOpenInterest(bar);
+  const fundSamples = fundHist.key === seriesKey ? fundHist.points : EMPTY_FUNDING;
   const liveFills = useLiveAccountTrades();
   const [fillPage, setFillPage] = useState<{ key: number; rows: AccountTrade[] } | null>(null);
   const chartMarket = useMemo(() => {
@@ -514,6 +568,11 @@ export const ChartWidget = memo(function ChartWidget({
     const oi = quotedOi ?? chartMarket?.open_interest ?? null;
     return oi != null && Number.isFinite(oi) && oi > 0 ? oi : null;
   }, [chartMarket, quotedOi]);
+  const quotedFunding = useLiveFundingRate(chartMarket?.market_index);
+  const liveFunding = useMemo(() => {
+    const rate = quotedFunding ?? chartMarket?.funding_rate ?? null;
+    return rate != null && Number.isFinite(rate) ? rate : null;
+  }, [chartMarket, quotedFunding]);
   const fillMarkList = useMemo(() => {
     if (!isPrice || !chartMarket) return EMPTY_FILLS;
     const rest = fillPage?.key === chartMarket.market_index ? fillPage.rows : [];
@@ -549,6 +608,18 @@ export const ChartWidget = memo(function ChartWidget({
   }, [isPrice, oiOn, bar, oiSamples, liveOi, nowSec]);
   const oiLineRef = useRef(oiLine);
   const oiShape = oiLine.map((point) => point.time).join(",");
+
+  const fundBars = useMemo(() => {
+    if (!showFund) return EMPTY_FUND_BARS;
+    const step = bar.seconds;
+    const live =
+      liveFunding != null ? { time: bucketOpen(nowSec, step), rate: liveFunding } : null;
+    return buildFundingBars(fundSamples, step, live);
+  }, [showFund, bar, fundSamples, liveFunding, nowSec]);
+  const fundBarsRef = useRef(fundBars);
+  const fundShape = fundBars
+    .map((point) => `${point.time}${isSettled(point) ? "s" : ""}`)
+    .join(",");
 
   const marketByIndex = useMemo(
     () => new Map(markets.map((m) => [m.market_index, m])),
@@ -592,6 +663,10 @@ export const ChartWidget = memo(function ChartWidget({
   useEffect(() => {
     oiLineRef.current = oiLine;
   }, [oiLine]);
+
+  useEffect(() => {
+    fundBarsRef.current = fundBars;
+  }, [fundBars]);
 
   useEffect(() => {
     seriesKeyRef.current = seriesKey;
@@ -717,10 +792,32 @@ export const ChartWidget = memo(function ChartWidget({
   }, [symbol, tf, showOi]);
 
   useEffect(() => {
-    if (!showOi) return;
+    if (!showFund) return;
+    const key = `${symbol}:${tf}`;
+    let cancelled = false;
+    const load = () => {
+      api
+        .funding(symbol, tf, 500)
+        .then((data) => {
+          if (!cancelled) setFundHist({ key, points: data });
+        })
+        .catch(() => {
+          if (!cancelled) setFundHist({ key, points: [] });
+        });
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbol, tf, showFund]);
+
+  useEffect(() => {
+    if (!showOi && !showFund) return;
     const id = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
-  }, [showOi]);
+  }, [showOi, showFund]);
 
   const display = useMemo(() => {
     if (fromSeconds) {
@@ -1009,17 +1106,28 @@ export const ChartWidget = memo(function ChartWidget({
           rawOi && "value" in rawOi && typeof rawOi.value === "number" && Number.isFinite(rawOi.value)
             ? rawOi.value
             : null;
+        const fundSeries = fundSeriesRef.current;
+        const rawFund = fundSeries ? param.seriesData.get(fundSeries) : undefined;
+        const fund =
+          rawFund &&
+          "value" in rawFund &&
+          typeof rawFund.value === "number" &&
+          Number.isFinite(rawFund.value)
+            ? { apr: rawFund.value, settled: isSettled(rawFund) }
+            : null;
         setHover((prev) => {
           if (!next) return prev?.key === key ? null : prev;
           if (
             prev?.key === key &&
             prev.time === barTime &&
             sameOhlc(prev.bar, next) &&
-            prev.oi === oi
+            prev.oi === oi &&
+            prev.fund?.apr === fund?.apr &&
+            prev.fund?.settled === fund?.settled
           ) {
             return prev;
           }
-          return { key, bar: next, oi, time: barTime };
+          return { key, bar: next, oi, fund, time: barTime };
         });
       }
     };
@@ -1059,6 +1167,7 @@ export const ChartWidget = memo(function ChartWidget({
       fillMarksRef.current = null;
       volSeriesRef.current = null;
       oiSeriesRef.current = null;
+      fundSeriesRef.current = null;
       tradingLinesRef.current = null;
       topOfBookRef.current = null;
     };
@@ -1090,7 +1199,7 @@ export const ChartWidget = memo(function ChartWidget({
       },
       1,
     );
-    chart.panes()[1]?.setStretchFactor(0.28);
+    chart.panes()[1]?.setStretchFactor(INDICATOR_STRETCH);
     oiSeriesRef.current = series;
     series.setData(oiLineRef.current);
     return () => {
@@ -1109,6 +1218,57 @@ export const ChartWidget = memo(function ChartWidget({
     if (!series || !last || !("value" in last)) return;
     series.update(last);
   }, [liveOi, nowSec, showOi]);
+
+  // Below OI when both are on. Rebuilt when OI toggles, since an empty pane is dropped.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !showFund) {
+      const series = fundSeriesRef.current;
+      fundSeriesRef.current = null;
+      if (series && chartRef.current) chartRef.current.removeSeries(series);
+      return;
+    }
+    const pane = showOi ? 2 : 1;
+    const series = chart.addSeries(
+      HistogramSeries,
+      {
+        priceLineVisible: false,
+        lastValueVisible: true,
+        base: 0,
+        priceFormat: {
+          type: "custom",
+          minMove: 0.01,
+          formatter: (apr: number) => formatApr(apr),
+        },
+      },
+      pane,
+    );
+    series.createPriceLine({
+      price: 0,
+      color: theme.rule,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: false,
+    });
+    chart.panes()[pane]?.setStretchFactor(INDICATOR_STRETCH);
+    fundSeriesRef.current = series;
+    series.setData(fundBarsRef.current);
+    return () => {
+      fundSeriesRef.current = null;
+      if (chartRef.current) chart.removeSeries(series);
+    };
+  }, [showFund, showOi]);
+
+  useEffect(() => {
+    fundSeriesRef.current?.setData(fundBarsRef.current);
+  }, [fundShape, showFund, showOi]);
+
+  useEffect(() => {
+    const series = fundSeriesRef.current;
+    const last = fundBarsRef.current[fundBarsRef.current.length - 1];
+    if (!series || !last || !("value" in last)) return;
+    series.update(last);
+  }, [liveFunding, nowSec, showFund]);
 
   useEffect(() => {
     seriesRef.current?.applyOptions({ priceFormat: priceFormat(priceDecimals) });
@@ -1279,6 +1439,12 @@ export const ChartWidget = memo(function ChartWidget({
   const ohlc = hoverBar ?? lastBar;
   const hovered = hover?.key === seriesKey ? hover : null;
   const oiRead = hovered ? hovered.oi : liveOi;
+  const lastFund = fundBars[fundBars.length - 1];
+  const fundRead = hovered
+    ? hovered.fund
+    : lastFund && "value" in lastFund
+      ? { apr: lastFund.value, settled: isSettled(lastFund) }
+      : null;
   const numeraireChange24h = useMemo(
     () => rankRelativeStrength(markets).numeraireChange24h,
     [markets]
@@ -1289,6 +1455,18 @@ export const ChartWidget = memo(function ChartWidget({
       const next = !on;
       try {
         localStorage.setItem(VOL_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const toggleFund = () => {
+    setFundOn((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem(FUND_KEY, next ? "1" : "0");
       } catch {
         /* ignore */
       }
@@ -1368,6 +1546,23 @@ export const ChartWidget = memo(function ChartWidget({
               <Toggle
                 variant="seg"
                 size="sm"
+                pressed={showFund}
+                disabled={!supportsOpenInterest(bar)}
+                title={
+                  supportsOpenInterest(bar)
+                    ? fundOn
+                      ? "Hide funding"
+                      : "Show funding, APR. Faint bars are the estimate for an hour that has not settled"
+                    : "Funding follows 1m, 5m, 15m, 1h, 4h, and 1d"
+                }
+                className="h-6 px-1.5 font-mono text-sm"
+                onPressedChange={() => toggleFund()}
+              >
+                Fund
+              </Toggle>
+              <Toggle
+                variant="seg"
+                size="sm"
                 pressed={bboOn}
                 title="Top of book"
                 className="h-6 px-1.5 font-mono text-sm"
@@ -1409,7 +1604,7 @@ export const ChartWidget = memo(function ChartWidget({
             </>
           ) : isScan && scanTab === "liqs" ? (
             <LiqsReadout hours={liqHours} />
-          ) : isScan ? (
+          ) : isScan && scanTab === "rel" ? (
             <NumeraireReadout change={numeraireChange24h} />
           ) : null}
         </div>
@@ -1439,7 +1634,7 @@ export const ChartWidget = memo(function ChartWidget({
           </ToggleGroupItem>
           <ToggleGroupItem
             value="scan"
-            title="Scan: Rel vs BTC and liquidations"
+            title="Scan: Rel vs BTC, liquidations, activity and tones"
             className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
           >
             Scan
@@ -1478,6 +1673,20 @@ export const ChartWidget = memo(function ChartWidget({
                 className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
               >
                 Liqs
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="act"
+                title="Activity: what every liquid perp's tape shows now"
+                className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
+              >
+                Act
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="tones"
+                title="Tones: last closed bar blue or orange"
+                className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
+              >
+                Tones
               </ToggleGroupItem>
             </ToggleGroup>
           ) : null}
@@ -1580,6 +1789,8 @@ export const ChartWidget = memo(function ChartWidget({
                 showVolume={volOn}
                 showOi={showOi}
                 oi={oiRead}
+                showFund={showFund}
+                fund={fundRead}
                 fills={hoverFills}
               />
             </div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -12,8 +13,9 @@ from lighter.configuration import Configuration
 
 from mayedge import db as store
 from mayedge import feed_health
-from mayedge.alerts import ExploitDetector, ExploitEvent
+from mayedge.alerts import AlertDetector, Held
 from mayedge.config import settings
+from mayedge.funding_backfill import backfill_funding, backfill_funding_days
 from mayedge.lighter.budget import budget
 from mayedge.lighter.liquidations import LiquidationFeed
 from mayedge.lighter.market_ws import run_tone_ws, run_ws_loop, ws_send
@@ -26,8 +28,9 @@ from mayedge.lighter.models import (
     to_float,
 )
 from mayedge.lighter.order_book import OrderBookFeed
+from mayedge.persist_funding import funding_print_rows, funding_sample_rows
 from mayedge.persist_oi import open_interest_sample_rows
-from mayedge.tone_alerts import ToneBook, ToneHit
+from mayedge.tone_alerts import ToneBook
 from mayedge.tone_timeframes import (
     NATIVE_TONE_TIMEFRAMES,
     TONE_TIMEFRAME_CAP,
@@ -56,7 +59,7 @@ _MARKET_REFRESH_S = 3600.0
 _TONE_BACKFILL = 500
 _ALERT_MINUTE_BARS = 240
 _REST_CANDLE_CAP = 500
-_BOARD_BROADCAST_S = 3.0
+_SCAN_BROADCAST_S = 5.0
 
 
 class LighterGateway:
@@ -74,6 +77,10 @@ class LighterGateway:
         self._oi_task: asyncio.Task[None] | None = None
         self._ws_connected = asyncio.Event()
         self._subscribers: list[Callable[[dict[str, Any]], None]] = []
+        # Desk-only messages (Trail prints). Never sent to the web.
+        self._internal: list[Callable[[dict[str, Any]], None]] = []
+        # Markets whose every trade print the desk keeps (Trail F9), on screen or not.
+        self._print_watch: set[int] = set()
         self._current_market_index: int | None = None
         self._recent_trades: dict[int, list[Trade]] = {}
         self._candles_1s: dict[int, list[Candle]] = {}
@@ -88,7 +95,7 @@ class LighterGateway:
         self._last_msg_at = 0.0
         self._books = OrderBookFeed(self.broadcast, resubscribe=self._resubscribe_order_book_sync)
         self._liqs = LiquidationFeed(self.broadcast)
-        self._alerts = ExploitDetector(self.broadcast)
+        self._alerts = AlertDetector(self.broadcast, held=self._held_markets)
         self._tone_book = ToneBook()
         self._tone_resync = asyncio.Event()
         self._tone_generation = 0
@@ -98,8 +105,9 @@ class LighterGateway:
         self._tone_fill = ""
         self._tone_epoch = 0
         self._alert_minute_task: asyncio.Task[None] | None = None
-        self._alert_board_task: asyncio.Task[None] | None = None
-        self._last_board_sig: str = ""
+        self._funding_backfill_task: asyncio.Task[None] | None = None
+        self._scan_task: asyncio.Task[None] | None = None
+        self._last_scan: dict[str, str] = {}
 
     async def start(self) -> None:
         self._client = lighter.ApiClient(Configuration(host=settings.base_url))
@@ -116,6 +124,10 @@ class LighterGateway:
         self._books.set_current_market(self._current_market_index)
         self._books.start_resync_loop(lambda: self._current_market_index)
         try:
+            self._seed_alert_levels()
+        except Exception:
+            logger.exception("failed to load stored funding and open interest")
+        try:
             store.fold_open_interest(now_ms=int(time.time() * 1000))
         except Exception:
             logger.exception("failed to fold open interest")
@@ -130,7 +142,8 @@ class LighterGateway:
         self._tone_task = asyncio.create_task(self._tone_loop())
         self._tone_ws_task = asyncio.create_task(run_tone_ws(self))
         self._alert_minute_task = asyncio.create_task(self._alert_minute_backfill_loop())
-        self._alert_board_task = asyncio.create_task(self._alert_board_loop())
+        self._funding_backfill_task = asyncio.create_task(self._funding_backfill_loop())
+        self._scan_task = asyncio.create_task(self._scan_loop())
 
     async def stop(self) -> None:
         for task in (
@@ -141,7 +154,8 @@ class LighterGateway:
             self._tone_ws_task,
             self._market_task,
             self._alert_minute_task,
-            self._alert_board_task,
+            self._funding_backfill_task,
+            self._scan_task,
         ):
             if task:
                 task.cancel()
@@ -154,7 +168,8 @@ class LighterGateway:
         self._tone_ws_task = None
         self._market_task = None
         self._alert_minute_task = None
-        self._alert_board_task = None
+        self._funding_backfill_task = None
+        self._scan_task = None
         await self._books.stop_resync_loop()
         if self._client:
             await self._client.close()
@@ -178,6 +193,24 @@ class LighterGateway:
 
     def broadcast(self, message: dict[str, Any]) -> None:
         self._broadcast(message)
+
+    def subscribe_internal(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        if callback not in self._internal:
+            self._internal.append(callback)
+
+    def emit_internal(self, message: dict[str, Any]) -> None:
+        for cb in list(self._internal):
+            try:
+                cb(message)
+            except Exception:
+                logger.exception("internal subscriber error")
+
+    def watch_prints(self, market_index: int, on: bool) -> None:
+        """Keep, or stop keeping, every trade print on a Market (Trail F9)."""
+        if on:
+            self._print_watch.add(market_index)
+        else:
+            self._print_watch.discard(market_index)
 
     @property
     def client(self) -> lighter.ApiClient:
@@ -311,9 +344,12 @@ class LighterGateway:
                 meta.index_price = idx_px
             # Wire units are percent (0.0012 = 0.0012%/hr). Prefer the upcoming
             # estimate; funding_rate is the last settled print.
+            settled = row.get("funding_rate")
+            if settled is not None:
+                meta.settled_funding_rate = to_float(settled)
             fr = row.get("current_funding_rate")
             if fr is None:
-                fr = row.get("funding_rate")
+                fr = settled
             if fr is not None:
                 meta.funding_rate = to_float(fr)
             oi = row.get("open_interest")
@@ -544,10 +580,27 @@ class LighterGateway:
         closed = int(time.time()) // 60 - 1
         if closed < 0:
             return
+        # Funding is written beside open interest, so a restart knows what is normal.
+        funding = funding_sample_rows(self._markets.values())
+        if funding:
+            keep = self._alerts.settings.funding_retention_days * 1440
+            store.flush_funding(funding, minute_index=closed, keep_minutes=keep)
+        prints = funding_print_rows(self._markets.values())
+        if prints:
+            store.flush_funding_prints(prints)
         rows = open_interest_sample_rows(self._markets.values())
         if not rows:
             return
         store.flush_open_interest(rows, minute_index=closed)
+
+    def _seed_alert_levels(self) -> None:
+        """Give the alert rules the hour of open interest and the day of funding before this run."""
+        minute = int(time.time()) // 60
+        cfg = self._alerts.settings
+        self._alerts.seed_levels("funding", store.recent_funding(minute - cfg.level_window_min))
+        self._alerts.seed_levels(
+            "oi", store.recent_open_interest(minute - cfg.spike_window_min - 2)
+        )
 
     async def _health_loop(self) -> None:
         while True:
@@ -673,11 +726,54 @@ class LighterGateway:
     def recent_alerts(self) -> list[dict[str, Any]]:
         return self._alerts.recent()
 
-    def recent_alert_board(self) -> list[dict[str, Any]]:
-        return self._alerts.board()
-
     def alert_stats(self, hours: int = 24) -> dict[str, Any]:
-        return self._alerts.outcome_stats(hours=hours)
+        return self._alerts.stats(hours=hours)
+
+    def alert_opened(self, row_id: str) -> bool:
+        return self._alerts.opened(row_id)
+
+    def scan_activity(self) -> list[dict[str, Any]]:
+        return self._alerts.activity()
+
+    def funding_extremes(self) -> list[dict[str, Any]]:
+        return self._alerts.funding_extremes()
+
+    def tone_board(self) -> list[dict[str, Any]]:
+        """Liquid perps whose last closed bar on a Tone timeframe is blue or orange."""
+        rows: list[dict[str, Any]] = []
+        for hit in self._tone_book.board():
+            if not self._alerts.liquid(hit.market_index):
+                continue
+            meta = self._markets.get(hit.market_index)
+            step = TONE_TIMEFRAME_SECONDS[hit.resolution]
+            rows.append(
+                {
+                    "market_index": hit.market_index,
+                    "symbol": meta.symbol if meta is not None else f"M{hit.market_index}",
+                    "timeframe": hit.resolution,
+                    "tone": hit.label.lower(),
+                    "closed_at": (hit.bar_time + step) * 1000,
+                    "close": hit.close,
+                }
+            )
+        rows.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
+        return rows
+
+    def _held_markets(self) -> dict[int, Held]:
+        """Markets with a Position or a working order, for the alert rules."""
+        from mayedge.lighter.account import account_service
+
+        held: dict[int, Held] = {}
+        for order in account_service.list_open_orders():
+            held.setdefault(order.market_index, Held())
+        for pos in account_service.cached_summary().positions:
+            if to_float(pos.size) == 0:
+                continue
+            held[pos.market_index] = Held(
+                side=pos.side,
+                liquidation_price=to_float(pos.liquidation_price),
+            )
+        return held
 
     def _prune_trade_buffers(self, keep: int | None = None) -> None:
         keep_idx = keep if keep is not None else self._current_market_index
@@ -769,37 +865,7 @@ class LighterGateway:
             alerts.on_minute_bars(market_index, candles)
         book = getattr(self, "_tone_book", None)
         if book is not None and resolution in book.timeframes:
-            hits = book.observe(market_index, resolution, candles, now=time.time())
-            self._emit_tone_hits(hits)
-
-    def _emit_tone_hits(self, hits: list[ToneHit]) -> None:
-        if not hits:
-            return
-        alerts = getattr(self, "_alerts", None)
-        markets = getattr(self, "_markets", {})
-        if alerts is None:
-            return
-        events: list[ExploitEvent] = []
-        for hit in hits:
-            meta = markets.get(hit.market_index)
-            symbol = meta.symbol if meta is not None else f"M{hit.market_index}"
-            step = TONE_TIMEFRAME_SECONDS[hit.resolution]
-            events.append(
-                ExploitEvent(
-                    id=f"tone-{hit.market_index}-{hit.resolution}-{hit.bar_time}",
-                    ts=(hit.bar_time + step) * 1000,
-                    symbol=symbol,
-                    market_index=hit.market_index,
-                    kind="tone",
-                    severity=2,
-                    direction="up" if hit.tone == "ucru" else "down",
-                    value=hit.close,
-                    baseline=None,
-                    unit="px",
-                    note=f"{hit.resolution} {hit.label}",
-                )
-            )
-        alerts.emit_events(events)
+            book.observe(market_index, resolution, candles, now=time.time())
 
     def tone_channels(self) -> list[str]:
         labels = set(self._tone_book.timeframes)
@@ -822,6 +888,39 @@ class LighterGateway:
                 logger.exception("alert minute backfill failed")
             await asyncio.sleep(3600)
 
+    async def _funding_backfill_loop(self) -> None:
+        """Once a day, fill a year of settled funding for perps not yet backfilled: hours, then days."""
+        # Wait for live prints: the backfill checks the venue's rows against them.
+        await asyncio.sleep(300)
+        while True:
+            try:
+                perps = sorted(
+                    (m for m in self._markets.values() if m.is_perp),
+                    key=lambda m: to_float(m.volume_24h),
+                    reverse=True,
+                )
+                await backfill_funding(perps, self._fetch_fundings, now=time.time())
+                await backfill_funding_days(perps, self._fetch_fundings, now=time.time())
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("funding backfill failed")
+            await asyncio.sleep(86_400)
+
+    async def _fetch_fundings(
+        self, market_index: int, end_ms: int, count: int, resolution: str
+    ) -> list[dict[str, Any]]:
+        await budget.take("background", wait=True)
+        step_ms = 86_400_000 if resolution == "1d" else 3_600_000
+        resp = await lighter.CandlestickApi(self.client).fundings(
+            market_id=market_index,
+            resolution=resolution,
+            start_timestamp=max(0, end_ms - count * step_ms),
+            end_timestamp=end_ms,
+            count_back=count,
+        )
+        return [row.to_dict() for row in (getattr(resp, "fundings", None) or [])]
+
     async def _backfill_alert_minute_books(self) -> None:
         perps = sorted(
             (m for m in self._markets.values() if m.is_perp),
@@ -841,32 +940,25 @@ class LighterGateway:
                 continue
             self._alerts.seed_minute_bars(meta.market_index, candles)
 
-    async def _alert_board_loop(self) -> None:
+    async def _scan_loop(self) -> None:
+        """Push each Scan board when it has changed."""
         while True:
             try:
-                await asyncio.sleep(_BOARD_BROADCAST_S)
-                rows = self._alerts.board()
-                sig = str(
-                    [
-                        (
-                            r.get("market_index"),
-                            r.get("score"),
-                            r.get("setup"),
-                            r.get("direction"),
-                            r.get("move_pct"),
-                            r.get("breadth"),
-                        )
-                        for r in rows
-                    ]
-                )
-                if sig == self._last_board_sig:
-                    continue
-                self._last_board_sig = sig
-                self.broadcast({"type": "alert_board", "rows": rows})
+                await asyncio.sleep(_SCAN_BROADCAST_S)
+                for kind, rows in (
+                    ("scan_activity", self.scan_activity()),
+                    ("tone_board", self.tone_board()),
+                    ("funding_extremes", self.funding_extremes()),
+                ):
+                    sig = json.dumps(rows, sort_keys=True, default=str)
+                    if sig == self._last_scan.get(kind):
+                        continue
+                    self._last_scan[kind] = sig
+                    self.broadcast({"type": kind, "rows": rows})
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("alert board broadcast failed")
+                logger.exception("scan board broadcast failed")
 
     def _request_tone_fill(self, kind: str) -> None:
         if self._tone_fill != "full":
@@ -915,8 +1007,7 @@ class LighterGateway:
                 continue
             if generation != self._tone_generation:
                 return
-            hits = self._tone_book.seed(market_index, resolution, candles, now=time.time())
-            self._emit_tone_hits(hits)
+            self._tone_book.seed(market_index, resolution, candles, now=time.time())
 
 
 gateway = LighterGateway()

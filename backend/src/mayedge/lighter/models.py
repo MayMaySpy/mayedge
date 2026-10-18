@@ -58,6 +58,7 @@ class MarketMeta:
     mid_price: float | None = None
     premium: float | None = None
     funding_timestamp: int | None = None
+    settled_funding_rate: float | None = None  # the 1h print paid at funding_timestamp
     daily_price_high: float | None = None
     daily_price_low: float | None = None
 

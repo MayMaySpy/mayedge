@@ -282,7 +282,7 @@ class LiquidationSummaryTests(unittest.TestCase):
             version = store._meta_int(conn, "schema_version")
         self.assertEqual(sides[1], "sell")
         self.assertEqual(sides[2], "buy")
-        self.assertEqual(version, 7)
+        self.assertEqual(version, store.SCHEMA_VERSION)
 
         with store._lock:
             conn = store._connect()

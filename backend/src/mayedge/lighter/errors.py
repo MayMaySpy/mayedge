@@ -60,3 +60,36 @@ def http_block(status: int, body: str) -> tuple[int, str] | None:
     if status == 429:
         return 429, RATE_MSG
     return venue_client_error(f"({status}) {body}")
+
+
+_DOWN_HTTP = frozenset({502, 503, 504})
+# 1012 service restart, 1013 try again later: Lighter is going away, not us.
+_DOWN_CLOSE = {1012: "service restart", 1013: "try again later"}
+
+
+def venue_down_reason(err: BaseException | None) -> str | None:
+    """Short reason when ``err`` says Lighter itself is offline (maintenance, restart).
+
+    Looks through exception groups and chained causes, since sockets fail inside TaskGroups.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [err] if err is not None else []
+    while stack:
+        e = stack.pop()
+        if id(e) in seen:
+            continue
+        seen.add(id(e))
+        response = getattr(e, "response", None)
+        status = getattr(response, "status_code", None) or getattr(e, "status", None)
+        if isinstance(status, int) and status in _DOWN_HTTP:
+            return f"HTTP {status}"
+        rcvd = getattr(e, "rcvd", None)
+        code = getattr(rcvd, "code", None)
+        if isinstance(code, int) and code in _DOWN_CLOSE:
+            return f"{code} {_DOWN_CLOSE[code]}"
+        if isinstance(e, BaseExceptionGroup):
+            stack.extend(e.exceptions)
+        for nxt in (e.__cause__, e.__context__):
+            if nxt is not None:
+                stack.append(nxt)
+    return None

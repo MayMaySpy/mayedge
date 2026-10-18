@@ -8,6 +8,7 @@ from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Any, Literal
 
 from mayedge.algos.planner.config import DEFAULT_SLIPPAGE, MAX_SLIPPAGE, MAX_TARGETS
+from mayedge.algos.trail import engine
 from mayedge.numbers import fmt_decimal, parse_decimal
 
 ALGO_ID = "planner"
@@ -15,11 +16,17 @@ ALGO_VERSION = "1"
 
 Side = Literal["buy", "sell"]
 Mode = Literal["enter", "attach"]
-EntryType = Literal["market", "limit"]
+EntryType = Literal["market", "limit", "trail"]
 TargetKind = Literal["price", "r"]
 StopSteps = Literal["off", "breakeven", "ladder"]
-# P9: a resting reduce-only limit, or a Take Profit Limit that waits off the book.
-TargetOrder = Literal["limit", "trigger"]
+# P9: a resting reduce-only limit, a Take Profit Limit that waits off the book, or a Trail.
+TargetOrder = Literal["limit", "trigger", "trail"]
+Reference = Literal["mark", "last"]
+# A Trail target or Trail stop distance: R multiples or % of the best price.
+TrailUnit = Literal["r", "pct"]
+TrailStopStart = Literal["target", "last", "r"]
+# Two ticks at least (trail-rules S3).
+MIN_TRAIL_TICKS = 2
 
 HUNDRED = Decimal("100")
 BPS = Decimal("10000")
@@ -37,20 +44,37 @@ class PlanRefused(ValueError):
         return {"rule": self.rule, "message": self.message}
 
 
+def _trail_distance(raw: Any, rule: str) -> Decimal:
+    try:
+        d = parse_decimal(str(raw or ""))
+    except ValueError:
+        raise PlanRefused(rule, "Set the trail distance") from None
+    if d <= 0:
+        raise PlanRefused(rule, "The trail distance must be above 0")
+    return d
+
+
 @dataclass(frozen=True)
 class Target:
     kind: TargetKind
     value: Decimal
     pct: Decimal
     order: TargetOrder = "limit"
+    # P9 Trail: how far behind the best price it follows once its price is reached.
+    trail_distance: Decimal | None = None
+    trail_unit: TrailUnit = "r"
 
     def to_json(self) -> dict[str, str]:
-        return {
+        out = {
             "kind": self.kind,
             "value": fmt_decimal(self.value) or "0",
             "pct": fmt_decimal(self.pct) or "0",
             "order": self.order,
         }
+        if self.order == "trail":
+            out["trail_distance"] = fmt_decimal(self.trail_distance) or "0"
+            out["trail_unit"] = self.trail_unit
+        return out
 
     @classmethod
     def from_json(cls, raw: Any) -> Target:
@@ -66,9 +90,97 @@ class Target:
             raise PlanRefused("P5", "Each target needs a price or R and a %") from None
         # P9: saved before the choice, every target was a Trigger.
         order = raw.get("order") or "trigger"
-        if order not in ("limit", "trigger"):
-            raise PlanRefused("P9", "A target is a Limit or a Trigger")
-        return cls(kind=kind, value=value, pct=pct, order=order)
+        if order not in ("limit", "trigger", "trail"):
+            raise PlanRefused("P9", "A target is a Limit, a Trigger or a Trail")
+        if order != "trail":
+            return cls(kind=kind, value=value, pct=pct, order=order)
+        unit = raw.get("trail_unit") or "r"
+        if unit not in ("r", "pct"):
+            raise PlanRefused("P9", "A Trail target's distance is in R or %")
+        return cls(
+            kind=kind,
+            value=value,
+            pct=pct,
+            order="trail",
+            trail_distance=_trail_distance(raw.get("trail_distance"), "P9"),
+            trail_unit=unit,
+        )
+
+
+@dataclass(frozen=True)
+class EntryTrail:
+    """E9: a Trail entry follows the best price from its Activation."""
+
+    distance: Decimal
+    distance_kind: engine.DistanceKind = "pct"
+    activation: Decimal | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "distance": fmt_decimal(self.distance) or "0",
+            "distance_kind": self.distance_kind,
+            "activation": fmt_decimal(self.activation),
+        }
+
+    @classmethod
+    def from_json(cls, raw: Any) -> EntryTrail:
+        if not isinstance(raw, dict):
+            raise PlanRefused("E9", "Set the Trail entry's distance")
+        kind = raw.get("distance_kind") or "pct"
+        if kind not in ("pct", "price"):
+            raise ValueError("entry_trail.distance_kind must be pct or price")
+        return cls(
+            distance=_trail_distance(raw.get("distance"), "E9"),
+            distance_kind=kind,
+            activation=_opt_decimal(raw.get("activation")),
+        )
+
+
+@dataclass(frozen=True)
+class TrailStop:
+    """M10: when the stop starts to trail, and how far behind the best price."""
+
+    start: TrailStopStart
+    distance: Decimal
+    unit: TrailUnit = "r"
+    # The target number for start "target".
+    after: int = 1
+    # The R multiple for start "r".
+    at_r: Decimal | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "start": self.start,
+            "distance": fmt_decimal(self.distance) or "0",
+            "unit": self.unit,
+            "after": self.after,
+            "at_r": fmt_decimal(self.at_r),
+        }
+
+    @classmethod
+    def from_json(cls, raw: Any) -> TrailStop | None:
+        if not isinstance(raw, dict) or raw.get("start") in (None, "", "off"):
+            return None
+        start = raw.get("start")
+        if start not in ("target", "last", "r"):
+            raise ValueError("trail_stop.start must be off, target, last or r")
+        unit = raw.get("unit") or "r"
+        if unit not in ("r", "pct"):
+            raise ValueError("trail_stop.unit must be r or pct")
+        at_r = _opt_decimal(raw.get("at_r"))
+        if start == "r" and (at_r is None or at_r <= 0):
+            raise PlanRefused("M10", "Set the R multiple the stop starts trailing at")
+        try:
+            after = int(raw.get("after") or 1)
+        except (TypeError, ValueError):
+            after = 1
+        return cls(
+            start=start,
+            distance=_trail_distance(raw.get("distance"), "M10"),
+            unit=unit,
+            after=max(1, after),
+            at_r=at_r,
+        )
 
 
 @dataclass
@@ -84,9 +196,15 @@ class PlannerParams:
     stop_steps: StopSteps = "breakeven"
     expiry_min: int | None = None
     slippage: float = DEFAULT_SLIPPAGE
+    entry_trail: EntryTrail | None = None
+    trail_stop: TrailStop | None = None
+    reference: Reference = "mark"
 
     def to_json(self) -> dict[str, Any]:
         return {
+            "entry_trail": self.entry_trail.to_json() if self.entry_trail else None,
+            "trail_stop": self.trail_stop.to_json() if self.trail_stop else None,
+            "reference": self.reference,
             "mode": self.mode,
             "side": self.side,
             "stop": fmt_decimal(self.stop) or "0",
@@ -110,8 +228,11 @@ class PlannerParams:
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
         entry_type = raw.get("entry_type") or "limit"
-        if entry_type not in ("market", "limit"):
-            raise ValueError("entry_type must be market or limit")
+        if entry_type not in ("market", "limit", "trail"):
+            raise ValueError("entry_type must be market, limit or trail")
+        reference = raw.get("reference") or "mark"
+        if reference not in ("mark", "last"):
+            raise ValueError("reference must be mark or last")
         try:
             stop = parse_decimal(str(raw.get("stop") or ""))
         except ValueError:
@@ -132,6 +253,17 @@ class PlannerParams:
             stop_steps=_stop_steps(raw),
             expiry_min=int(expiry) if expiry not in (None, "", 0, "0") else None,
             slippage=_clamp_slippage(raw.get("slippage")),
+            entry_trail=EntryTrail.from_json(raw.get("entry_trail")) if entry_type == "trail" else None,
+            trail_stop=TrailStop.from_json(raw.get("trail_stop")),
+            reference=reference,
+        )
+
+    def trails(self) -> bool:
+        """Any part of this plan follows the price (F9: Last needs the Market's prints)."""
+        return (
+            self.entry_type == "trail"
+            or self.trail_stop is not None
+            or any(t.order == "trail" for t in self.targets)
         )
 
 
@@ -159,6 +291,9 @@ class PlannedTarget:
     r: Decimal
     move_pct: Decimal
     order: TargetOrder = "trigger"
+    # A Trail target's distance, in price ("price") or % of the best price ("pct").
+    trail_distance: Decimal | None = None
+    trail_kind: engine.DistanceKind = "price"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -169,6 +304,8 @@ class PlannedTarget:
             "r": fmt_decimal(self.r) or "0",
             "move_pct": fmt_decimal(self.move_pct) or "0",
             "order": self.order,
+            "trail_distance": fmt_decimal(self.trail_distance),
+            "trail_kind": self.trail_kind,
         }
 
     @classmethod
@@ -180,7 +317,9 @@ class PlannedTarget:
             pct=Decimal(str(raw["pct"])),
             r=Decimal(str(raw.get("r") or "0")),
             move_pct=Decimal(str(raw.get("move_pct") or "0")),
-            order="limit" if raw.get("order") == "limit" else "trigger",
+            order=raw["order"] if raw.get("order") in ("limit", "trail") else "trigger",
+            trail_distance=_opt_decimal(raw.get("trail_distance")),
+            trail_kind="pct" if raw.get("trail_kind") == "pct" else "price",
         )
 
 
@@ -326,14 +465,61 @@ def entry_price(params: PlannerParams, ctx: MarketContext) -> Decimal:
         if ctx.mark <= 0:
             raise PlanRefused("S1", "No mark to price a Market entry")
         return ctx.mark
+    if params.entry_type == "trail":
+        return trail_entry_now(params, ctx)
     if params.entry_price is None or params.entry_price <= 0:
         raise PlanRefused("S1", "Set the Limit entry price")
     # A buy rests at or below what was typed, a sell at or above.
     return round_price(params.entry_price, ctx.tick, up=params.side == "sell")
 
 
-def _check_targets_shape(targets: list[Target]) -> None:
+def entry_follow(params: PlannerParams, tick: Decimal) -> engine.Follow:
+    """E9: what a Trail entry follows. A buy follows the low, a sell the high."""
+    et = params.entry_trail
+    if et is None:
+        raise PlanRefused("E9", "Set the Trail entry's distance")
+    return engine.Follow(
+        side=params.side,
+        distance=et.distance,
+        distance_kind=et.distance_kind,
+        tick=tick,
+        activation=et.activation,
+    )
+
+
+def trail_entry_now(params: PlannerParams, ctx: MarketContext) -> Decimal:
+    """P1 for a Trail entry: where it would fire if the best price were its start now."""
+    if ctx.mark <= 0:
+        raise PlanRefused("S1", "No mark to price a Trail entry")
+    f = entry_follow(params, ctx.tick)
+    _check_trail_ticks(f.distance, f.distance_kind, ctx, "E9")
+    if f.activation is not None:
+        if f.activation <= 0:
+            raise PlanRefused("E9", "The Activation must be above 0")
+        if engine.reached(f, ctx.mark, f.activation):
+            raise PlanRefused("E9", "Mark is already past the Activation")
+    return engine.trigger_at(f, f.activation if f.activation is not None else ctx.mark)
+
+
+def _check_trail_ticks(distance: Decimal, kind: str, ctx: MarketContext, rule: str) -> None:
+    at = ctx.mark * distance / HUNDRED if kind == "pct" else distance
+    if kind == "pct" and distance >= HUNDRED:
+        raise PlanRefused(rule, "The trail distance must be under 100%")
+    if ctx.tick > 0 and ctx.mark > 0 and at < ctx.tick * MIN_TRAIL_TICKS:
+        raise PlanRefused(rule, f"The trail distance is under {MIN_TRAIL_TICKS} ticks")
+
+
+def trail_price_distance(unit: TrailUnit, distance: Decimal, r: Decimal) -> tuple[Decimal, engine.DistanceKind]:
+    """An R distance becomes a price; a % stays a % of the best price."""
+    if unit == "r":
+        return distance * r, "price"
+    return distance, "pct"
+
+
+def _check_targets_shape(targets: list[Target], *, trail_stop: bool = False) -> None:
     if not targets:
+        if trail_stop:
+            return  # P5: all Runner, on a trailing stop
         raise PlanRefused("P5", "Add at least one target")
     if len(targets) > MAX_TARGETS:
         raise PlanRefused("P5", f"At most {MAX_TARGETS} targets")
@@ -354,6 +540,8 @@ class _Leg:
     pct: Decimal
     order: TargetOrder
     qty: Decimal = Decimal("0")
+    trail_distance: Decimal | None = None
+    trail_unit: TrailUnit = "r"
 
 
 def _target_prices(
@@ -365,7 +553,15 @@ def _target_prices(
     for t in targets:
         raw = entry + sign * r * t.value if t.kind == "r" else t.value
         # Targets round toward entry.
-        out.append(_Leg(round_price(raw, tick, up=side == "sell"), t.pct, t.order))
+        out.append(
+            _Leg(
+                round_price(raw, tick, up=side == "sell"),
+                t.pct,
+                t.order,
+                trail_distance=t.trail_distance,
+                trail_unit=t.trail_unit,
+            )
+        )
     out.sort(key=lambda leg: leg.price * sign)
     return out
 
@@ -380,6 +576,8 @@ def _size_targets(
     """Each target's size. P5 Runner, P6 rounding, P7 merges."""
     legs = list(priced)
     warnings: list[str] = []
+    if not legs:
+        return [], warnings
     while legs:
         total_pct = sum((leg.pct for leg in legs), Decimal("0"))
         closing = round_qty(size * total_pct / HUNDRED, qty_step)
@@ -421,9 +619,10 @@ def price_plan(
     ctx: MarketContext,
     risk_pct: Decimal | None = None,
     stop_steps: StopSteps = "breakeven",
+    trail_stop: TrailStop | None = None,
 ) -> Plan:
     """Draw a plan at a known entry and size. The job calls this again after the fill."""
-    _check_targets_shape(targets)
+    _check_targets_shape(targets, trail_stop=trail_stop is not None)
     stop = stop_price(side, stop, ctx.tick)
     sign = _sign(side)
     if (entry - stop) * sign <= 0:
@@ -438,18 +637,7 @@ def price_plan(
     sized, warnings = _size_targets(
         priced, size=size, qty_step=ctx.qty_step, min_qty=ctx.min_qty
     )
-    planned = tuple(
-        PlannedTarget(
-            index=i + 1,
-            price=leg.price,
-            qty=leg.qty,
-            pct=leg.pct,
-            r=(abs(leg.price - entry) / r) if r > 0 else Decimal("0"),
-            move_pct=_move_pct(side, entry, leg.price),
-            order=leg.order,
-        )
-        for i, leg in enumerate(sized)
-    )
+    planned = tuple(_planned_target(i + 1, leg, side=side, entry=entry, r=r, ctx=ctx) for i, leg in enumerate(sized))
     closing = sum((t.qty for t in planned), Decimal("0"))
     be = breakeven_price(side, entry, taker_bps=ctx.taker_bps, tick=ctx.tick)
     steps = plan_steps(stop_steps, planned, size=size, breakeven=be)
@@ -472,6 +660,27 @@ def price_plan(
         stop_pct=_move_pct(side, entry, stop),
         warnings=tuple(warnings),
         steps=steps,
+    )
+
+
+def _planned_target(
+    index: int, leg: _Leg, *, side: Side, entry: Decimal, r: Decimal, ctx: MarketContext
+) -> PlannedTarget:
+    distance: Decimal | None = None
+    kind: engine.DistanceKind = "price"
+    if leg.order == "trail" and leg.trail_distance is not None:
+        distance, kind = trail_price_distance(leg.trail_unit, leg.trail_distance, r)
+        _check_trail_ticks(distance, kind, ctx, "P9")
+    return PlannedTarget(
+        index=index,
+        price=leg.price,
+        qty=leg.qty,
+        pct=leg.pct,
+        r=(abs(leg.price - entry) / r) if r > 0 else Decimal("0"),
+        move_pct=_move_pct(side, entry, leg.price),
+        order=leg.order,
+        trail_distance=distance,
+        trail_kind=kind,
     )
 
 
@@ -501,7 +710,7 @@ def plan_steps(
     return tuple(out)
 
 
-def _plan_size(params: PlannerParams, ctx: MarketContext, *, entry: Decimal, stop: Decimal) -> Decimal:
+def plan_size(params: PlannerParams, ctx: MarketContext, *, entry: Decimal, stop: Decimal) -> Decimal:
     if params.mode == "attach":
         return abs(ctx.position_size)
     if params.size is not None and params.risk_pct is not None:
@@ -544,7 +753,11 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
     if (entry - stop) * sign <= 0:
         raise PlanRefused("S1", "The stop must be on the losing side of entry")
     check_stop_live(params.side, stop, ctx)
-    size = _plan_size(params, ctx, entry=entry, stop=stop)
+    et = params.entry_trail
+    act = et.activation if params.entry_type == "trail" and et is not None else None
+    if act is not None and (act - stop) * sign <= 0:
+        raise PlanRefused("E9", "The Activation is past the stop")
+    size = plan_size(params, ctx, entry=entry, stop=stop)
     plan = price_plan(
         side=params.side,
         entry=entry,
@@ -554,9 +767,21 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
         ctx=ctx,
         risk_pct=params.risk_pct,
         stop_steps=params.stop_steps,
+        trail_stop=params.trail_stop,
     )
     check_targets_live(plan, ctx)
+    check_trail_stop(params.trail_stop, plan, ctx)
     return plan
+
+
+def check_trail_stop(ts: TrailStop | None, plan: Plan, ctx: MarketContext) -> None:
+    """M10 at start: a distance of two ticks or more, and a start the plan has."""
+    if ts is None:
+        return
+    distance, kind = trail_price_distance(ts.unit, ts.distance, plan.r)
+    _check_trail_ticks(distance, kind, ctx, "M10")
+    if ts.start == "target" and ts.after > len(plan.targets):
+        raise PlanRefused("M10", f"There is no target {ts.after} to start trailing after")
 
 
 def check_stop_live(side: Side, stop: Decimal, ctx: MarketContext) -> None:

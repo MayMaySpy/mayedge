@@ -2,10 +2,17 @@ import { chaseGridPlugin } from "./chaseGridPlugin";
 import { chaseIcebergPlugin } from "./chaseIcebergPlugin";
 import { ladderPlugin } from "./ladderPlugin";
 import { plannerBand } from "./plannerBand";
+import { trailPlugin } from "./trailPlugin";
 import { twapPlugin } from "./twapPlugin";
 import { coiInBand, type AlgoBandEntry, type AlgoCoiBand, type AlgoPlugin } from "./types";
 
-export const ALGO_PLUGINS = [twapPlugin, chaseIcebergPlugin, chaseGridPlugin, ladderPlugin] as const;
+export const ALGO_PLUGINS = [
+  twapPlugin,
+  chaseIcebergPlugin,
+  chaseGridPlugin,
+  ladderPlugin,
+  trailPlugin,
+] as const;
 
 const COI_PLUGINS: readonly AlgoBandEntry[] = [...ALGO_PLUGINS, plannerBand];
 
@@ -27,6 +34,7 @@ export {
 export { GRID_COI_BASE, GRID_COI_END, chaseGridPlugin } from "./chaseGridPlugin";
 export { LADDER_COI_BASE, LADDER_COI_END, ladderPlugin } from "./ladderPlugin";
 export { PLANNER_COI_BASE, PLANNER_COI_END, plannerBand } from "./plannerBand";
+export { TRAIL_COI_BASE, TRAIL_COI_END, trailPlugin } from "./trailPlugin";
 export { TWAP_COI_BASE, TWAP_COI_END, twapPlugin } from "./twapPlugin";
 
 export function algoPluginById(id: string): AlgoPlugin | undefined {

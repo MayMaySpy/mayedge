@@ -1,10 +1,9 @@
-"""Rolling baselines for relative alert factors."""
+"""Rolling baselines: the hour a spike is judged against, and the day a level is judged against."""
 
 from __future__ import annotations
 
-import math
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -21,12 +20,22 @@ def _median(values: list[float]) -> float:
     return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
+_MAD_TO_SIGMA = 1.4826
+_P90_TO_SIGMA = 1.645
+
+
 def robust_sigma(values: list[float], center: float, floor: float) -> float:
-    """1.4826 × MAD, never below ``floor``. Flat series score against the floor, not zero."""
+    """1.4826 × MAD or the 90th-percentile deviation over 1.645, whichever is larger.
+
+    Never below ``floor``. Both are sigma on a normal series. A tape that sits still
+    most minutes has a MAD of zero; the percentile still sees the moves that do print.
+    """
     if not values:
         return floor
-    mad = _median([abs(v - center) for v in values])
-    return max(1.4826 * mad, floor)
+    devs = sorted(abs(v - center) for v in values)
+    mad = _median(devs)
+    p90 = devs[min(len(devs) - 1, int(0.9 * len(devs)))]
+    return max(_MAD_TO_SIGMA * mad, p90 / _P90_TO_SIGMA, floor)
 
 
 def z_score(value: float, center: float, sigma: float) -> float:
@@ -43,23 +52,23 @@ class MinuteMetrics:
     rvol_5m: float
     vol_quote_1m: float
     vol_quote_5m: float
-    sigma_1m_pct: float
-    move_5m_pct: float | None = None
+
+
+@dataclass
+class HourBase:
+    """K1: the biggest closed minute of the hour, and the minute being judged."""
+
+    max_volume_usd: float
+    max_move_pct: float
+    forming_volume_usd: float
 
 
 class MinuteBook:
-    """Per-market 1m candles for volume multiples and return volatility."""
+    """Per-market 1m candles: volume multiples, and the bars an alert row is measured on."""
 
-    def __init__(
-        self,
-        *,
-        max_bars: int = 240,
-        min_bars: int = 30,
-        sigma_floor_pct: float = 0.05,
-    ) -> None:
+    def __init__(self, *, max_bars: int = 240, min_bars: int = 30) -> None:
         self._max_bars = max_bars
         self._min_bars = min_bars
-        self._sigma_floor_pct = sigma_floor_pct
         self._bars: dict[int, deque[Candle]] = {}
         self._seeded: set[int] = set()
 
@@ -116,16 +125,6 @@ class MinuteBook:
         tail5 = bars[-5:]
         vol_5m = sum(self._quote_vol(b) for b in tail5)
         expected_5m = baseline * len(tail5)
-
-        rets = [
-            (cur.close - prev.close) / prev.close * 100.0
-            for prev, cur in pairwise(closed)
-            if prev.close > 0 and cur.close > 0
-        ]
-        sigma = robust_sigma(rets, _median(rets), self._sigma_floor_pct)
-        move_5m: float | None = None
-        if len(bars) >= 6 and bars[-6].close > 0 and bars[-1].close > 0:
-            move_5m = (bars[-1].close - bars[-6].close) / bars[-6].close * 100.0
         return MinuteMetrics(
             bar_count=len(bars),
             baseline_vol_quote=baseline,
@@ -133,173 +132,84 @@ class MinuteBook:
             rvol_5m=vol_5m / expected_5m if expected_5m > 0 else 0.0,
             vol_quote_1m=vol_1m,
             vol_quote_5m=vol_5m,
-            sigma_1m_pct=sigma,
-            move_5m_pct=move_5m,
         )
 
-    def closed_return_map(self, market_index: int) -> dict[int, float]:
-        """Close-to-close percent returns of closed bars, keyed by bar open time.
 
-        The newest bar is treated as still forming and dropped.
-        """
-        bars = self.bars(market_index)
-        if len(bars) < 3:
-            return {}
-        out: dict[int, float] = {}
-        for prev, cur in pairwise(bars[:-1]):
-            if prev.close <= 0 or cur.close <= 0:
+    def hour(self, market_index: int, *, now: float, window_min: int = 60) -> HourBase | None:
+        """K1, K6. None until the book reaches a full window back."""
+        dq = self._bars.get(market_index)
+        if not dq:
+            return None
+        bars = list(dq)
+        minute = int(now // 60) * 60
+        start = minute - window_min * 60
+        if bars[0].time > start:
+            return None
+        max_volume = 0.0
+        max_move = 0.0
+        forming = 0.0
+        for i, bar in enumerate(bars):
+            if bar.time < start:
                 continue
-            out[cur.time] = (cur.close - prev.close) / prev.close * 100.0
-        return out
-
-    def broad_returns(self, *, min_markets: int) -> dict[int, float]:
-        """Median 1m return across markets, for minutes with enough names."""
-        bucket: dict[int, list[float]] = {}
-        for market_index in self._bars:
-            for minute, ret in self.closed_return_map(market_index).items():
-                bucket.setdefault(minute, []).append(ret)
-        return {
-            minute: _median(vals) for minute, vals in bucket.items() if len(vals) >= min_markets
-        }
-
-
-@dataclass
-class LevelSample:
-    ts_min: int
-    premium: float
-    disloc_bps: float | None
-    funding: float
-    oi: float
+            if bar.time >= minute:
+                if bar.time == minute:
+                    forming = self._quote_vol(bar)
+                continue
+            max_volume = max(max_volume, self._quote_vol(bar))
+            prev = bars[i - 1] if i else None
+            if prev is not None and prev.close > 0 and bar.close > 0:
+                max_move = max(max_move, abs(bar.close - prev.close) / prev.close * 100.0)
+        return HourBase(max_volume, max_move, forming)
 
 
 class LevelBook:
-    """One sample per minute. Level factors stay silent until ``min_samples`` minutes exist."""
+    """One sample a minute for each named series of a market: premium, funding, open interest."""
 
     def __init__(self, *, window_min: int = 1440, min_samples: int = 30) -> None:
         self._window = window_min
         self._min_samples = min_samples
-        self._samples: dict[int, deque[LevelSample]] = {}
+        self._series: dict[tuple[int, str], deque[tuple[int, float]]] = {}
 
-    def samples(self, market_index: int) -> int:
-        return len(self._samples.get(market_index, ()))
+    def samples(self, market_index: int, name: str) -> int:
+        return len(self._series.get((market_index, name), ()))
 
-    def observe(
-        self,
-        market_index: int,
-        *,
-        ts: float,
-        premium: float,
-        disloc_bps: float | None,
-        funding: float,
-        oi: float,
-    ) -> None:
+    def observe(self, market_index: int, name: str, *, ts: float, value: float) -> None:
         minute = int(ts // 60)
-        sample = LevelSample(minute, premium, disloc_bps, funding, oi)
-        dq = self._samples.setdefault(market_index, deque(maxlen=self._window))
-        if dq and dq[-1].ts_min == minute:
-            dq[-1] = sample
-        else:
-            dq.append(sample)
+        dq = self._series.setdefault((market_index, name), deque(maxlen=self._window))
+        if dq and dq[-1][0] == minute:
+            dq[-1] = (minute, value)
+        elif not dq or minute > dq[-1][0]:
+            dq.append((minute, value))
 
-    def z_premium(self, market_index: int, premium: float, *, floor: float) -> float | None:
-        return self._z(market_index, premium, lambda s: s.premium, floor)
+    def seed(self, market_index: int, name: str, samples: Iterable[tuple[int, float]]) -> None:
+        """Stored minutes, from before this run. A minute already seen live keeps its live value."""
+        by_minute = dict(samples)
+        by_minute.update(self._series.get((market_index, name), ()))
+        ordered = sorted(by_minute.items())[-self._window :]
+        self._series[(market_index, name)] = deque(ordered, maxlen=self._window)
 
-    def z_disloc(self, market_index: int, disloc_bps: float, *, floor: float) -> float | None:
-        return self._z(market_index, disloc_bps, lambda s: s.disloc_bps, floor)
-
-    def z_funding(self, market_index: int, funding: float, *, floor: float) -> float | None:
-        return self._z(market_index, funding, lambda s: s.funding, floor)
-
-    def z_oi_change_pct(
-        self, market_index: int, oi_change_pct: float, *, lag: int = 5, floor: float
-    ) -> float | None:
-        """Score a ``lag``-minute OI change against this market's own ``lag``-minute changes."""
-        series = list(self._samples.get(market_index, ()))
-        if len(series) < self._min_samples:
-            return None
-        changes = [
-            (cur.oi - prev.oi) / prev.oi * 100.0
-            for prev, cur in zip(series, series[lag:], strict=False)
-            if prev.oi > 0 and cur.oi > 0
-        ]
-        if len(changes) < self._min_samples // 2:
-            return None
-        center = _median(changes)
-        return z_score(oi_change_pct, center, robust_sigma(changes, center, floor))
-
-    def _z(
-        self,
-        market_index: int,
-        value: float,
-        pick: Callable[[LevelSample], float | None],
-        floor: float,
-    ) -> float | None:
-        series = self._samples.get(market_index)
+    def z(self, market_index: int, name: str, value: float, *, floor: float) -> float | None:
+        """Sigmas from this series' own median. None until ``min_samples`` minutes exist."""
+        series = self._series.get((market_index, name))
         if not series or len(series) < self._min_samples:
             return None
-        values = [v for v in (pick(s) for s in series) if v is not None]
-        if len(values) < self._min_samples:
-            return None
+        values = [v for _minute, v in series]
         center = _median(values)
         return z_score(value, center, robust_sigma(values, center, floor))
 
+    def changes(
+        self, market_index: int, name: str, *, now: float, window_min: int
+    ) -> list[float] | None:
+        """K1: minute-to-minute changes over the last window, the current minute left out.
 
-def rvol_score(rvol: float) -> float:
-    if rvol <= 1.0:
-        return 0.0
-    return 2.0 * math.log2(rvol)
-
-
-def market_beta(
-    market: dict[int, float],
-    broad: dict[int, float],
-    *,
-    min_samples: int,
-    beta_max: float,
-) -> float:
-    """``cov / var`` of aligned 1m returns, clipped to ``[0, beta_max]``.
-
-    Too few overlapping minutes, or a flat Broad series, scores as 0: the
-    market is treated as moving on its own.
-    """
-    xs: list[float] = []
-    ys: list[float] = []
-    for minute, y in market.items():
-        x = broad.get(minute)
-        if x is None:
-            continue
-        xs.append(x)
-        ys.append(y)
-    if len(xs) < min_samples:
-        return 0.0
-    mean_x = sum(xs) / len(xs)
-    var = sum((x - mean_x) ** 2 for x in xs)
-    if var <= 1e-18:
-        return 0.0
-    mean_y = sum(ys) / len(ys)
-    cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True))
-    return min(beta_max, max(0.0, cov / var))
-
-
-def noise_sigma(
-    values: list[float],
-    *,
-    recent_bars: int,
-    exclude_recent: int,
-    floor: float,
-) -> float:
-    """The larger of the full-window robust sigma and the recent RMS.
-
-    The newest ``exclude_recent`` points are left out of the RMS so the move
-    being scored does not widen its own baseline.
-    """
-    if len(values) < 5:
-        return floor
-    robust = robust_sigma(values, _median(values), floor)
-    if len(values) <= exclude_recent + 5:
-        return robust
-    window = values[: len(values) - exclude_recent][-recent_bars:]
-    if len(window) < 5:
-        return robust
-    rms = math.sqrt(sum(v * v for v in window) / len(window))
-    return max(robust, rms)
+        None until the series reaches a full window back.
+        """
+        series = self._series.get((market_index, name))
+        if not series:
+            return None
+        minute = int(now // 60)
+        start = minute - window_min
+        if series[0][0] > start:
+            return None
+        closed = [(m, v) for m, v in series if start - 1 <= m < minute]
+        return [abs(cur[1] - prev[1]) for prev, cur in pairwise(closed)]

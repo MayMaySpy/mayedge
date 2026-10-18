@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +18,7 @@ from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
 from mayedge.algos.planner.job import PlannerRunner
 from mayedge.algos.planner.plan import ALGO_ID, PlannerParams, PlanRefused, build_plan
+from mayedge.algos.trail.config import MARKET_AMENDS_PER_MIN
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,10 @@ class PlannerBook:
         coi_base: int = PLANNER_COI_BASE,
         coi_end: int = PLANNER_COI_END,
         market_conflict: MarketConflictFn | None = None,
+        watch_prints: Callable[[int, bool], None] | None = None,
     ) -> None:
+        self._watch_prints = watch_prints
+        self._amends: dict[int, deque[int]] = {}
         self._execution_fn = execution
         self._broadcast_fn = broadcast
         self._coi_base = coi_base
@@ -46,6 +51,33 @@ class PlannerBook:
 
     def set_market_conflict(self, fn: MarketConflictFn) -> None:
         self._market_conflict = fn
+
+    def set_watch_prints(self, fn: Callable[[int, bool], None]) -> None:
+        self._watch_prints = fn
+
+    def take_amend(self, market_index: int, now_ms: int) -> bool:
+        """Trail F7: a Planner's trailing parts share one Amend budget a minute."""
+        sent = self._amends.setdefault(market_index, deque())
+        while sent and now_ms - sent[0] >= 60_000:
+            sent.popleft()
+        if len(sent) >= MARKET_AMENDS_PER_MIN:
+            return False
+        sent.append(now_ms)
+        return True
+
+    def _sync_watch(self, market_index: int) -> None:
+        """Trail F9: keep a Market's prints while a plan there trails on Last."""
+        if self._watch_prints is None:
+            return
+        want = any(
+            j.state.params is not None
+            and j.state.params.reference == "last"
+            and j.state.params.trails()
+            and j.state.status in ACTIVE_STATUSES
+            for j in self._jobs.values()
+            if j.state.market_index == market_index
+        )
+        self._watch_prints(market_index, want)
 
     @property
     def algo_type(self) -> str:
@@ -125,6 +157,7 @@ class PlannerBook:
             self._archive = [a for a in self._archive if a.get("algo_id") != algo_id]
             self._archive.insert(0, job.snapshot())
             self._archive = self._archive[:HISTORY_CAP]
+        self._sync_watch(job.state.market_index)
         self.publish()
 
     def on_gateway(self, msg: AlgoPayload) -> None:
@@ -185,6 +218,7 @@ class PlannerBook:
         except Exception:
             _ = self._jobs.pop(algo_id, None)
             raise
+        self._sync_watch(market_index)
         self.publish()
 
     async def replan_from_body(self, body: dict[str, Any]) -> None:
@@ -193,6 +227,7 @@ class PlannerBook:
         if job is None:
             raise ValueError(f"unknown algo_id {algo_id}")
         await job.replan(PlannerParams.from_json(body))
+        self._sync_watch(job.state.market_index)
 
     # ── lifecycle ────────────────────────────────────────────────────────
 
@@ -282,6 +317,7 @@ class PlannerBook:
             restored.append(job)
         await self._wait_feeds_ready()
         for job in restored:
+            self._sync_watch(job.state.market_index)
             try:
                 await job.resume()
             except Exception:

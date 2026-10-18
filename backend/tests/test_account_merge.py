@@ -341,6 +341,24 @@ class DeskAccountPositionsTests(TestCase):
         self.assertEqual(set(by_mi), {1})
         self.assertEqual(by_mi[1]["size"], "0.5")
 
+    def test_update_without_funding_keeps_the_paid_total(self) -> None:
+        first = _lighter_position(1, "BTC", "1")
+        first["total_funding_paid_out"] = "-1.25"
+        self._feed_positions({1: first}, snapshot=True)
+        self._feed_positions({1: _lighter_position(1, "BTC", "1.5")}, snapshot=False)
+        by_mi = self._desk_positions()
+        self.assertEqual(by_mi[1]["size"], "1.5")
+        self.assertEqual(by_mi[1]["funding_paid"], "-1.25")
+
+    def test_explicit_zero_funding_replaces_the_paid_total(self) -> None:
+        first = _lighter_position(1, "BTC", "1")
+        first["total_funding_paid_out"] = "-1.25"
+        self._feed_positions({1: first}, snapshot=True)
+        nxt = _lighter_position(1, "BTC", "1")
+        nxt["total_funding_paid_out"] = "0"
+        self._feed_positions({1: nxt}, snapshot=False)
+        self.assertEqual(self._desk_positions()[1]["funding_paid"], "0")
+
     def test_incremental_fill_on_one_market_leaves_the_others(self) -> None:
         self._open_btc_and_eth()
         self._feed_positions({1: _lighter_position(1, "BTC", "0.5")}, snapshot=False)
@@ -414,6 +432,7 @@ class DeskPositionFundingTests(TestCase):
         self.assertEqual(len(page["fundings"]), 1)
         self.assertEqual(page["fundings"][0]["side"], "short")
         self.assertEqual(page["fundings"][0]["change"], "-1.25")
+        self.assertEqual(page["fundings"][0]["rate"], "0.01")
         self.assertEqual(page["fundings"][0]["timestamp"], 1789900000)
 
     def test_empty_payload(self) -> None:

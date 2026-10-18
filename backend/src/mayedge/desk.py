@@ -17,6 +17,8 @@ from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
 from mayedge.algos.planner.book import PlannerBook
 from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
+from mayedge.algos.trail.book import TrailBook
+from mayedge.algos.trail.config import TRAIL_COI_BASE, TRAIL_COI_END
 from mayedge.algos.twap.book import AdvancedTwapBook
 from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 from mayedge.lighter.account import account_service
@@ -112,8 +114,23 @@ planner_book = PlannerBook(
     broadcast=_publish_algo_book,
     coi_base=PLANNER_COI_BASE,
     coi_end=PLANNER_COI_END,
+    watch_prints=gateway.watch_prints,
 )
-books: tuple[AlgoBook, ...] = (chase_book, twap_book, ladder_book, grid_book, planner_book)
+trail_book = TrailBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=TRAIL_COI_BASE,
+    coi_end=TRAIL_COI_END,
+    watch_prints=gateway.watch_prints,
+)
+books: tuple[AlgoBook, ...] = (
+    chase_book,
+    twap_book,
+    ladder_book,
+    grid_book,
+    planner_book,
+    trail_book,
+)
 
 
 def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
@@ -130,11 +147,20 @@ def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
 
 grid_book.set_market_conflict(_market_has_other_desk_algo(grid_book))
 planner_book.set_market_conflict(_market_has_other_desk_algo(planner_book))
+# Trail S1: it sits beside Chase and Ladder, not beside a Planner or Grid.
+trail_book.set_market_conflict(
+    lambda mi: planner_book.live_on_market(mi) or grid_book.live_on_market(mi)
+)
 
 
 def planner_owns_exit(market_index: int) -> bool:
     """ADR 0015: while a Planner is live on a Market, its exit is Planner's alone."""
     return planner_book.live_on_market(market_index)
+
+
+def trail_stop_owns_stop(market_index: int) -> bool:
+    """Trail TS4: one stop per Position, and a Trail Stop is it."""
+    return trail_book.stop_live_on_market(market_index)
 
 
 def get_book(algo_type: str) -> AlgoBook | None:
@@ -199,6 +225,7 @@ def set_broadcast(fn: Callable[[dict[str, Any]], None] | None) -> None:
     _broadcast = fn
     if fn is not None:
         gateway.subscribe(_on_gateway)
+        gateway.subscribe_internal(_on_internal)
     else:
         gateway.unsubscribe(_on_gateway)
 
@@ -206,6 +233,11 @@ def set_broadcast(fn: Callable[[dict[str, Any]], None] | None) -> None:
 def _on_gateway(msg: dict[str, Any]) -> None:
     if _broadcast:
         _broadcast(msg)
+    for book in books:
+        book.on_gateway(msg)
+
+
+def _on_internal(msg: dict[str, Any]) -> None:
     for book in books:
         book.on_gateway(msg)
 

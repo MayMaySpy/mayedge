@@ -4,10 +4,12 @@ import type {
   AccountTrade,
   AlgoBook,
   AlgoState,
-  AlertBoardRow,
   Candle,
   AlertEvent,
+  FundingExtremeRow,
   Market,
+  ScanActivityRow,
+  ToneBoardRow,
 } from "@/lib/api";
 import { algoIsWorking } from "@/lib/algos";
 import { liqIdentity } from "@/lib/venuePair";
@@ -386,6 +388,25 @@ export function useLiveOpenInterest(marketIndex: number | null | undefined): num
   return useSyncExternalStore(subscribe, get, get);
 }
 
+/** One market's 1h funding estimate, in percent. */
+export function liveFundingRate(marketIndex: number | null | undefined): number | null {
+  if (marketIndex == null) return null;
+  const rate = quotes[marketIndex]?.funding_rate;
+  return rate != null && Number.isFinite(rate) ? rate : null;
+}
+
+export function useLiveFundingRate(marketIndex: number | null | undefined): number | null {
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      subscribeQuoteDelta((rows) => {
+        if (marketIndex == null) return;
+        if (rows.some((row) => row.market_index === marketIndex)) onChange();
+      }),
+    [marketIndex]
+  );
+  const get = useCallback(() => liveFundingRate(marketIndex), [marketIndex]);
+  return useSyncExternalStore(subscribe, get, get);
+}
 
 export function subscribeBook(onChange: () => void) {
   bookListeners.add(onChange);
@@ -856,6 +877,9 @@ export type FeedHealth = {
   account_last_msg_at: number;
   trade_subs: number;
   trade_subs_target: number;
+  /** Ms since Lighter itself went offline (503, service restart); 0 when it answers. */
+  venue_down_since: number;
+  venue_down_reason: string | null;
   ts: number;
 };
 
@@ -912,6 +936,8 @@ let feedHealth: FeedHealth = {
   account_last_msg_at: 0,
   trade_subs: 0,
   trade_subs_target: 0,
+  venue_down_since: 0,
+  venue_down_reason: null,
   ts: 0,
 };
 const healthListeners = new Set<() => void>();
@@ -1012,33 +1038,64 @@ export function useLiveAlerts() {
   return useSyncExternalStore(subscribeAlerts, getAlerts, getAlerts);
 }
 
-let alertBoard: AlertBoardRow[] = [];
-const boardNotify = makeThrottledNotify(100);
+let scanActivity: ScanActivityRow[] = [];
+const activityNotify = makeThrottledNotify(100);
 
-export function subscribeAlertBoard(onChange: () => void) {
-  return boardNotify.subscribe(onChange);
+export function subscribeScanActivity(onChange: () => void) {
+  return activityNotify.subscribe(onChange);
 }
 
-export function getAlertBoard() {
-  return alertBoard;
+export function getScanActivity() {
+  return scanActivity;
 }
 
-export function setAlertBoard(rows: AlertBoardRow[]) {
-  const same =
-    rows.length === alertBoard.length &&
-    rows.every(
-      (r, i) =>
-        r.market_index === alertBoard[i]?.market_index &&
-        r.score === alertBoard[i]?.score &&
-        r.setup === alertBoard[i]?.setup
-    );
-  if (same) return;
-  alertBoard = rows;
-  boardNotify.notify();
+export function setScanActivity(rows: ScanActivityRow[]) {
+  scanActivity = rows;
+  activityNotify.notify();
 }
 
-export function useLiveAlertBoard() {
-  return useSyncExternalStore(subscribeAlertBoard, getAlertBoard, getAlertBoard);
+export function useScanActivity() {
+  return useSyncExternalStore(subscribeScanActivity, getScanActivity, getScanActivity);
+}
+
+let fundingExtremes: FundingExtremeRow[] = [];
+const fundingNotify = makeThrottledNotify(100);
+
+export function subscribeFundingExtremes(onChange: () => void) {
+  return fundingNotify.subscribe(onChange);
+}
+
+export function getFundingExtremes() {
+  return fundingExtremes;
+}
+
+export function setFundingExtremes(rows: FundingExtremeRow[]) {
+  fundingExtremes = rows;
+  fundingNotify.notify();
+}
+
+export function useFundingExtremes() {
+  return useSyncExternalStore(subscribeFundingExtremes, getFundingExtremes, getFundingExtremes);
+}
+
+let toneBoard: ToneBoardRow[] = [];
+const toneNotify = makeThrottledNotify(100);
+
+export function subscribeToneBoard(onChange: () => void) {
+  return toneNotify.subscribe(onChange);
+}
+
+export function getToneBoard() {
+  return toneBoard;
+}
+
+export function setToneBoard(rows: ToneBoardRow[]) {
+  toneBoard = rows;
+  toneNotify.notify();
+}
+
+export function useToneBoard() {
+  return useSyncExternalStore(subscribeToneBoard, getToneBoard, getToneBoard);
 }
 
 export function subscribeFeedHealth(onChange: () => void) {
@@ -1060,6 +1117,9 @@ export function setFeedHealth(next: Partial<FeedHealth> & { type?: string }) {
     account_last_msg_at: next.account_last_msg_at ?? feedHealth.account_last_msg_at,
     trade_subs: next.trade_subs ?? feedHealth.trade_subs,
     trade_subs_target: next.trade_subs_target ?? feedHealth.trade_subs_target,
+    venue_down_since: next.venue_down_since ?? feedHealth.venue_down_since,
+    venue_down_reason:
+      next.venue_down_reason !== undefined ? next.venue_down_reason : feedHealth.venue_down_reason,
     ts: next.ts ?? Date.now(),
   };
   healthListeners.forEach((fn) => fn());

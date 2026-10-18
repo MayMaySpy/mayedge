@@ -123,3 +123,47 @@ class PlannerApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, 409)
         order_service.create_sl_tp.assert_not_called()
 
+
+
+class TrailApiTests(unittest.IsolatedAsyncioTestCase):
+    @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.trail_stop_owns_stop", return_value=True)
+    @patch("mayedge.api.app.order_service")
+    async def test_the_stop_editor_refuses_beside_a_trail_stop(
+        self, order_service, _owns, *_mocks
+    ) -> None:
+        """Trail TS4: one stop per Position. A Take Profit still goes on."""
+        order_service.enabled = True
+        order_service.create_sl_tp = AsyncMock(return_value={"tx_hash": "0x"})
+        app = create_app()
+        transport = ASGITransport(app=app)
+        base = {"market_index": 1, "side": "sell", "size": "0"}
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            res = await client.post(
+                "/api/orders/sl-tp", json={**base, "sl": {"kind": "market", "trigger": "90"}}
+            )
+            self.assertEqual(res.status_code, 409)
+            order_service.create_sl_tp.assert_not_called()
+            res = await client.post(
+                "/api/orders/sl-tp", json={**base, "tp": {"kind": "market", "trigger": "110"}}
+            )
+        self.assertEqual(res.status_code, 200)
+
+    @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
+    @patch("mayedge.api.app.desk.algo_book", return_value={"type": "algo", "working": [], "history": []})
+    @patch("mayedge.api.app.desk.trail_book")
+    async def test_trail_stop_passes_keep_stop(self, trail_book, *_mocks) -> None:
+        trail_book.has = MagicMock(return_value=True)
+        trail_book.stop = AsyncMock()
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            res = await client.post(
+                "/api/algos/trail/stop", json={"algo_id": "TR-0001", "keep_stop": True}
+            )
+        self.assertEqual(res.status_code, 200)
+        trail_book.stop.assert_awaited_once_with("TR-0001", keep_stop=True)

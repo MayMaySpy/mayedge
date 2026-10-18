@@ -1,9 +1,11 @@
 import { memo } from "react";
+import { ActivityTable } from "@/components/widgets/ActivityTable";
 import { LiquidationHeatTable } from "@/components/widgets/LiquidationHeatTable";
 import { RelativeStrengthTable } from "@/components/widgets/RelativeStrengthTable";
+import { TonesTable } from "@/components/widgets/TonesTable";
 import type { LiquidationSummaryHours, Market } from "@/lib/api";
 
-export type ScanTab = "rel" | "liqs";
+export type ScanTab = "rel" | "liqs" | "act" | "tones";
 
 interface ScanBoardProps {
   tab: ScanTab;
@@ -33,5 +35,7 @@ export const ScanBoard = memo(function ScanBoard({
       />
     );
   }
+  if (tab === "act") return <ActivityTable symbol={symbol} onSymbolChange={onSymbolChange} />;
+  if (tab === "tones") return <TonesTable symbol={symbol} onSymbolChange={onSymbolChange} />;
   return <RelativeStrengthTable markets={markets} symbol={symbol} onSymbolChange={onSymbolChange} />;
 });

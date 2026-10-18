@@ -12,6 +12,8 @@ import {
   ladderPlugin,
   PLANNER_COI_BASE,
   PLANNER_COI_END,
+  TRAIL_COI_END,
+  trailPlugin,
   TWAP_COI_BASE,
   twapPlugin,
 } from "@/lib/algoPlugins";
@@ -43,9 +45,36 @@ describe("algo plugin COI bands", () => {
 
   it("attributes Planner Clips by band without putting Planner in the Algo menu", () => {
     expect(isAlgoClientOrder(PLANNER_COI_BASE + 1)).toBe(true);
-    expect(isAlgoClientOrder(PLANNER_COI_END)).toBe(false);
     expect(algoOrderKind(PLANNER_COI_BASE + 1)).toBe("Planner");
+    // Trail's band starts where Planner's ends.
+    expect(algoOrderKind(PLANNER_COI_END)).toBe("Trail");
     expect(ALGOS.some((a) => (a.id as string) === "planner")).toBe(false);
+  });
+});
+
+describe("trail plugin", () => {
+  const ctx = { sizeNum: 1, decimals: 2, minSz: 0.1, symbol: "ETH", spot: 100, priceDecimals: 2 };
+
+  it("labels its band and is in the Algo menu as an entry", () => {
+    expect(isAlgoClientOrder(TRAIL_COI_END)).toBe(false);
+    expect(algoPluginByDeskType("trail")?.label).toBe("Trail");
+    expect(ALGOS.some((a) => a.id === "trail")).toBe(true);
+  });
+
+  it("blocks reduce-only: a Trail exit starts from the Position", () => {
+    expect(trailPlugin.blockReason(trailPlugin.defaultState, { ...ctx, reduceOnly: true })).toMatch(
+      /Position/
+    );
+    expect(trailPlugin.blockReason(trailPlugin.defaultState, ctx)).toBeNull();
+  });
+
+  it("blocks a distance under 2 ticks", () => {
+    expect(
+      trailPlugin.blockReason(
+        { ...trailPlugin.defaultState, distance: "0.01", distanceKind: "price" },
+        ctx
+      )
+    ).toMatch(/2 ticks/);
   });
 });
 

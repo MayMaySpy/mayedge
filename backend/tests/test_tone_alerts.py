@@ -1,4 +1,4 @@
-"""Tone alerts fire once, on a closed blue or orange bar."""
+"""The Tones board: which perps closed their last bar blue or orange."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
-from mayedge.alerts import ExploitDetector
+from mayedge.alerts import AlertDetector
 from mayedge.api.app import create_app
 from mayedge.lighter.gateway import LighterGateway
 from mayedge.lighter.market_ws import handle_candle
@@ -200,19 +200,70 @@ class ToneTimeframeGatewayTest(unittest.TestCase):
         self.assertEqual(gw._tone_book.timeframes, ("1h", "4h"))
 
 
+class ToneBoardTest(unittest.TestCase):
+    def test_the_board_lists_the_last_closed_bar(self) -> None:
+        # Bars loaded at boot raise nothing. The last closed one is still what the board shows.
+        book = ToneBook(timeframes=("30m",), tones_fn=_tones("ucru"), min_bars=1)
+        bars = _flat(4)
+        self.assertEqual(book.seed(7, "30m", bars, now=bars[-1].time + 10), [])
+        (hit,) = book.board()
+        self.assertEqual((hit.market_index, hit.resolution, hit.label), (7, "30m", "Blue"))
+        self.assertEqual(hit.bar_time, bars[-2].time)
+
+    def test_the_next_close_clears_the_row(self) -> None:
+        calls = {"tone": "ur"}
+
+        def tones(bars: Sequence[Candle]) -> list[str | None]:
+            return [calls["tone"]] * len(bars)
+
+        book = ToneBook(timeframes=("30m",), tones_fn=tones, min_bars=1)
+        bars = _flat(4)
+        book.seed(7, "30m", bars, now=bars[-1].time + 10)
+        self.assertEqual([hit.label for hit in book.board()], ["Orange"])
+        calls["tone"] = "neutral"
+        book.observe(7, "30m", [_bar(bars[-1].time + 1800)], now=bars[-1].time + 1810)
+        self.assertEqual(book.board(), [])
+
+    def test_a_dropped_timeframe_leaves_the_board(self) -> None:
+        book = ToneBook(timeframes=("30m",), tones_fn=_tones("ucru"), min_bars=1)
+        bars = _flat(4)
+        book.seed(7, "30m", bars, now=bars[-1].time + 10)
+        book.set_timeframes(("4h",))
+        self.assertEqual(book.board(), [])
+
+
+def _eth(volume_24h: float) -> MarketMeta:
+    return MarketMeta(
+        7,
+        "ETH",
+        2,
+        4,
+        0.0,
+        0.0,
+        market_type="perp",
+        volume_24h=volume_24h,
+        mark_price=10.0,
+        last_trade_price=10.0,
+        mid_price=10.0,
+        best_bid_price=9.999,
+        best_ask_price=10.001,
+    )
+
+
 class ToneCandleFeedTest(unittest.IsolatedAsyncioTestCase):
-    async def test_closed_bar_on_another_market_alerts_without_painting_the_chart(self) -> None:
-        chart: list[dict[str, Any]] = []
-        detector = ExploitDetector(lambda message: None)
+    async def _close_a_blue_bar(self, meta: MarketMeta) -> tuple[list[dict[str, Any]], LighterGateway]:
+        sent: list[dict[str, Any]] = []
+        detector = AlertDetector(sent.append)
+        detector.on_market_stats(meta)
         gw = LighterGateway.__new__(LighterGateway)
         gw._current_market_index = 1
-        gw._markets = {7: MarketMeta(7, "ETH", 2, 4, 0.0, 0.0, market_type="perp")}
+        gw._markets = {7: meta}
         gw._alerts = detector
 
-        def on_chart(message: dict[str, Any]) -> None:
-            chart.append(message)
+        def on_message(message: dict[str, Any]) -> None:
+            sent.append(message)
 
-        gw.broadcast = on_chart
+        gw.broadcast = on_message
         gw._tone_book = ToneBook(tones_fn=_tones("ucru"), min_bars=1)
         start = _origin(1800)
         gw._tone_book.seed(7, "30m", _flat(3), now=start + 2 * 1800 + 10)
@@ -227,14 +278,21 @@ class ToneCandleFeedTest(unittest.IsolatedAsyncioTestCase):
                 ],
             },
         )
-        self.assertEqual(chart, [])
-        recent = detector.recent()
-        self.assertEqual(len(recent), 1)
-        self.assertEqual(recent[0]["kind"], "tone")
-        self.assertEqual(recent[0]["symbol"], "ETH")
-        self.assertEqual(recent[0]["note"], "30m Blue")
-        self.assertEqual(recent[0]["severity"], 2)
-        self.assertEqual(recent[0]["market_index"], 7)
+        return sent, gw
+
+    async def test_a_closed_bar_on_another_market_reaches_the_board_and_nothing_else(self) -> None:
+        sent, gw = await self._close_a_blue_bar(_eth(10_000_000.0))
+        # No chart paint, and no alert: a tone is a board row now.
+        self.assertEqual(sent, [])
+        self.assertEqual(gw.recent_alerts(), [])
+        (row,) = gw.tone_board()
+        start = _origin(1800)
+        self.assertEqual((row["symbol"], row["timeframe"], row["tone"]), ("ETH", "30m", "blue"))
+        self.assertEqual(row["closed_at"], (start + 3 * 1800) * 1000)
+
+    async def test_a_thin_market_is_not_on_the_tone_board(self) -> None:
+        _sent, gw = await self._close_a_blue_bar(_eth(400_000.0))
+        self.assertEqual(gw.tone_board(), [])
 
 
 class ToneTimeframeApiTest(unittest.IsolatedAsyncioTestCase):
@@ -245,7 +303,7 @@ class ToneTimeframeApiTest(unittest.IsolatedAsyncioTestCase):
         app = create_app()
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://localhost") as client:
-            got = await client.get("/api/alerts/timeframes")
+            got = await client.get("/api/scan/tones/timeframes")
             self.assertEqual(got.status_code, 200)
             body = got.json()
             self.assertEqual(body["cap"], 2)
@@ -253,7 +311,7 @@ class ToneTimeframeApiTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("4h", body["choices"])
             self.assertLessEqual(len(body["timeframes"]), 2)
             rejected = await client.put(
-                "/api/alerts/timeframes",
+                "/api/scan/tones/timeframes",
                 json={"timeframes": ["30m", "4h", "1h"]},
             )
         self.assertEqual(rejected.status_code, 400)

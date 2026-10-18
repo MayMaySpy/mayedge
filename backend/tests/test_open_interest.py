@@ -11,6 +11,7 @@ from mayedge.lighter.models import MarketMeta
 from mayedge.persist_oi import (
     OI_DAY_S,
     OI_DETAIL_MS,
+    OI_HOUR_S,
     flush_open_interest,
     fold_open_interest,
     list_open_interest,
@@ -97,10 +98,10 @@ class OpenInterestStoreTests(unittest.TestCase):
         rows = list_open_interest(1, resolution="1m", count=10)
         self.assertEqual([r["time"] for r in rows], [0, 180])
 
-    def test_folds_a_finished_day_older_than_30_days(self) -> None:
+    def test_folds_a_finished_hour_older_than_30_days(self) -> None:
         now = 100 * OI_DAY_S * 1000
-        old_day = (now - OI_DETAIL_MS) // (OI_DAY_S * 1000) - 1
-        first = old_day * (OI_DAY_S // 60)
+        old_hour = (now - OI_DETAIL_MS) // (OI_HOUR_S * 1000) - 1
+        first = old_hour * (OI_HOUR_S // 60)
         flush_open_interest(
             [{"market_index": 1, "symbol": "ETH", "oi_usd": 100.0}],
             minute_index=first,
@@ -111,9 +112,9 @@ class OpenInterestStoreTests(unittest.TestCase):
         )
         flush_open_interest(
             [{"market_index": 1, "symbol": "ETHEREUM", "oi_usd": 180.0}],
-            minute_index=first + 100,
+            minute_index=first + 50,
         )
-        kept = (old_day + 1) * (OI_DAY_S // 60)
+        kept = (old_hour + 1) * (OI_HOUR_S // 60)
         flush_open_interest(
             [{"market_index": 1, "symbol": "ETH", "oi_usd": 90.0}],
             minute_index=kept,
@@ -127,40 +128,65 @@ class OpenInterestStoreTests(unittest.TestCase):
         rows = list_open_interest(1, resolution="1m", count=10)
         self.assertEqual(rows, [{"time": kept * 60, "open_interest": 90.0}])
 
-        days = list_open_interest(1, resolution="1d", count=10)
+        hours = list_open_interest(1, resolution="1h", count=10)
         self.assertEqual(
-            days,
+            hours,
             [
-                {"time": old_day * OI_DAY_S, "open_interest": 180.0},
-                {"time": (old_day + 1) * OI_DAY_S, "open_interest": 90.0},
+                {"time": old_hour * OI_HOUR_S, "open_interest": 180.0},
+                {"time": (old_hour + 1) * OI_HOUR_S, "open_interest": 90.0},
             ],
         )
         with store._lock:
             conn = store._connect()
-            day = conn.execute(
-                "SELECT symbol, oi_high, oi_low, oi_close FROM oi_days WHERE market_index = 1"
+            hour = conn.execute(
+                "SELECT symbol, oi_high, oi_low, oi_close FROM oi_hours WHERE market_index = 1"
             ).fetchone()
             btc = conn.execute(
-                "SELECT oi_close FROM oi_days WHERE market_index = 2"
+                "SELECT oi_close FROM oi_hours WHERE market_index = 2"
             ).fetchone()
-        self.assertEqual(day["symbol"], "ETHEREUM")
-        self.assertEqual(day["oi_high"], 250.0)
-        self.assertEqual(day["oi_low"], 100.0)
-        self.assertEqual(day["oi_close"], 180.0)
+        self.assertEqual(hour["symbol"], "ETHEREUM")
+        self.assertEqual(hour["oi_high"], 250.0)
+        self.assertEqual(hour["oi_low"], 100.0)
+        self.assertEqual(hour["oi_close"], 180.0)
         self.assertEqual(btc["oi_close"], 5.0)
 
-    def test_fold_is_idempotent_for_the_same_day(self) -> None:
+    def test_folded_hours_keep_every_coarse_chart_past_30_days(self) -> None:
         now = 100 * OI_DAY_S * 1000
-        old_day = (now - OI_DETAIL_MS) // (OI_DAY_S * 1000) - 1
-        minute = old_day * (OI_DAY_S // 60)
+        old_day = (now - OI_DETAIL_MS) // (OI_DAY_S * 1000) - 5
+        for hour, oi in [(0, 10.0), (3, 20.0), (5, 30.0), (23, 40.0)]:
+            flush_open_interest(
+                [{"market_index": 1, "symbol": "ETH", "oi_usd": oi}],
+                minute_index=(old_day * 24 + hour) * 60 + 30,
+            )
+        fold_open_interest(now_ms=now)
+        day_s = old_day * OI_DAY_S
+        self.assertEqual(
+            list_open_interest(1, resolution="1d", count=10),
+            [{"time": day_s, "open_interest": 40.0}],
+        )
+        self.assertEqual(
+            list_open_interest(1, resolution="4h", count=10),
+            [
+                {"time": day_s, "open_interest": 20.0},
+                {"time": day_s + 4 * OI_HOUR_S, "open_interest": 30.0},
+                {"time": day_s + 20 * OI_HOUR_S, "open_interest": 40.0},
+            ],
+        )
+        # Minute charts do not stretch hourly closes past the 30-day detail.
+        self.assertEqual(list_open_interest(1, resolution="15m", count=10), [])
+
+    def test_fold_is_idempotent_for_the_same_hour(self) -> None:
+        now = 100 * OI_DAY_S * 1000
+        old_hour = (now - OI_DETAIL_MS) // (OI_HOUR_S * 1000) - 1
+        minute = old_hour * (OI_HOUR_S // 60)
         flush_open_interest(
             [{"market_index": 1, "symbol": "ETH", "oi_usd": 40.0}],
             minute_index=minute,
         )
         self.assertEqual(fold_open_interest(now_ms=now), 1)
         self.assertEqual(fold_open_interest(now_ms=now), 0)
-        days = list_open_interest(1, resolution="1d", count=10)
-        self.assertEqual(days, [{"time": old_day * OI_DAY_S, "open_interest": 40.0}])
+        hours = list_open_interest(1, resolution="1h", count=10)
+        self.assertEqual(hours, [{"time": old_hour * OI_HOUR_S, "open_interest": 40.0}])
 
     def test_rejects_unknown_resolution(self) -> None:
         with self.assertRaises(ValueError):

@@ -1,73 +1,65 @@
-# Relative outlier alert settings. Restart backend after edits.
-# Scores are roughly "standard deviations from this market's own normal".
+# Alert rules: docs/alert-rules.md. Change the rule there first. Restart backend after edits.
 
-min_severity: 2
-max_events_per_flush: 20
-warmup_s: 20
+liquidity:
+  # Thinner markets raise nothing and are on no Scan board. A Held market always passes.
+  min_24h_usd: 1000000
+  max_spread_bps: 40
+
+spike:
+  # A spike is a minute at least this many times the biggest minute of the last window_min.
+  window_min: 60
+  price_x: 2
+  volume_x: 3
+  oi_x: 2
+  # Floors, so a dead tape stays quiet.
+  min_move_pct: 0.25
+  min_volume_usd: 50000
+  min_oi_usd: 250000
+  min_oi_pct: 0.3
+
+liquidations:
+  oi_bps: 20
+  min_usd: 100000
+  window_s: 120
+
+board:
+  # Liquid perps beyond this many percent over 5m are movers.
+  move_pct: 0.3
+  min_movers: 10
+  # Share of the movers that must go the same way.
+  agree: 0.8
+  # Median 5m move of that side, in percent.
+  median_pct: 0.5
+
+held:
+  # Mark within this many percent of a Position's Liquidation price.
+  liq_distance_pct: 10
+
+funding:
+  # On the strip when the hourly rate is this many sigma from the market's own 24h median.
+  sigma: 3
+  sigma_floor: 0.002
+  # Minute samples of the estimate. Settled hourly prints are kept for the life of the desk.
+  retention_days: 30
+
+rows:
+  # Rules that fire on a market inside this many seconds are one row.
+  merge_s: 120
+  # A state that has not fired for this long starts afresh.
+  quiet_s: 180
+  max_new_per_min: 6
+
+activity:
+  # A quieter day is sized as if it ranged this many percent.
+  range_floor_pct: 3
 
 baseline:
   bars_1m: 240
   min_bars: 30
   level_window_min: 1440
-  # Premium, dislocation, funding and OI stay silent until this many minutes of history exist.
+  # A sigma needs this many minutes of samples.
   level_min_samples: 30
 
-liquidity:
-  # Thinner markets never alert and never reach the board.
-  min_24h_usd: 1000000
-  max_spread_bps: 40
-
-factors:
-  volume:
-    rvol: [4, 8]
-    min_usd_1m: 50000
-    # Volume confirms. Capped below urgent so a tape print alone stays notable.
-    score_cap: 6
-  price:
-    sigma: [4, 6]
-    # A move must also clear this many percent (1m, 5m). Stops 0.05% ticks on flat books.
-    min_pct: [0.3, 0.6]
-    sigma_floor_pct: 0.05
-    # Recent residual RMS, excluding the newest 5 bars, can raise the noise floor.
-    recent_bars: 30
-  oi:
-    sigma: [4, 6]
-    min_usd: 250000
-    sigma_floor_pct: 0.3
-  premium:
-    sigma: [4, 6]
-    sigma_floor_pct: 0.05
-  dislocation:
-    sigma: [4, 6]
-    min_bps: 25
-    sigma_floor_bps: 10
-  funding:
-    sigma: [3, 5]
-    sigma_floor: 0.002
-  liq_cluster:
-    oi_bps: [20, 60]
-    min_usd: 100000
-    window_s: 120
-
-score:
-  sev2: 4
-  sev3: 7
-  exit: 2
-  cap: 12
-  board_min: 2.5
-
-episode:
-  quiet_s: 180
-  rearm_s: 600
-  max_new_per_min: 6
-
-# A move shared by the board. Below min_markets the excess is the raw move.
-broad:
-  min_markets: 15
-  move_pct: 0.3
-  breadth: 0.6
-  beta_max: 3
-
 outcomes:
-  horizons_min: [5, 15]
+  horizon_min: 15
   retention_days: 30

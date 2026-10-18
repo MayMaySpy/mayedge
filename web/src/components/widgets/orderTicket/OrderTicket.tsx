@@ -285,6 +285,8 @@ export function OrderTicket({
     symbol: market.symbol,
     spot,
     slipFrac,
+    reduceOnly,
+    priceDecimals: market.price_decimals,
   };
   const algoBlocked =
     kind === "algo" && plugin

@@ -1,89 +1,101 @@
-import type { AlertBoardRow, AlertEvent, AlertFactorRow, AlertKind } from "@/lib/api";
+import type { AlertEvent, AlertFact } from "@/lib/api";
 import { formatUsdCompact } from "@/lib/utils";
 import { pairLabel } from "@/lib/venuePair";
 
-const SETUP: Record<string, { short: string; long: string }> = {
-  breakout_longs: { short: "Breakout", long: "Breakout: longs opening" },
-  short_squeeze: { short: "Short squeeze", long: "Short squeeze: shorts covering" },
-  breakdown_shorts: { short: "Breakdown", long: "Breakdown: shorts opening" },
-  long_flush: { short: "Long flush", long: "Long flush: longs exiting" },
-  pump: { short: "Sharp up", long: "Sharp move up" },
-  dump: { short: "Sharp down", long: "Sharp move down" },
-  broad_up: { short: "Broad up", long: "Broad move up" },
-  broad_down: { short: "Broad down", long: "Broad move down" },
-  holds_up: { short: "Holds up", long: "Holds up: stronger than the market" },
-  lags: { short: "Lags", long: "Lags: weaker than the market" },
-  vol_surge: { short: "Vol surge", long: "Volume surge" },
-  absorption: { short: "Absorption", long: "Absorption: heavy volume, price flat" },
-  crowded_longs: { short: "Crowded longs", long: "Crowded longs: premium or funding stretched" },
-  crowded_shorts: { short: "Crowded shorts", long: "Crowded shorts: premium or funding stretched" },
-  mark_off_book: { short: "Off mark", long: "Mark off book: mid far from mark" },
-  liq_cascade: { short: "Liq cascade", long: "Liquidation cascade" },
-  mixed: { short: "Unusual", long: "Unusual activity" },
+const RULE_NAME: Record<string, string> = {
+  move: "Price spike",
+  volume: "Volume spike",
+  oi: "OI spike",
+  liqs: "Liquidations",
+  board: "Board move",
+  near_liq: "Near liquidation",
 };
 
-const LEGACY_KIND: Record<AlertKind, string> = {
-  oi: "OI",
-  volume: "Vol",
-  price: "Price",
-  premium: "Premium",
-  dislocation: "Off mark",
-  funding: "Funding",
-  liq_cluster: "Liqs",
-  tone: "Tone",
-  signal: "Signal",
-};
-
-export function setupShort(key: string | undefined): string {
-  return (key && SETUP[key]?.short) || "Signal";
-}
-
-export function setupLong(key: string | undefined): string {
-  return (key && SETUP[key]?.long) || "Signal";
+export function ruleName(rule: string): string {
+  return RULE_NAME[rule] ?? rule;
 }
 
 function signed(v: number, digits: number): string {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+  const text = v.toFixed(digits);
+  // A move too small to show is flat, not "-0.00".
+  if (Number(text) === 0) return (0).toFixed(digits);
+  return v > 0 ? `+${text}` : text;
 }
 
-export function factorText(f: AlertFactorRow): string {
-  const v = f.value;
+function liquidatedSide(f: AlertFact): string {
+  return f.direction === "down" ? "longs" : "shorts";
+}
+
+/** What a fact says happened. */
+export function headlineText(f: AlertFact): string {
   switch (f.kind) {
-    case "price": {
-      const px = `Px ${signed(v, 2)}%`;
-      return f.excess == null ? px : `${px} · ex ${signed(f.excess, 2)}%`;
-    }
-    case "broad": {
-      const side = f.direction === "up" || f.direction === "down" ? f.direction : "";
-      const tail = [f.window, side].filter(Boolean).join(" ");
-      const board = `Board ${signed(v, 1)}%`;
-      return tail ? `${board} · ${tail}` : board;
-    }
+    case "move":
+      return `${signed(f.value, 2)}% ${f.window ?? ""}`.trim();
     case "volume":
-      return `Vol ${v.toFixed(1)}×`;
+      return `Vol ${formatUsdCompact(f.value) || "$0"} ${f.window ?? ""}`.trim();
     case "oi":
-      return `OI ${signed(v, 1)}%`;
-    case "premium":
-      return `Prem ${signed(v, 2)}%`;
-    case "dislocation":
-      return `Off mark ${v.toFixed(0)}bp`;
+      return `OI ${signed(f.value, 2)}% ${f.window ?? ""}`.trim();
+    case "day_high":
+      return "day high";
+    case "day_low":
+      return "day low";
     case "funding":
-      return `Fund ${signed(v, 4)}%/h`;
-    case "liq_cluster":
-      return `Liqs ${formatUsdCompact(v) || "$0"}`;
+      return `funding ${signed(f.value, 4)}%/h`;
+    case "liqs":
+      return `Liqs ${formatUsdCompact(f.value) || "$0"} ${liquidatedSide(f)}`;
+    case "board":
+      return `${signed(f.value, 2)}% 5m`;
+    case "near_liq":
+      return `${f.value.toFixed(1)}% from liquidation`;
     default:
       return f.kind;
   }
 }
 
-export function factorSummary(factors: readonly AlertFactorRow[] | undefined, max = 3): string {
-  return (factors ?? []).slice(0, max).map(factorText).join(" · ");
+function hourMax(f: AlertFact): string {
+  return f.multiple == null ? "" : `${f.multiple.toFixed(1)}× hour max`;
 }
 
-function factorDetail(f: AlertFactorRow): string {
-  const win = f.window ? ` (${f.window})` : "";
-  const sigma = f.score != null ? ` · ${f.score.toFixed(1)}σ` : "";
-  return `${factorText(f)}${win}${sigma}`;
+/** How big the headline is: against the hour for a spike, against the book for the rest. */
+export function supportText(f: AlertFact): string[] {
+  switch (f.kind) {
+    case "move":
+      return [hourMax(f), f.excess == null ? "" : `${signed(f.excess, 2)}% past the board`].filter(
+        Boolean
+      );
+    case "volume":
+    case "oi":
+      return [hourMax(f)].filter(Boolean);
+    case "liqs":
+      return f.bps == null ? [] : [`${Math.round(f.bps)} bps of OI`];
+    case "board": {
+      const [same, movers] = (f.window ?? "").split("/");
+      const out = same && movers ? [`${same} of ${movers} movers ${f.direction ?? ""}`.trim()] : [];
+      if (f.liquid != null) out.push(`${f.liquid} liquid`);
+      return out;
+    }
+    default:
+      return [];
+  }
+}
+
+/** A fact that is not the headline: another rule on the row, or what the tape showed. */
+export function sideText(f: AlertFact): string {
+  const text = headlineText(f);
+  const spike = f.kind === "move" || f.kind === "volume" || f.kind === "oi";
+  // A plain 1m move is just the tape. Anything else that reached the hour's biggest says so.
+  if (!spike || f.multiple == null || (f.kind === "move" && f.size == null)) return text;
+  return `${text} (${f.multiple.toFixed(1)}×)`;
+}
+
+/** Which side the operator holds, and whether the row runs with it. */
+export function heldText(ev: AlertEvent): string {
+  if (!ev.held) return "";
+  if (ev.held === "order") return "working order";
+  if (ev.direction !== "up" && ev.direction !== "down") return `your ${ev.held}`;
+  if (ev.rule === "near_liq" || ev.rule === "board") return `your ${ev.held}`;
+  const against = (ev.held === "long") === (ev.direction === "down");
+  return `${against ? "against" : "with"} your ${ev.held}`;
 }
 
 export function directionArrow(direction: string | undefined): string {
@@ -99,15 +111,7 @@ export function directionClass(direction: string | undefined): string {
 }
 
 export function severityBorder(sev: number): string {
-  if (sev >= 3) return "border-ask";
-  if (sev >= 2) return "border-warn";
-  return "border-transparent";
-}
-
-export function severityText(sev: number): string {
-  if (sev >= 3) return "text-ask";
-  if (sev >= 2) return "text-warn";
-  return "text-muted-foreground";
+  return sev >= 3 ? "border-ask" : "border-warn";
 }
 
 export function eventMs(ts: number | undefined): number {
@@ -134,100 +138,64 @@ export type AlertLine = {
   key: string;
   symbol: string;
   name: string;
-  /** Broad move uses BTC only so a click opens that chart. Muting it would hide BTC. */
+  /** The Market row uses BTC only so a click opens that chart. Muting it would hide BTC. */
   mutable: boolean;
+  held: boolean;
   direction: string;
   severity: number;
   label: string;
   detail: string;
-  score: number | null;
-  atMs: number | null;
+  atMs: number;
   tooltip: string;
 };
 
+/** A row reads as its facts. No label says what they mean. */
 export function eventLine(ev: AlertEvent): AlertLine {
-  const atMs = alertStartMs(ev);
+  const facts = ev.facts ?? [];
+  const head = facts.find((f) => f.kind === ev.rule) ?? facts[0];
+  const rest = facts.filter((f) => f !== head);
+  const detail = [...(head ? supportText(head) : []), ...rest.map(sideText), heldText(ev)].filter(
+    Boolean
+  );
   const name = alertName(ev.symbol, ev.market_index);
-  if (ev.kind === "signal") {
-    const factors = ev.factors ?? [];
-    return {
-      key: ev.id,
-      symbol: ev.symbol,
-      name,
-      mutable: ev.market_index !== -1,
-      direction: ev.direction,
-      severity: ev.severity,
-      label: setupShort(ev.setup),
-      detail: factorSummary(factors),
-      score: ev.score ?? null,
-      atMs,
-      tooltip: [
-        `${name} · ${setupLong(ev.setup)}`,
-        ...factors.map(factorDetail),
-        `Started ${new Date(atMs).toLocaleTimeString()}`,
-      ].join("\n"),
-    };
-  }
-  const label = ev.kind === "tone" ? ev.note : (LEGACY_KIND[ev.kind] ?? ev.kind);
+  const atMs = alertStartMs(ev);
   return {
     key: ev.id,
     symbol: ev.symbol,
     name,
     mutable: ev.market_index !== -1,
+    held: Boolean(ev.held),
     direction: ev.direction,
     severity: ev.severity,
-    label,
-    detail: ev.kind === "tone" ? "" : ev.note,
-    score: null,
+    label: head ? headlineText(head) : ruleName(ev.rule),
+    detail: detail.join(" · "),
     atMs,
-    tooltip: `${ev.symbol} · ${ev.note}`,
+    tooltip: [
+      `${name} · ${ruleName(ev.rule)}`,
+      ...detail,
+      `Fired ${new Date(atMs).toLocaleTimeString()}`,
+    ].join("\n"),
   };
-}
-
-export function boardLine(row: AlertBoardRow): AlertLine {
-  const parts = [factorSummary(row.factors)];
-  const priced = row.factors.some((f) => f.kind === "price" || f.kind === "broad");
-  if (row.move_pct != null && !priced) {
-    parts.push(`5m ${signed(row.move_pct, 2)}%`);
-  }
-  const name = alertName(row.symbol, row.market_index);
-  return {
-    key: `live-${row.market_index}`,
-    symbol: row.symbol,
-    name,
-    mutable: row.market_index !== -1,
-    direction: row.direction,
-    severity: row.severity ?? 1,
-    label: setupShort(row.setup),
-    detail: parts.filter(Boolean).join(" · "),
-    score: row.score,
-    atMs: null,
-    tooltip: [`${name} · ${setupLong(row.setup)}`, ...row.factors.map(factorDetail)].join("\n"),
-  };
-}
-
-/** Newest episode of a market already shown under Live would repeat it; older history stays. */
-export function recentEvents(
-  events: readonly AlertEvent[],
-  liveMarkets: ReadonlySet<number>,
-  nowMs: number,
-  dedupeWindowMs = 10 * 60_000
-): AlertEvent[] {
-  const sorted = [...events].sort((a, b) => alertStartMs(b) - alertStartMs(a));
-  const hidden = new Set<number>();
-  return sorted.filter((ev) => {
-    if (ev.kind !== "signal" || !liveMarkets.has(ev.market_index) || hidden.has(ev.market_index)) {
-      return true;
-    }
-    if (nowMs - eventMs(ev.ts) > dedupeWindowMs) return true;
-    hidden.add(ev.market_index);
-    return false;
-  });
 }
 
 export function toastCopy(ev: AlertEvent, pair: string): { title: string; description: string } {
+  const line = eventLine(ev);
   const arrow = directionArrow(ev.direction);
-  const head = `${arrow ? `${arrow} ` : ""}${pair}`;
-  if (ev.kind !== "signal") return { title: head, description: eventLine(ev).label };
-  return { title: `${head} · ${setupShort(ev.setup)}`, description: factorSummary(ev.factors) };
+  const name = ev.market_index === -1 ? line.name : pair;
+  return { title: `${arrow ? `${arrow} ` : ""}${name} · ${line.label}`, description: line.detail };
+}
+
+/** P1, P2 in docs/alert-rules.md. The Market row and a Held market survive Favorites only. */
+export function shownAlerts(
+  events: readonly AlertEvent[],
+  opts: { minSeverity: number; favoritesOnly: boolean; favorites: readonly string[]; muted: ReadonlySet<string> }
+): AlertEvent[] {
+  return events
+    .filter((ev) => {
+      if (ev.severity < opts.minSeverity) return false;
+      if (ev.market_index === -1) return true;
+      if (opts.muted.has(ev.symbol)) return false;
+      return !opts.favoritesOnly || Boolean(ev.held) || opts.favorites.includes(ev.symbol);
+    })
+    .sort((a, b) => alertStartMs(b) - alertStartMs(a));
 }

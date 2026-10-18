@@ -1,4 +1,4 @@
-/** Native timeframes a tone alert can follow. At most two. */
+/** Native timeframes the Tones board can follow. At most two. */
 
 export const TONE_TIMEFRAME_CAP = 2;
 export const TONE_TIMEFRAME_CHOICES = ["1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d"] as const;

@@ -75,6 +75,28 @@ export interface OpenInterestSample {
   open_interest: number;
 }
 
+/** One funding bucket. `rate` is the 1h rate in percent; unsettled buckets are the estimate. */
+export interface FundingSample {
+  time: number;
+  rate: number;
+  settled: boolean;
+}
+
+/**
+ * Mean settled 1h rate (percent) per window; `hours` is how many settled hours it holds.
+ * `venue_days` of those are whole days taken from Lighter's daily history, 24 hours each.
+ */
+export interface FundingAverage {
+  windows: {
+    label: string;
+    days: number;
+    hours: number;
+    venue_days?: number;
+    rate: number | null;
+  }[];
+  first_time: number | null;
+}
+
 export interface Position {
   market_index: number;
   symbol: string;
@@ -248,6 +270,53 @@ export interface AlgoState {
     merged?: boolean;
   }[];
   planner?: PlannerRuntime | null;
+  trail?: TrailRuntime | null;
+}
+
+export type TrailKind = "entry" | "stop" | "tp";
+export type TrailReference = "mark" | "last";
+export type TrailDistanceKind = "pct" | "price";
+
+/** A Trail as the desk runs it (docs/trail-rules.md). */
+export interface TrailRuntime {
+  kind: TrailKind;
+  /** The side of the order it fires: the closing side for a Stop or Take Profit. */
+  side: "buy" | "sell";
+  qty: string;
+  reference: TrailReference;
+  distance: string;
+  distance_kind: TrailDistanceKind;
+  activation: string | null;
+  /** A Stop's start price; the trigger is never worse. */
+  floor: string | null;
+  active: boolean;
+  best: string | null;
+  trigger: string | null;
+  /** Where its venue Stop sits now. */
+  venue_trigger: string | null;
+  last_move_ms: number | null;
+  fired_at: number | null;
+  fired_price: string | null;
+  deadline_ms: number | null;
+  /** False while the market feed is not live (F10). */
+  following: boolean;
+  /** On Last, the venue Stop is a backstop one step behind (L2). */
+  backstop: boolean;
+  clip_roles?: Record<string, string>;
+}
+
+export interface TrailPreview {
+  resolved: {
+    side: "buy" | "sell";
+    qty: string;
+    start: string | null;
+    activation: string | null;
+    mark: string | null;
+    step: string | null;
+    trigger_now: string | null;
+  } | null;
+  refused: PlannerRefusal | null;
+  replaces: OpenOrder[];
 }
 
 export interface PlannerTargetPlan {
@@ -257,7 +326,10 @@ export interface PlannerTargetPlan {
   pct: string;
   r: string;
   move_pct: string;
-  order?: "limit" | "trigger";
+  order?: "limit" | "trigger" | "trail";
+  /** A Trail target's distance: a price, or a % of the best price. */
+  trail_distance?: string | null;
+  trail_kind?: "price" | "pct";
 }
 
 /** What Planner will send: every number comes from one stop (docs/planner-rules.md). */
@@ -309,6 +381,8 @@ export interface PlannerRuntime {
   /** The target number of the last Stop step taken; 0 before any. */
   steps_done?: number;
   entry_deadline_ms: number | null;
+  /** Where each trailing part is: "entry", "stop", "tp2"… */
+  trails?: Record<string, { active: boolean; best: string | null; trigger: string | null }>;
   /** client_order_index → "entry" | "stop" | "tp1"… */
   clip_roles?: Record<string, string>;
 }
@@ -351,55 +425,84 @@ export interface LiquidationSummary {
   rows: LiquidationSummaryRow[];
 }
 
-export type AlertKind =
-  | "oi"
-  | "volume"
-  | "price"
-  | "premium"
-  | "dislocation"
-  | "funding"
-  | "liq_cluster"
-  | "tone"
-  | "signal";
+export type AlertRule = "move" | "volume" | "oi" | "liqs" | "board" | "near_liq";
 
-export interface AlertFactorRow {
+/** One thing an alert row states. A rule that fired has a size; what the tape showed has none. */
+export interface AlertFact {
   kind: string;
   direction?: string;
   value: number;
   unit: string;
-  score?: number;
   window?: string;
-  /** Move left after subtracting beta times the Broad move. */
+  /** Times its threshold. */
+  size?: number;
+  /** A spike's minute, as a multiple of the hour's biggest minute. */
+  multiple?: number;
+  /** Move: share of the Day range, 0 to 1. */
+  share?: number;
+  /** Move: the part beyond the Broad move. */
   excess?: number;
+  /** Open interest: the change in USD. */
+  usd?: number;
+  /** Funding: sigmas from its own 24h median. */
+  z?: number;
+  /** Liquidations: basis points of open interest. */
+  bps?: number;
+  /** Board: liquid perps counted. */
+  liquid?: number;
+  liquidation_price?: number;
 }
 
-export interface AlertBoardRow {
-  market_index: number;
-  symbol: string;
-  score: number;
-  severity?: number;
-  setup: string;
-  direction: string;
-  factors: AlertFactorRow[];
-  /** 5m price move, sent even when price itself is not a factor. */
-  move_pct?: number | null;
-  /** Names moving with the Broad move, and names in the sample. */
-  breadth?: [number, number];
-  ts: number;
-}
-
-export interface AlertSetupStats {
-  setup: string;
+export interface AlertRuleStats {
+  rule: string;
   n: number;
-  hit_5m: number;
-  hit_15m: number | null;
-  avg_ex_5m: number;
-  avg_ex_15m: number | null;
+  measured: number;
+  /** Median Left, percent. Null until a row has its bars. */
+  left: number | null;
+  against: number | null;
+  opened: number;
 }
 
 export interface AlertStats {
   hours: number;
-  setups: AlertSetupStats[];
+  rules: AlertRuleStats[];
+}
+
+/** One liquid perp on the Activity board. A null cell has no baseline yet. */
+export interface ScanActivityRow {
+  market_index: number;
+  symbol: string;
+  move_5m: number | null;
+  /** The 5m move as a share of the Day range, 0 to 1. */
+  share: number | null;
+  day_range: number;
+  vol_x: number | null;
+  vol_usd_5m: number | null;
+  oi_5m: number | null;
+  oi_usd_5m: number | null;
+  funding: number;
+  funding_z: number | null;
+  premium: number;
+  premium_z: number | null;
+  held: boolean;
+}
+
+/** A market on the funding strip: its hourly rate is far from its own day. */
+export interface FundingExtremeRow {
+  market_index: number;
+  symbol: string;
+  funding: number;
+  z: number;
+  held: boolean;
+}
+
+export interface ToneBoardRow {
+  market_index: number;
+  symbol: string;
+  timeframe: string;
+  tone: "blue" | "orange";
+  closed_at: number;
+  close: number;
 }
 
 export interface ToneTimeframes {
@@ -424,17 +527,17 @@ export interface AlertEvent {
   ts: number;
   symbol: string;
   market_index: number;
-  kind: AlertKind;
+  /** The largest rule on the row. */
+  rule: AlertRule;
   severity: number;
   direction: string;
-  value: number;
-  baseline: number | null;
-  unit: string;
+  size: number;
+  price: number;
+  facts: AlertFact[];
+  /** "long", "short", "order" for a working order with no Position, or "". */
+  held: string;
+  started_at: number;
   note: string;
-  score?: number;
-  setup?: string;
-  factors?: AlertFactorRow[];
-  started_at?: number;
 }
 
 export const api = {
@@ -452,6 +555,9 @@ export const api = {
     request<Candle[]>(`/candles/${symbol}?resolution=${resolution}&count=${count}`),
   openInterest: (symbol: string, resolution = "1m", count = 500) =>
     request<OpenInterestSample[]>(`/oi/${symbol}?resolution=${resolution}&count=${count}`),
+  funding: (symbol: string, resolution = "1h", count = 500) =>
+    request<FundingSample[]>(`/funding/${symbol}?resolution=${resolution}&count=${count}`),
+  fundingAverage: (symbol: string) => request<FundingAverage>(`/funding/${symbol}/average`),
   activateMarket: (symbol: string) =>
     request<{ status: string }>(`/markets/${symbol}/activate`, { method: "POST" }),
   account: () => request<Account>("/account"),
@@ -471,11 +577,15 @@ export const api = {
     const qs = q.toString();
     return request<AlertEvent[]>(`/alerts${qs ? `?${qs}` : ""}`);
   },
-  alertBoard: () => request<AlertBoardRow[]>("/alerts/board"),
   alertStats: (hours = 24) => request<AlertStats>(`/alerts/stats?hours=${hours}`),
-  toneTimeframes: () => request<ToneTimeframes>("/alerts/timeframes"),
+  fundingExtremes: () => request<FundingExtremeRow[]>("/alerts/funding"),
+  alertOpened: (id: string) =>
+    request<{ status: string }>(`/alerts/${encodeURIComponent(id)}/opened`, { method: "POST" }),
+  scanActivity: () => request<ScanActivityRow[]>("/scan/activity"),
+  toneBoard: () => request<ToneBoardRow[]>("/scan/tones"),
+  toneTimeframes: () => request<ToneTimeframes>("/scan/tones/timeframes"),
   setToneTimeframes: (timeframes: string[]) =>
-    request<ToneTimeframes>("/alerts/timeframes", {
+    request<ToneTimeframes>("/scan/tones/timeframes", {
       method: "PUT",
       body: JSON.stringify({ timeframes }),
     }),
@@ -568,6 +678,21 @@ export const api = {
     request<AlgoBook>("/algos/planner/replan", {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  trailPreview: (body: Record<string, unknown>) =>
+    request<TrailPreview>("/algos/trail/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  trailEdit: (body: Record<string, unknown>) =>
+    request<AlgoBook>("/algos/trail/edit", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  trailStop: (algo_id: string, keepStop: boolean) =>
+    request<AlgoBook>("/algos/trail/stop", {
+      method: "POST",
+      body: JSON.stringify({ algo_id, keep_stop: keepStop }),
     }),
   kill: (flatten = false) =>
     request<{

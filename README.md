@@ -22,7 +22,7 @@ Personal software, not a product. There is no login: anyone who can reach the HT
 
 **Feed.** Lighter WebSocket fan-out. Public market data works without keys. Testnet or mainnet via `LIGHTER_NETWORK` in backend `.env`.
 
-Desk language is [CONTEXT.md](CONTEXT.md). Hard-to-reverse calls are in [docs/adr](docs/adr).
+Desk language is [CONTEXT.md](CONTEXT.md). Hard-to-reverse calls are in [docs/adr](docs/adr). Alert rules are in [docs/alert-rules.md](docs/alert-rules.md).
 
 ## Production
 

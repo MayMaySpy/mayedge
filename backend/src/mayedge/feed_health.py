@@ -14,6 +14,8 @@ _market_last_msg_at: int = 0
 _account_last_msg_at: int = 0
 _trade_subs: int = 0
 _trade_subs_target: int = 0
+_venue_down_since: int = 0
+_venue_down_reason: str | None = None
 _emitter: Callable[[dict[str, Any]], None] | None = None
 
 
@@ -26,6 +28,26 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def note_venue_down(reason: str) -> None:
+    """Lighter refused us as a whole (503, service restart). Cleared by the next live message."""
+    global _venue_down_since, _venue_down_reason
+    changed = _venue_down_reason != reason or not _venue_down_since
+    if not _venue_down_since:
+        _venue_down_since = _now_ms()
+    _venue_down_reason = reason
+    if changed:
+        _emit()
+
+
+def _clear_venue_down() -> bool:
+    global _venue_down_since, _venue_down_reason
+    if not _venue_down_since:
+        return False
+    _venue_down_since = 0
+    _venue_down_reason = None
+    return True
+
+
 def set_market_ws(
     status: FeedStatus,
     *,
@@ -36,6 +58,8 @@ def set_market_ws(
 ) -> None:
     global _market_ws, _market_last_msg_at, _trade_subs, _trade_subs_target
     _market_ws = status
+    if status == "live":
+        _clear_venue_down()
     if last_msg_at is not None:
         _market_last_msg_at = last_msg_at
     if trade_subs is not None:
@@ -49,7 +73,8 @@ def set_market_ws(
 def touch_market_msg() -> None:
     global _market_last_msg_at, _market_ws
     _market_last_msg_at = _now_ms()
-    if _market_ws != "live":
+    cleared = _clear_venue_down()
+    if _market_ws != "live" or cleared:
         _market_ws = "live"
         _emit()
 
@@ -59,6 +84,8 @@ def set_account_ws(
 ) -> None:
     global _account_ws, _account_last_msg_at
     _account_ws = status
+    if status == "live":
+        _clear_venue_down()
     if last_msg_at is not None:
         _account_last_msg_at = last_msg_at
     if broadcast:
@@ -68,7 +95,8 @@ def set_account_ws(
 def touch_account_msg() -> None:
     global _account_last_msg_at, _account_ws
     _account_last_msg_at = _now_ms()
-    if _account_ws != "live":
+    cleared = _clear_venue_down()
+    if _account_ws != "live" or cleared:
         _account_ws = "live"
         _emit()
 
@@ -82,6 +110,8 @@ def snapshot() -> dict[str, Any]:
         "account_last_msg_at": _account_last_msg_at,
         "trade_subs": _trade_subs,
         "trade_subs_target": _trade_subs_target,
+        "venue_down_since": _venue_down_since,
+        "venue_down_reason": _venue_down_reason,
         "ts": _now_ms(),
     }
 

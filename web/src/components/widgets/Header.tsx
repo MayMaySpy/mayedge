@@ -25,7 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FavoritesBar } from "@/components/widgets/FavoritesBar";
 import { MarketPicker } from "@/components/widgets/MarketPicker";
-import type { Market } from "@/lib/api";
+import type { FundingAverage, Market } from "@/lib/api";
 import { preferPerpMarket, algoBlotter, algoIsWorking } from "@/lib/algos";
 import { api } from "@/lib/api";
 import { useFavorites } from "@/lib/favorites";
@@ -43,6 +43,11 @@ import {
 import { AutoKillSection } from "@/components/widgets/AutoKillSection";
 import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
 import { formatFundingPct } from "@/lib/marketPicker";
+import { averageReading, headlineAverage } from "@/lib/funding";
+import { formatClock } from "@/lib/alertFormat";
+
+/** Prints settle hourly; a slow refresh keeps the average current. */
+const FUNDING_AVERAGE_REFRESH_MS = 10 * 60_000;
 
 interface HeaderProps {
   markets: Market[];
@@ -67,6 +72,7 @@ function HeaderStat({
   valueClass,
   hint,
   hintClass,
+  aside,
   title,
   loud,
 }: {
@@ -75,6 +81,7 @@ function HeaderStat({
   valueClass?: string;
   hint?: string;
   hintClass?: string;
+  aside?: ReactNode;
   title?: string;
   loud?: boolean;
 }) {
@@ -95,6 +102,7 @@ function HeaderStat({
           {hint}
         </span>
       ) : null}
+      {aside}
     </span>
   );
   if (!title) return body;
@@ -142,13 +150,64 @@ function HeaderFavorite({ symbol }: { symbol: string }) {
   );
 }
 
-function fundingTooltip(rate: number | null, apr: number | null): string | undefined {
+function fundingTooltip(
+  rate: number | null,
+  apr: number | null,
+  avg: FundingAverage | null
+): string | undefined {
   if (rate == null) return undefined;
   const parts = [`${formatFundingPct(rate)} per hour`, `${formatFundingPct(rate * 8)} / 8h`];
   if (apr != null && apr > 0) parts.push("longs pay shorts");
   else if (apr != null && apr < 0) parts.push("shorts pay longs");
   if (apr != null) parts.push(`${formatApr(apr)} APR`);
+  const means = (avg?.windows ?? [])
+    .map((w) => {
+      const read = averageReading(w);
+      return read ? `${read.label} ${formatApr(read.apr)}` : null;
+    })
+    .filter((part): part is string => part != null);
+  if (means.length) parts.push(`Settled average APR: ${means.join(", ")}`);
+  const venueDays = avg?.windows[avg.windows.length - 1]?.venue_days ?? 0;
+  if (means.length && venueDays > 0) parts.push(`${venueDays} days from Lighter's daily history`);
   return parts.join(". ");
+}
+
+function FundingAverageAside({ avg }: { avg: FundingAverage | null }) {
+  const read = headlineAverage(avg);
+  if (!read) return null;
+  return (
+    // Below xl the header has no room; the averages stay in the tooltip.
+    <span className="hidden items-baseline gap-1 font-mono text-sm tabular-nums text-muted-foreground xl:inline-flex">
+      <span aria-hidden>·</span>
+      <span>{read.label}</span>
+      <span className={read.apr > 0 ? "text-ask/80" : read.apr < 0 ? "text-bid/80" : undefined}>
+        {formatApr(read.apr)}
+      </span>
+    </span>
+  );
+}
+
+function useFundingAverage(symbol: string, perp: boolean): FundingAverage | null {
+  const [avg, setAvg] = useState<{ symbol: string; value: FundingAverage } | null>(null);
+  useEffect(() => {
+    if (!symbol || !perp) return;
+    let cancelled = false;
+    const load = () => {
+      api
+        .fundingAverage(symbol)
+        .then((value) => {
+          if (!cancelled) setAvg({ symbol, value });
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, FUNDING_AVERAGE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbol, perp]);
+  return perp && avg?.symbol === symbol ? avg.value : null;
 }
 
 export function Header({
@@ -180,6 +239,9 @@ export function Header({
   const algosRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
   const plannersRunning = workingAlgos.filter(
     (a) => a.algo_type === "planner" && algoIsWorking(a.status)
+  ).length;
+  const trailStopsRunning = workingAlgos.filter(
+    (a) => a.algo_type === "trail" && a.trail?.kind === "stop" && algoIsWorking(a.status)
   ).length;
   const bid = parseFloat(bbo.bid ?? "");
   const ask = parseFloat(bbo.ask ?? "");
@@ -218,12 +280,24 @@ export function Header({
           ? "stale"
           : "down";
 
-  const statusLabel =
-    worst === "live" ? "Live" : worst === "connecting" ? "Connecting" : worst === "stale" ? "Stale" : "Down";
+  // Lighter refusing everyone (maintenance, restart) is not our feed going stale: say so.
+  const venueDown = worst !== "live" && health.venue_down_since > 0;
+  const venueDownTitle = venueDown
+    ? `Lighter unavailable since ${formatClock(health.venue_down_since)}` +
+      (health.venue_down_reason ? ` (${health.venue_down_reason})` : "") +
+      " — usually venue maintenance. Reconnecting on its own."
+    : undefined;
+  const statusLabel = venueDown
+    ? "Lighter down"
+    : worst === "live" ? "Live" : worst === "connecting" ? "Connecting" : worst === "stale" ? "Stale" : "Down";
   const statusVariant = worst === "live" ? "bid" : worst === "connecting" ? "muted" : "ask";
 
   const fundingApr = current?.funding_apr ?? null;
   const fundingRate = current?.funding_rate ?? null;
+  const fundingAverage = useFundingAverage(
+    current?.symbol ?? "",
+    current?.is_perp !== false && fundingRate != null
+  );
   const oi = current?.open_interest ?? null;
 
   const openPositions = (account?.positions ?? []).filter((p) => parseFloat(p.size) !== 0);
@@ -234,7 +308,7 @@ export function Header({
       : mark != null
         ? `Mark ${formatPrice(mark)}`
         : undefined;
-  const fundingTitle = fundingTooltip(fundingRate, fundingApr);
+  const fundingTitle = fundingTooltip(fundingRate, fundingApr, fundingAverage);
 
   const distClass =
     distPct == null
@@ -283,7 +357,7 @@ export function Header({
   const flattenNotional = flattenLegs.reduce((s, l) => s + l.notional, 0);
 
   let healthBadge: ReactNode = (
-    <Badge variant={statusVariant}>
+    <Badge variant={statusVariant} title={venueDownTitle}>
       <span
         className={cn(
           "inline-block size-1.5 rounded-full",
@@ -317,6 +391,7 @@ export function Header({
             value={formatApr(fundingApr)}
             valueClass={fundingClass}
             hint={fundingApr != null ? "APR" : undefined}
+            aside={<FundingAverageAside avg={fundingAverage} />}
             title={fundingTitle}
           />
           <StatRule />
@@ -341,6 +416,12 @@ export function Header({
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Feeds</DropdownMenuLabel>
+                {venueDown && (
+                  <DropdownMenuItem disabled className="text-ask">
+                    Lighter down since {formatClock(health.venue_down_since)}
+                    {health.venue_down_reason ? ` · ${health.venue_down_reason}` : ""}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem disabled>
                   Market {health.market_ws}
                   {health.trade_subs_target
@@ -415,6 +496,13 @@ export function Header({
                   {plannersRunning === 1 ? "A Planner is" : `${plannersRunning} Planners are`} live.
                   Stop + cancel takes off its stop: without a flatten, the Position is left with
                   no stop.
+                </span>
+              )}
+              {trailStopsRunning > 0 && (
+                <span className="mt-2 block text-warn">
+                  {trailStopsRunning === 1 ? "A Trail Stop is" : `${trailStopsRunning} Trail Stops are`}{" "}
+                  live. Stop + cancel takes it off: without a flatten, its Position is left with no
+                  stop.
                 </span>
               )}
               {openPositions.length > 0 && (

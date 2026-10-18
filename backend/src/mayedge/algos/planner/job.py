@@ -33,16 +33,22 @@ from mayedge.algos.planner.plan import (
     ALGO_VERSION,
     Plan,
     PlannedStep,
+    PlannedTarget,
     PlannerParams,
     PlanRefused,
     Side,
     check_stop_live,
     check_targets_live,
+    entry_follow,
+    plan_size,
     plan_steps,
     price_plan,
     stop_price,
+    trail_price_distance,
 )
 from mayedge.algos.planner.state import PlannerBookView, PlannerState
+from mayedge.algos.trail import engine
+from mayedge.algos.trail.engine import Follow, Point
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional, fmt_decimal
@@ -69,6 +75,8 @@ class PlannerRunner:
         self._wake = asyncio.Event()
         self._lock = asyncio.Lock()
         self._pending_trades: list[dict[str, Any]] = []
+        # Trail F9: every print since the last evaluate, for a plan that trails on Last.
+        self._prints: list[Decimal] = []
         self._backoff_until = 0
         self._mismatch_since: int | None = None
         self._flat_since: int | None = None
@@ -231,6 +239,23 @@ class PlannerRunner:
             return ZERO
         return venue.dec(meta.mark_price) or venue.dec(meta.last_trade_price) or ZERO
 
+    def _tick(self) -> Decimal:
+        meta = self._exec().get_market_by_index(self._state.market_index)
+        if not meta:
+            return ZERO
+        return Decimal(10) ** -meta.price_decimals
+
+    def _prices(self) -> list[Decimal]:
+        """What the plan's trailing parts follow since the last look (Trail F9)."""
+        p = self._state.params
+        if p is None or not p.trails():
+            return []
+        if p.reference == "last":
+            prints, self._prints = self._prints, []
+            return prints
+        mark = self._mark()
+        return [mark] if mark > 0 else []
+
     # ── sends ────────────────────────────────────────────────────────────
 
     async def _send_entry(self) -> None:
@@ -240,7 +265,7 @@ class PlannerRunner:
         clip = self._place("entry", price=plan.entry, qty=plan.size)
         ex = self._exec()
         try:
-            if p.entry_type == "market":
+            if p.entry_type in ("market", "trail"):
                 await ex.create_market_order(
                     market_index=st.market_index,
                     side=p.side,
@@ -328,7 +353,7 @@ class PlannerRunner:
         assert st.plan is not None
         for t in st.plan.targets:
             role = f"tp{t.index}"
-            if role in self._gave_up:
+            if role in self._gave_up or t.order == "trail":
                 continue
             clips = [c for c in st.ledger.clips if self._role(c) == role]
             if any(c.status == "live" for c in clips):
@@ -498,6 +523,24 @@ class PlannerRunner:
             return
         if kind == "account":
             self._wake.set()
+            return
+        p = self._state.params
+        if p is None or not p.trails():
+            return
+        if kind == "prints":
+            if p.reference != "last" or int(msg.get("market_index") or -1) != self._state.market_index:
+                return
+            for raw in msg.get("prices") or []:
+                px = venue.dec(raw)
+                if px and px > 0:
+                    self._prints.append(px)
+            self._wake.set()
+            return
+        if kind == "market_stats":
+            for m in msg.get("markets") or []:
+                if isinstance(m, dict) and int(m.get("market_index") or -1) == self._state.market_index:
+                    self._wake.set()
+                    return
 
     async def start(
         self,
@@ -523,9 +566,15 @@ class PlannerRunner:
         try:
             if params.mode == "enter":
                 check_notional(plan.size, plan.entry, settings.max_order_notional)
-                if params.entry_type == "limit" and params.expiry_min:
+                if params.entry_type in ("limit", "trail") and params.expiry_min:
                     st.entry_deadline_ms = st.created_at + params.expiry_min * 60_000
-                await self._send_entry()
+                if params.entry_type == "trail":
+                    # E9: the desk holds the entry until the price comes back.
+                    f = entry_follow(params, self._tick())
+                    st.trails["entry"] = engine.follow(f, Point(), self._mark())
+                    st.reason = "entry following" if st.trails["entry"].active else "entry waits for its Activation"
+                else:
+                    await self._send_entry()
             else:
                 st.entry_filled = plan.size
                 st.expected_size = plan.size
@@ -602,19 +651,23 @@ class PlannerRunner:
             now = util.now_ms()
             self._drain_trades(now)
             self._sync_open(now)
+            prices = self._prices()
             if self._state.phase == "entering":
-                await self._evaluate_entry(now)
+                await self._evaluate_entry(now, prices)
             else:
-                await self._evaluate_manage(now)
+                await self._evaluate_manage(now, prices)
             if self._state.status in ACTIVE_STATUSES:
                 self._publish()
 
-    async def _evaluate_entry(self, now: int) -> None:
+    async def _evaluate_entry(self, now: int, prices: list[Decimal]) -> None:
         st = self._state
         p, plan = st.params, st.plan
         assert p is not None and plan is not None
         entry = self._latest("entry")
         if entry is None:
+            if p.entry_type == "trail":
+                await self._track_entry(now, prices)
+                return
             raise RuntimeError("planner entering with no entry")
         pos, avg = self._held()
         filled = max(min(entry.filled, plan.size), min(max(pos, ZERO), plan.size))
@@ -641,7 +694,7 @@ class PlannerRunner:
                 )
                 # A Market entry may come and go between two account updates.
                 market_over = (
-                    p.entry_type == "market"
+                    p.entry_type in ("market", "trail")
                     and not entry.seen_on_book
                     and now - entry.placed_at >= MARKET_ENTRY_GRACE_MS
                 )
@@ -661,6 +714,65 @@ class PlannerRunner:
             return
         await self._enter_managing(filled, avg or plan.entry)
 
+    def _end(self, reason: str) -> None:
+        st = self._state
+        st.status = ChaseStatus.DONE
+        st.reason = reason
+        self._book.finish(self)
+
+    async def _track_entry(self, now: int, prices: list[Decimal]) -> None:
+        """E9: follow the best price, and fire the entry when the price comes back."""
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None
+        if st.entry_deadline_ms and now >= st.entry_deadline_ms:
+            await self._cancel_all()
+            self._end("entry expired before it fired")  # E5, E6
+            return
+        f = entry_follow(p, self._tick())
+        sign = _sign(p.side)
+        point = st.trails.get("entry", Point())
+        for px in prices:
+            if (px - plan.stop) * sign <= 0:
+                st.trails["entry"] = point
+                await self._cancel_all()
+                self._end("stop reached before the entry fired")  # E4
+                return
+            point = engine.follow(f, point, px)
+            if point.active and point.trigger is not None and engine.crossed(f, point.trigger, px):
+                st.trails["entry"] = point
+                await self._fire_entry(px)
+                return
+        st.trails["entry"] = point
+        st.reason = "entry following" if point.active else "entry waits for its Activation"
+
+    async def _fire_entry(self, px: Decimal) -> None:
+        """E9 and P2: size from the price it fires at, check S1 again, send it at market."""
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None
+        ctx, _ = venue.market_context(self._exec(), st.market_index)
+        try:
+            size = plan_size(p, ctx, entry=px, stop=plan.stop)
+            st.plan = price_plan(
+                side=p.side,
+                entry=px,
+                stop=plan.stop,
+                size=size,
+                targets=p.targets,
+                ctx=ctx,
+                risk_pct=p.risk_pct,
+                stop_steps=p.stop_steps,
+                trail_stop=p.trail_stop,
+            )
+            check_notional(size, px, settings.max_order_notional)
+        except (PlanRefused, ValueError) as e:
+            await self._cancel_all()
+            self._end(f"entry did not fire: {e}")
+            return
+        await self._send_entry()
+        st.reason = f"entry fired at {_fmt(px)}"
+
     async def _enter_managing(self, filled: Decimal, avg: Decimal) -> None:
         """P4 and E3: re-draw the targets from the actual entry and put them on."""
         st = self._state
@@ -679,6 +791,7 @@ class PlannerRunner:
                 ctx=ctx,
                 risk_pct=plan.risk_pct,
                 stop_steps=p.stop_steps,
+                trail_stop=p.trail_stop,
             )
         except PlanRefused as e:
             st.status = ChaseStatus.PAUSED
@@ -686,7 +799,7 @@ class PlannerRunner:
             return
         await self._place_targets()
 
-    async def _evaluate_manage(self, now: int) -> None:
+    async def _evaluate_manage(self, now: int, prices: list[Decimal]) -> None:
         st = self._state
         p, plan = st.params, st.plan
         assert p is not None and plan is not None
@@ -736,6 +849,10 @@ class PlannerRunner:
             await self._place_stop()
         await self._place_targets()
         await self._take_step()
+        if st.status == ChaseStatus.RUNNING and st.phase == "managing":
+            await self._trail_stop(now, prices)
+        if st.status == ChaseStatus.RUNNING and st.phase == "managing":
+            await self._trail_targets(now, prices)
 
     def _due_step(self) -> PlannedStep | None:
         """The furthest Stop step whose target has filled in full and is not taken yet."""
@@ -757,8 +874,9 @@ class PlannerRunner:
         step = self._due_step()
         if step is None:
             return
+        price = self._step_price(step)
         current = st.stop_trigger if st.stop_trigger is not None else st.plan.stop
-        if (step.price - current) * _sign(self._side()) <= 0:
+        if (price - current) * _sign(self._side()) <= 0:
             st.steps_done = step.after
             return
         stop = self._live("stop")
@@ -779,7 +897,7 @@ class PlannerRunner:
                 self._close_side(),
                 role="sl",
                 kind="market",
-                trigger=_fmt(step.price) or "0",
+                trigger=_fmt(price) or "0",
                 slippage=p.slippage if p else 0.01,
             )
         except ValueError as e:
@@ -793,10 +911,225 @@ class PlannerRunner:
             st.steps_done = step.after
             st.reason = f"mark passed the step to {name}: closed at market"
             return
-        stop.price = step.price
-        st.stop_trigger = step.price
+        stop.price = price
+        st.stop_trigger = price
         st.steps_done = step.after
         st.reason = f"stop at {name}"
+
+    def _step_price(self, step: PlannedStep) -> Decimal:
+        """M2: a step to a Trail target goes to the price it filled at."""
+        st = self._state
+        assert st.plan is not None
+        if not step.to.startswith("tp"):
+            return step.price
+        target = next((t for t in st.plan.targets if f"tp{t.index}" == step.to), None)
+        if target is None or target.order != "trail":
+            return step.price
+        seqs = {c.seq for c in st.ledger.clips if self._role(c) == step.to}
+        fills = [f for f in st.ledger.fills if f.clip_seq in seqs]
+        qty = sum((f.qty for f in fills), ZERO)
+        if qty <= 0:
+            return step.price
+        avg = sum((f.price * f.qty for f in fills), ZERO) / qty
+        return stop_price(self._side(), avg, self._tick())
+
+    def _leg_follow(
+        self, distance: Decimal, kind: engine.DistanceKind, *, activation: Decimal | None, floor: Decimal | None
+    ) -> Follow:
+        return Follow(
+            side=self._close_side(),
+            distance=distance,
+            distance_kind=kind,
+            tick=self._tick(),
+            activation=activation,
+            floor=floor,
+        )
+
+    def _venue_wanted(self, f: Follow, point: Point) -> Decimal:
+        """Trail L2: on Last the venue Stop sits one step behind the desk's trigger."""
+        p = self._state.params
+        assert p is not None and point.trigger is not None
+        if p.reference == "mark":
+            return point.trigger
+        return engine.backstop(f, point.trigger, point.best or point.trigger)
+
+    def _move_due(self, role: str, f: Follow, *, venue_at: Decimal, wanted: Decimal, best: Decimal, now: int) -> bool:
+        if not engine.move_due(
+            f, venue=venue_at, wanted=wanted, best=best, now_ms=now,
+            last_move_ms=self._state.trail_moves.get(role),
+        ):
+            return False
+        return self._book.take_amend(self._state.market_index, now)
+
+    async def _amend_trigger(self, clip: Clip, trigger: Decimal) -> bool | None:
+        """Amend a trailing venue Stop. False when mark has passed it; None if not on the book yet."""
+        await self._await_order_index(clip)
+        if not clip.order_index:
+            return None
+        ex = self._exec()
+        if ex.amend_trigger_leg is None:
+            raise RuntimeError("trigger amend is not wired")
+        p = self._state.params
+        try:
+            await ex.amend_trigger_leg(
+                self._state.market_index,
+                clip.order_index,
+                self._close_side(),
+                role="sl",
+                kind="market",
+                trigger=_fmt(trigger) or "0",
+                slippage=p.slippage if p else 0.01,
+            )
+        except ValueError as e:
+            if "wrong side of mark" not in str(e):
+                raise
+            return False
+        clip.price = trigger
+        return True
+
+    def _trail_stop_started(self) -> bool:
+        st = self._state
+        assert st.params is not None and st.plan is not None
+        ts = st.params.trail_stop
+        if ts is None:
+            return False
+        if ts.start == "r":
+            return True  # its Activation is the R multiple
+        targets = st.plan.targets
+        if not targets:
+            return True  # all Runner: it trails from the fill
+        n = targets[-1].index if ts.start == "last" else ts.after
+        tp = self._latest(f"tp{n}")
+        return tp is not None and tp.status == "filled" and tp.filled >= tp.qty
+
+    async def _trail_stop(self, now: int, prices: list[Decimal]) -> None:
+        """M10: past its start the stop follows the best price, never below the stepped stop."""
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None
+        ts = p.trail_stop
+        stop = self._live("stop")
+        if ts is None or stop is None or not self._trail_stop_started():
+            return
+        distance, kind = trail_price_distance(ts.unit, ts.distance, plan.r)
+        activation = None
+        if ts.start == "r" and ts.at_r is not None:
+            activation = plan.entry + _sign(p.side) * plan.r * ts.at_r
+        current = st.stop_trigger if st.stop_trigger is not None else plan.stop
+        f = self._leg_follow(distance, kind, activation=activation, floor=current)
+        point = st.trails.get("stop", Point())
+        for px in prices:
+            point = engine.follow(f, point, px)
+            trigger = point.trigger
+            if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
+                st.trails["stop"] = point
+                await self._close_at_market()  # Trail L1
+                st.reason = f"trail stop: closed at market at {_fmt(px)}"
+                return
+        st.trails["stop"] = point
+        if not point.active or point.trigger is None:
+            return
+        wanted = self._venue_wanted(f, point)
+        if not self._move_due("stop", f, venue_at=current, wanted=wanted, best=point.best or wanted, now=now):
+            return
+        moved = await self._amend_trigger(stop, wanted)
+        if moved is None:
+            return
+        if not moved:
+            await self._close_at_market()  # M9, Trail V2
+            st.reason = "mark passed the trail stop: closed at market"
+            return
+        st.stop_trigger = wanted
+        st.trail_moves["stop"] = now
+        st.reason = f"stop trailing at {_fmt(wanted)}"
+
+    async def _trail_targets(self, now: int, prices: list[Decimal]) -> None:
+        """P9 Trail: at its price a target puts on a reduce-only Stop for its size, and follows."""
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None
+        for t in plan.targets:
+            if t.order == "trail" and t.trail_distance is not None:
+                await self._trail_target(t, now, prices)
+                if st.status != ChaseStatus.RUNNING:
+                    return
+
+    async def _trail_target(self, t: PlannedTarget, now: int, prices: list[Decimal]) -> None:
+        st = self._state
+        p = st.params
+        assert p is not None and t.trail_distance is not None
+        role = f"tp{t.index}"
+        if role in self._gave_up:
+            return
+        clips = [c for c in st.ledger.clips if self._role(c) == role]
+        left = t.qty - sum((c.filled for c in clips), ZERO)
+        live = [c for c in clips if c.status == "live"]
+        if left <= 0:
+            return
+        if role in st.trail_fired:
+            if live:
+                return  # the fire is out; the fill or the grace decides
+            st.trail_fired.discard(role)
+        f = self._leg_follow(t.trail_distance, t.trail_kind, activation=t.price, floor=None)
+        point = st.trails.get(role, Point())
+        for px in prices:
+            point = engine.follow(f, point, px)
+            trigger = point.trigger
+            if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
+                st.trails[role] = point
+                await self._fire_target(role, live, left, px)
+                return
+        st.trails[role] = point
+        if not point.active or point.trigger is None:
+            return
+        wanted = self._venue_wanted(f, point)
+        clip = live[0] if live else None
+        if clip is None:
+            clip = self._place(role, price=wanted, qty=left)
+            try:
+                await self._send_trigger(clip, role="sl", kind="market", size=left, trigger=wanted)
+            except ValueError as e:
+                if "wrong side of mark" not in str(e):
+                    self._gave_up.add(role)
+                    st.reason = f"target {t.index} refused: {e}"
+                    return
+                await self._fire_target(role, [], left, self._mark())  # Trail V2
+                return
+            st.trail_moves[role] = now
+            st.reason = f"TP{t.index} trailing at {_fmt(wanted)}"
+            return
+        if not self._move_due(role, f, venue_at=clip.price, wanted=wanted, best=point.best or wanted, now=now):
+            return
+        moved = await self._amend_trigger(clip, wanted)
+        if moved is None:
+            return
+        if not moved:
+            await self._fire_target(role, [clip], left, self._mark())
+            return
+        st.trail_moves[role] = now
+
+    async def _fire_target(self, role: str, live: list[Clip], left: Decimal, px: Decimal) -> None:
+        """Trail L1, L3: close the target's size at market, then pull its backstop."""
+        st = self._state
+        p = st.params
+        assert p is not None
+        pos, _ = self._held()
+        qty = min(left, pos)
+        if qty <= 0:
+            return
+        clip = self._place(role, price=px, qty=qty)
+        await self._exec().create_market_order(
+            market_index=st.market_index,
+            side=self._close_side(),
+            size=_fmt(qty),
+            slippage=p.slippage,
+            reduce_only=True,
+            client_order_index=clip.client_order_index,
+        )
+        st.trail_fired.add(role)
+        for c in live:
+            await self._cancel_clip(c)
+        st.reason = f"{role.upper()} fired at {_fmt(px)}"
 
     # ── operator ─────────────────────────────────────────────────────────
 
@@ -854,6 +1187,7 @@ class PlannerRunner:
                 targets=params.targets,
                 ctx=ctx,
                 stop_steps=params.stop_steps,
+                trail_stop=params.trail_stop,
             )
             check_targets_live(plan, ctx)
             live_stop = self._live("stop")
@@ -886,6 +1220,9 @@ class PlannerRunner:
             st.expected_size = pos
             # New targets step from the start; M4 still keeps the stop from going back.
             st.steps_done = 0
+            # New targets trail from new; the stop keeps its best price (F4).
+            st.trails = {k: v for k, v in st.trails.items() if not k.startswith("tp")}
+            st.trail_fired = {r for r in st.trail_fired if not r.startswith("tp")}
             st.status = ChaseStatus.RUNNING
             st.error = None
             st.reason = "re-planned"

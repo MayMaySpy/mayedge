@@ -16,11 +16,13 @@ import {
   prependTrades,
   resetLiveSession,
   seedAlerts,
-  setAlertBoard,
   seedLiquidations,
   setAccount,
   setAlgo,
   setBookSynced,
+  setFundingExtremes,
+  setScanActivity,
+  setToneBoard,
   setAutoKill,
   setFeedHealth,
   setMinuteCandles,
@@ -164,7 +166,9 @@ export function useMarketWs(symbol: string) {
           .alerts({ limit: 200 })
           .then(seedAlerts)
           .catch(() => {});
-        api.alertBoard().then(setAlertBoard).catch(() => {});
+        api.scanActivity().then(setScanActivity).catch(() => {});
+        api.toneBoard().then(setToneBoard).catch(() => {});
+        api.fundingExtremes().then(setFundingExtremes).catch(() => {});
       };
 
       ws.onmessage = (ev) => {
@@ -227,8 +231,14 @@ export function useMarketWs(symbol: string) {
           case "alerts":
             prependAlerts((msg.events as import("@/lib/api").AlertEvent[]) ?? []);
             break;
-          case "alert_board":
-            setAlertBoard((msg.rows as import("@/lib/api").AlertBoardRow[]) ?? []);
+          case "scan_activity":
+            setScanActivity((msg.rows as import("@/lib/api").ScanActivityRow[]) ?? []);
+            break;
+          case "funding_extremes":
+            setFundingExtremes((msg.rows as import("@/lib/api").FundingExtremeRow[]) ?? []);
+            break;
+          case "tone_board":
+            setToneBoard((msg.rows as import("@/lib/api").ToneBoardRow[]) ?? []);
             break;
           case "feed_health":
             setFeedHealth(msg);

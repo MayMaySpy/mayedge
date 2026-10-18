@@ -1,4 +1,4 @@
-"""Open-interest samples. A level, not a flow: minutes for 30 days, then a daily high/low/close."""
+"""Open-interest samples. A level, not a flow: minutes for 30 days, then an hourly high/low/close."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from mayedge.db import _connect, _lock
 logger = logging.getLogger(__name__)
 
 OI_MINUTE_S = 60
+OI_HOUR_S = 3600
+OI_HOUR_MS = OI_HOUR_S * 1000
 OI_DAY_S = 86_400
 OI_DAY_MS = OI_DAY_S * 1000
 OI_DETAIL_MS = 30 * OI_DAY_MS
@@ -83,6 +85,27 @@ def flush_open_interest(rows: list[dict[str, Any]], *, minute_index: int) -> int
     return len(payload)
 
 
+def recent_open_interest(since_minute: int) -> dict[int, list[tuple[int, float]]]:
+    """Each perp's stored minutes from ``since_minute`` on, oldest first."""
+    with _lock:
+        conn = _connect()
+        found = conn.execute(
+            """
+            SELECT market_index, minute_index, oi_usd
+            FROM oi_samples
+            WHERE minute_index >= ?
+            ORDER BY minute_index
+            """,
+            (int(since_minute),),
+        ).fetchall()
+    out: dict[int, list[tuple[int, float]]] = {}
+    for row in found:
+        out.setdefault(int(row["market_index"]), []).append(
+            (int(row["minute_index"]), float(row["oi_usd"]))
+        )
+    return out
+
+
 def list_open_interest(
     market_index: int,
     *,
@@ -91,8 +114,8 @@ def list_open_interest(
 ) -> list[dict[str, Any]]:
     """Last `count` bucket closes for one market. Time is unix seconds at the bucket open.
 
-    Gaps are omitted. A 1d bucket inside the detail horizon uses the last minute;
-    an older day uses that day's close.
+    Gaps are omitted. Minutes cover the last 30 days. Older history is hourly, so
+    1h, 4h and 1d buckets reach back to the first sample; 1m-15m stop at 30 days.
     """
     step = OI_RESOLUTIONS.get(resolution)
     if step is None:
@@ -101,40 +124,20 @@ def list_open_interest(
     idx = int(market_index)
     with _lock:
         conn = _connect()
-        day_rows: list[Any] = []
-        if resolution == "1d":
-            day_rows = conn.execute(
-                """
-                SELECT day_index * ? AS time, oi_close AS open_interest
-                FROM oi_days
-                WHERE market_index = ?
-                """,
-                (OI_DAY_S, idx),
+        hour_rows: list[Any] = []
+        if step >= OI_HOUR_S:
+            hour_rows = conn.execute(
+                _LAST_IN_BUCKET.format(table="oi_hours", col="hour_index", value="oi_close"),
+                (OI_HOUR_S, step, OI_HOUR_S, step, idx, step, n),
             ).fetchall()
         sample_rows = conn.execute(
-            """
-            WITH ranked AS (
-                SELECT
-                    (minute_index * ?) / ? AS bucket,
-                    oi_usd,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY (minute_index * ?) / ?
-                        ORDER BY minute_index DESC
-                    ) AS rn
-                FROM oi_samples
-                WHERE market_index = ?
-            )
-            SELECT bucket * ? AS time, oi_usd AS open_interest
-            FROM ranked
-            WHERE rn = 1
-            ORDER BY bucket DESC
-            LIMIT ?
-            """,
+            _LAST_IN_BUCKET.format(table="oi_samples", col="minute_index", value="oi_usd"),
             (OI_MINUTE_S, step, OI_MINUTE_S, step, idx, step, n),
         ).fetchall()
     by_time: dict[int, float] = {}
-    for row in day_rows:
+    for row in hour_rows:
         by_time[int(row["time"])] = float(row["open_interest"])
+    # Minutes are later than any folded hour in the same bucket, so they hold its close.
     for row in sample_rows:
         by_time[int(row["time"])] = float(row["open_interest"])
     times = sorted(by_time)
@@ -143,13 +146,33 @@ def list_open_interest(
     return [{"time": t, "open_interest": by_time[t]} for t in times]
 
 
+_LAST_IN_BUCKET = """
+    WITH ranked AS (
+        SELECT
+            ({col} * ?) / ? AS bucket,
+            {value} AS value,
+            ROW_NUMBER() OVER (
+                PARTITION BY ({col} * ?) / ?
+                ORDER BY {col} DESC
+            ) AS rn
+        FROM {table}
+        WHERE market_index = ?
+    )
+    SELECT bucket * ? AS time, value AS open_interest
+    FROM ranked
+    WHERE rn = 1
+    ORDER BY bucket DESC
+    LIMIT ?
+"""
+
+
 def fold_open_interest(*, now_ms: int) -> int:
-    """Fold UTC days fully older than 30 days into one high/low/close. Returns minutes removed."""
-    fold_before_day = (int(now_ms) - OI_DETAIL_MS) // OI_DAY_MS
+    """Fold UTC hours fully older than 30 days into one high/low/close. Returns minutes removed."""
+    fold_before_hour = (int(now_ms) - OI_DETAIL_MS) // OI_HOUR_MS
     with _lock:
         conn = _connect()
         try:
-            removed = _fold_locked(conn, fold_before_day)
+            removed = _fold_locked(conn, fold_before_hour)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -157,8 +180,8 @@ def fold_open_interest(*, now_ms: int) -> int:
     return removed
 
 
-def _fold_locked(conn: Any, fold_before_day: int) -> int:
-    params = (OI_MINUTE_S, OI_DAY_S, OI_MINUTE_S, OI_DAY_S, int(fold_before_day))
+def _fold_locked(conn: Any, fold_before_hour: int) -> int:
+    params = (OI_MINUTE_S, OI_HOUR_S, OI_MINUTE_S, OI_HOUR_S, int(fold_before_hour))
     conn.execute(
         """
         WITH foldable AS (
@@ -167,7 +190,7 @@ def _fold_locked(conn: Any, fold_before_day: int) -> int:
                 symbol,
                 minute_index,
                 oi_usd,
-                (minute_index * ?) / ? AS day_index
+                (minute_index * ?) / ? AS hour_index
             FROM oi_samples
             WHERE (minute_index * ?) / ? < ?
         ),
@@ -175,30 +198,30 @@ def _fold_locked(conn: Any, fold_before_day: int) -> int:
             SELECT
                 *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY day_index, market_index
+                    PARTITION BY hour_index, market_index
                     ORDER BY minute_index DESC
                 ) AS rn
             FROM foldable
         )
-        INSERT INTO oi_days (day_index, market_index, symbol, oi_high, oi_low, oi_close)
+        INSERT INTO oi_hours (hour_index, market_index, symbol, oi_high, oi_low, oi_close)
         SELECT
-            day_index,
+            hour_index,
             market_index,
             MAX(CASE WHEN rn = 1 THEN symbol END),
             MAX(oi_usd),
             MIN(oi_usd),
             MAX(CASE WHEN rn = 1 THEN oi_usd END)
         FROM ranked
-        GROUP BY day_index, market_index
-        ON CONFLICT(day_index, market_index) DO UPDATE SET
+        GROUP BY hour_index, market_index
+        ON CONFLICT(hour_index, market_index) DO UPDATE SET
             symbol = excluded.symbol,
             oi_high = CASE
-                WHEN excluded.oi_high > oi_days.oi_high THEN excluded.oi_high
-                ELSE oi_days.oi_high
+                WHEN excluded.oi_high > oi_hours.oi_high THEN excluded.oi_high
+                ELSE oi_hours.oi_high
             END,
             oi_low = CASE
-                WHEN excluded.oi_low < oi_days.oi_low THEN excluded.oi_low
-                ELSE oi_days.oi_low
+                WHEN excluded.oi_low < oi_hours.oi_low THEN excluded.oi_low
+                ELSE oi_hours.oi_low
             END,
             oi_close = excluded.oi_close
         """,
@@ -209,7 +232,7 @@ def _fold_locked(conn: Any, fold_before_day: int) -> int:
         DELETE FROM oi_samples
         WHERE (minute_index * ?) / ? < ?
         """,
-        (OI_MINUTE_S, OI_DAY_S, int(fold_before_day)),
+        (OI_MINUTE_S, OI_HOUR_S, int(fold_before_hour)),
     )
     removed = conn.execute("SELECT changes()").fetchone()
     return int(removed[0] if removed is not None else 0)

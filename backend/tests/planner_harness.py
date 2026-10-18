@@ -213,5 +213,13 @@ class FakeBook:
         self.coi += 1
         return self.coi
 
+    amend_budget = 1_000
+
+    def take_amend(self, market_index: int, now_ms: int) -> bool:
+        if self.amend_budget <= 0:
+            return False
+        self.amend_budget -= 1
+        return True
+
     def execution(self) -> ChaseExecution:
         return self.venue.execution()

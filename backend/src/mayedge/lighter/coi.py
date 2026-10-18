@@ -7,6 +7,7 @@ from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
 from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
+from mayedge.algos.trail.config import TRAIL_COI_BASE, TRAIL_COI_END
 from mayedge.algos.twap.plan import TWAP_COI_BASE, TWAP_COI_END
 
 MANUAL_COI_BASE = 1_000_000_000
@@ -18,6 +19,7 @@ _ALGO_COI_BANDS = (
     (LADDER_COI_BASE, LADDER_COI_END),
     (GRID_COI_BASE, GRID_COI_END),
     (PLANNER_COI_BASE, PLANNER_COI_END),
+    (TRAIL_COI_BASE, TRAIL_COI_END),
 )
 
 

@@ -123,14 +123,14 @@ CREATE TABLE IF NOT EXISTS oi_samples (
 
 CREATE INDEX IF NOT EXISTS idx_oi_samples_minute ON oi_samples(minute_index);
 
-CREATE TABLE IF NOT EXISTS oi_days (
-    day_index INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS oi_hours (
+    hour_index INTEGER NOT NULL,
     market_index INTEGER NOT NULL,
     symbol TEXT NOT NULL,
     oi_high REAL NOT NULL,
     oi_low REAL NOT NULL,
     oi_close REAL NOT NULL,
-    PRIMARY KEY (day_index, market_index)
+    PRIMARY KEY (hour_index, market_index)
 );
 
 CREATE TABLE IF NOT EXISTS alert_outcomes (
@@ -148,6 +148,47 @@ CREATE TABLE IF NOT EXISTS alert_outcomes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_outcomes_opened ON alert_outcomes(opened_at);
+
+CREATE TABLE IF NOT EXISTS alert_rows (
+    id TEXT PRIMARY KEY,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    severity INTEGER NOT NULL,
+    direction TEXT NOT NULL,
+    held TEXT NOT NULL DEFAULT '',
+    fired_at INTEGER NOT NULL,
+    price REAL NOT NULL,
+    facts TEXT NOT NULL DEFAULT '[]',
+    left_pct REAL,
+    against_pct REAL,
+    opened_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_rows_fired ON alert_rows(fired_at);
+
+CREATE TABLE IF NOT EXISTS funding_samples (
+    market_index INTEGER NOT NULL,
+    minute_index INTEGER NOT NULL,
+    funding REAL NOT NULL,
+    PRIMARY KEY (market_index, minute_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_funding_samples_minute ON funding_samples(minute_index);
+
+CREATE TABLE IF NOT EXISTS funding_prints (
+    market_index INTEGER NOT NULL,
+    hour_index INTEGER NOT NULL,
+    rate REAL NOT NULL,
+    PRIMARY KEY (market_index, hour_index)
+);
+
+CREATE TABLE IF NOT EXISTS funding_days (
+    market_index INTEGER NOT NULL,
+    day_index INTEGER NOT NULL,
+    rate REAL NOT NULL,
+    PRIMARY KEY (market_index, day_index)
+);
 """
 
 _LIQ_TABLE = """
@@ -181,7 +222,7 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
 
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 12
 
 
 def _meta_int(
@@ -307,6 +348,91 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 PRIMARY KEY (episode_id, horizon_min)
             );
             CREATE INDEX IF NOT EXISTS idx_alert_outcomes_opened ON alert_outcomes(opened_at);
+            """
+        )
+    if version < 8:
+        # alert_outcomes stays where it is. Nothing reads it; its rows used the old clock.
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS alert_rows (
+                id TEXT PRIMARY KEY,
+                market_index INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                rule TEXT NOT NULL,
+                severity INTEGER NOT NULL,
+                direction TEXT NOT NULL,
+                held TEXT NOT NULL DEFAULT '',
+                fired_at INTEGER NOT NULL,
+                price REAL NOT NULL,
+                facts TEXT NOT NULL DEFAULT '[]',
+                left_pct REAL,
+                against_pct REAL,
+                opened_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_alert_rows_fired ON alert_rows(fired_at);
+            """
+        )
+    if version < 9:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS funding_samples (
+                market_index INTEGER NOT NULL,
+                minute_index INTEGER NOT NULL,
+                funding REAL NOT NULL,
+                PRIMARY KEY (market_index, minute_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_funding_samples_minute
+                ON funding_samples(minute_index);
+            """
+        )
+    if version < 10:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS funding_prints (
+                market_index INTEGER NOT NULL,
+                hour_index INTEGER NOT NULL,
+                rate REAL NOT NULL,
+                PRIMARY KEY (market_index, hour_index)
+            )
+            """
+        )
+    if version < 11:
+        # Old minutes now fold into hours. A folded day becomes its last hour.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS oi_hours (
+                hour_index INTEGER NOT NULL,
+                market_index INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                oi_high REAL NOT NULL,
+                oi_low REAL NOT NULL,
+                oi_close REAL NOT NULL,
+                PRIMARY KEY (hour_index, market_index)
+            )
+            """
+        )
+        has_days = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'oi_days'"
+        ).fetchone()
+        if has_days:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO oi_hours
+                    (hour_index, market_index, symbol, oi_high, oi_low, oi_close)
+                SELECT day_index * 24 + 23, market_index, symbol, oi_high, oi_low, oi_close
+                FROM oi_days
+                """
+            )
+            conn.execute("DROP TABLE oi_days")
+    if version < 12:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS funding_days (
+                market_index INTEGER NOT NULL,
+                day_index INTEGER NOT NULL,
+                rate REAL NOT NULL,
+                PRIMARY KEY (market_index, day_index)
+            )
             """
         )
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
@@ -478,6 +604,21 @@ from mayedge.persist_algo import (  # noqa: E402
     load_history,
     upsert_run,
 )
+from mayedge.persist_funding import (  # noqa: E402
+    flush_funding,
+    flush_funding_prints,
+    funding_averages,
+    funding_backfill_done,
+    funding_days_backfill_done,
+    funding_prints_for,
+    insert_funding_days,
+    insert_missing_funding_prints,
+    list_funding,
+    mark_funding_backfill_done,
+    mark_funding_days_backfill_done,
+    recent_funding,
+    recent_funding_prints,
+)
 from mayedge.persist_liq import (  # noqa: E402
     fold_liquidations,
     fold_liquidations_if_due,
@@ -490,17 +631,27 @@ from mayedge.persist_oi import (  # noqa: E402
     fold_open_interest,
     fold_open_interest_if_due,
     list_open_interest,
+    recent_open_interest,
 )
 
 __all__ = [
     "close_db",
+    "flush_funding",
+    "flush_funding_prints",
     "flush_open_interest",
     "fold_liquidations",
     "fold_liquidations_if_due",
     "fold_open_interest",
     "fold_open_interest_if_due",
+    "funding_averages",
+    "funding_backfill_done",
+    "funding_days_backfill_done",
+    "funding_prints_for",
     "init_db",
+    "insert_funding_days",
     "insert_liquidations",
+    "insert_missing_funding_prints",
+    "list_funding",
     "list_liquidations",
     "list_open_interest",
     "load_active_runs",
@@ -508,6 +659,11 @@ __all__ = [
     "load_counters",
     "load_history",
     "load_manual_coi_seq",
+    "mark_funding_backfill_done",
+    "mark_funding_days_backfill_done",
+    "recent_funding",
+    "recent_funding_prints",
+    "recent_open_interest",
     "save_book_counters",
     "save_counters",
     "save_manual_coi_seq",

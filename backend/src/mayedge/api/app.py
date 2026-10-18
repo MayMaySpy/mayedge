@@ -184,21 +184,35 @@ def create_app() -> FastAPI:
         cap = max(1, min(int(limit), 1000))
         return gateway.recent_alerts()[:cap]
 
-    @app.get("/api/alerts/board")
-    async def get_alert_board() -> list[dict[str, Any]]:
-        return gateway.recent_alert_board()
-
     @app.get("/api/alerts/stats")
     async def get_alert_stats(hours: int = 24) -> dict[str, Any]:
         span = max(1, min(int(hours), 24 * 30))
         return gateway.alert_stats(span)
 
-    @app.get("/api/alerts/timeframes")
-    async def get_alert_timeframes() -> dict[str, Any]:
+    @app.get("/api/alerts/funding")
+    async def get_funding_extremes() -> list[dict[str, Any]]:
+        return gateway.funding_extremes()
+
+    @app.post("/api/alerts/{alert_id}/opened")
+    async def post_alert_opened(alert_id: str) -> dict[str, str]:
+        if not gateway.alert_opened(alert_id):
+            raise HTTPException(404, "Alert not found")
+        return {"status": "ok"}
+
+    @app.get("/api/scan/activity")
+    async def get_scan_activity() -> list[dict[str, Any]]:
+        return gateway.scan_activity()
+
+    @app.get("/api/scan/tones")
+    async def get_scan_tones() -> list[dict[str, Any]]:
+        return gateway.tone_board()
+
+    @app.get("/api/scan/tones/timeframes")
+    async def get_tone_timeframes() -> dict[str, Any]:
         return gateway.tone_timeframes_view()
 
-    @app.put("/api/alerts/timeframes")
-    async def put_alert_timeframes(body: ToneTimeframesRequest) -> dict[str, Any]:
+    @app.put("/api/scan/tones/timeframes")
+    async def put_tone_timeframes(body: ToneTimeframesRequest) -> dict[str, Any]:
         try:
             return gateway.set_tone_timeframes(body.timeframes)
         except ValueError as e:
@@ -254,6 +268,30 @@ def create_app() -> FastAPI:
             return store.list_open_interest(meta.market_index, resolution=resolution, count=n)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    @app.get("/api/funding/{symbol}")
+    async def get_funding_history(
+        symbol: str, resolution: str = "1h", count: int = 500
+    ) -> list[dict[str, Any]]:
+        meta = gateway.get_market(symbol)
+        if not meta:
+            raise HTTPException(404, "Market not found")
+        if not meta.is_perp:
+            return []
+        n = min(max(int(count), 1), 3600)
+        try:
+            return store.list_funding(meta.market_index, resolution=resolution, count=n)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/api/funding/{symbol}/average")
+    async def get_funding_average(symbol: str) -> dict[str, Any]:
+        meta = gateway.get_market(symbol)
+        if not meta:
+            raise HTTPException(404, "Market not found")
+        if not meta.is_perp:
+            return {"windows": [], "first_time": None}
+        return store.funding_averages(meta.market_index)
 
     @app.get("/api/candles/{symbol}")
     async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
@@ -372,6 +410,8 @@ def create_app() -> FastAPI:
         _require_trading()
         if desk.planner_owns_exit(req.market_index):
             raise HTTPException(409, "Planner owns the exit on this Market")
+        if req.sl is not None and desk.trail_stop_owns_stop(req.market_index):
+            raise HTTPException(409, "A Trail Stop is this Position's stop")
         return await _trade(
             lambda: order_service.create_sl_tp(
                 req.market_index,
@@ -475,6 +515,30 @@ def create_app() -> FastAPI:
             await desk.planner_book.replan_from_body(body)
         except (ValueError, ArithmeticError, KeyError) as e:
             raise HTTPException(400, str(e)) from e
+        return desk.algo_book()
+
+    @app.post("/api/algos/trail/preview")
+    async def preview_trail(body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return desk.trail_book.preview_from_body(body)
+        except (ValueError, ArithmeticError, KeyError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/algos/trail/edit")
+    async def edit_trail(body: dict[str, Any]) -> dict[str, Any]:
+        _require_trading()
+        try:
+            await desk.trail_book.edit_from_body(body)
+        except (ValueError, ArithmeticError, KeyError) as e:
+            raise HTTPException(400, str(e)) from e
+        return desk.algo_book()
+
+    @app.post("/api/algos/trail/stop")
+    async def stop_trail(body: dict[str, Any]) -> dict[str, Any]:
+        algo_id = str(body.get("algo_id") or "")
+        if not desk.trail_book.has(algo_id):
+            raise HTTPException(404, f"Unknown Trail {algo_id!r}")
+        await desk.trail_book.stop(algo_id, keep_stop=bool(body.get("keep_stop")))
         return desk.algo_book()
 
     @app.post("/api/algos/{algo_type}/start")
