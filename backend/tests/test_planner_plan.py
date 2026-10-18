@@ -6,6 +6,7 @@ from decimal import Decimal as D
 from typing import Any
 
 from mayedge.algos.planner.plan import (
+    EntryChase,
     MarketContext,
     PlannerParams,
     PlanRefused,
@@ -301,3 +302,40 @@ class ParamsJsonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChaseEntryTests(unittest.TestCase):
+    def _chase(self, **kw: Any) -> PlannerParams:
+        band = EntryChase(low=D("2.15"), high=D("2.2"))
+        return _enter(entry_type="chase", entry_price=None, entry_chase=band, **kw)
+
+    def test_a_chase_entry_is_sized_from_the_worst_fill_in_its_band(self) -> None:
+        plan = build_plan(self._chase(size=None, risk_pct=D("1")), ZRO)
+        self.assertEqual(plan.entry, D("2.2"))
+        # 55.37 ÷ (2.2 − 2.0854) = 483.1, against 525 for a Limit at 2.19082.
+        self.assertEqual(plan.size, D("483"))
+        assert plan.risk_pct is not None
+        self.assertLessEqual(plan.risk_pct, D("1"))
+
+    def test_a_stop_inside_the_chase_band_is_refused(self) -> None:
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(self._chase(stop=D("2.16")), _ctx(mark=D("2.18")))
+        self.assertEqual(e.exception.rule, "E11")
+        short = self._chase(side="sell", stop=D("2.19"), targets=[Target("r", D("2"), D("100"))])
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(short, _ctx(mark=D("2.17")))
+        self.assertEqual(e.exception.rule, "E11")
+
+    def test_a_chase_band_with_its_low_over_its_high_is_refused(self) -> None:
+        with self.assertRaises(PlanRefused) as e:
+            PlannerParams.from_json(
+                {"side": "buy", "stop": "1", "entry_type": "chase",
+                 "entry_chase": {"low": "2.2", "high": "2.1"}, "targets": []}
+            )
+        self.assertEqual(e.exception.rule, "E11")
+
+    def test_a_chase_entry_survives_a_save(self) -> None:
+        params = self._chase(size=D("10"))
+        again = PlannerParams.from_json(params.to_json())
+        self.assertEqual(again.entry_chase, params.entry_chase)
+

@@ -46,6 +46,8 @@ class PlannerState:
     trail_moves: dict[str, int] = field(default_factory=dict)
     # Trail targets on Last the desk has fired (L1).
     trail_fired: set[str] = field(default_factory=set)
+    # E14: the operator ended the entry early.
+    finish_entry: bool = False
 
     def runtime_json(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,7 @@ class PlannerState:
             },
             "trail_moves": dict(self.trail_moves),
             "trail_fired": sorted(self.trail_fired),
+            "finish_entry": self.finish_entry,
         }
 
     def load_runtime(self, raw: dict[str, Any]) -> None:
@@ -98,6 +101,7 @@ class PlannerState:
         moves = raw.get("trail_moves") or {}
         self.trail_moves = {str(k): int(v) for k, v in moves.items()} if isinstance(moves, dict) else {}
         self.trail_fired = {str(x) for x in raw.get("trail_fired") or []}
+        self.finish_entry = bool(raw.get("finish_entry"))
 
 
 def _dec(raw: object) -> Decimal | None:

@@ -24,7 +24,10 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 |---|---|---|
 | Mode | Enter, Attach | Enter sends the entry. Attach takes over a Position already open. |
 | Side | long, short | Attach takes it from the Position. |
-| Entry type | Market, Limit, Trail | Enter only. A Trail entry also takes an Activation (optional) and a distance (% or price). |
+| Entry type | Market, Limit, Trail, Chase | Enter only. A Trail entry also takes an Activation (optional) and a distance (% or price). A Chase entry takes a band, an offset and a clip (E10). Ladder is planned, not built (EL1–EL4). |
+| Chase band | low, high | Chase only. The prices the entry works between. |
+| Chase offset | bps | Chase only. How far behind the touch the Clip rests. 4 by default. |
+| Chase clip | size, or none | Chase only. The most one Clip shows. None works the whole size at once. |
 | Entry price | price | Limit only. A Market entry plans from mark at send. |
 | Stop | price | Required. It defines **R**. |
 | Size | size, or risk % of equity | Enter only. Attach takes the Position's size. |
@@ -32,14 +35,14 @@ Every number in a plan comes from the one stop. There is no second, suggested st
 | Stop steps | Off, Breakeven, Step up | Breakeven by default. |
 | Trail stop | Off, after a target, after the last target, or at an R multiple; distance in R or % | Off by default. |
 | Reference | Mark, Last | What every Trail part of the plan follows ([trail-rules.md](trail-rules.md)). Mark by default. |
-| Entry expiry | minutes, or none | Limit or Trail. |
+| Entry expiry | minutes, or none | Limit, Trail or Chase. |
 | Slippage | % | Market entry and Market stop. The order ticket's setting, capped at 5% like every Market order. |
 
 ## Plan
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| P1 | **R** is the distance from entry to the stop. Before the fill, entry is the Limit price, or mark for a Market entry. After it, entry is the Position's average entry. | code | test_r_targets_reprice_from_the_actual_entry |
+| P1 | **R** is the distance from entry to the stop. Before the fill, entry is the Limit price, mark for a Market entry, or a Chase entry's worst fill (E12). After it, entry is the Position's average entry. | code | test_r_targets_reprice_from_the_actual_entry |
 | P2 | Size from risk is equity × risk % ÷ (R + the taker fee per unit at the stop), rounded down to the lot. Equity is the Portfolio margin the header shows at send. Size is fixed once sent. A Trail entry is sent when it fires, so its size is worked out from the price it fires at. | code | test_size_from_risk_rounds_down_to_the_lot, test_size_from_risk_pays_the_taker_fee_at_the_stop |
 | P3 | After the fill, the plan shows the risk at its actual entry. Slippage can make it differ from P2. | | test_targets_go_on_once_the_entry_is_complete_from_its_actual_price |
 | P4 | A target given in R is priced from the entry, and moves to the actual entry once filled. A target given as a price stays where it was put. | | test_r_targets_reprice_from_the_actual_entry, test_targets_go_on_once_the_entry_is_complete_from_its_actual_price |
@@ -76,6 +79,29 @@ A plan that breaks a rule here does not start, and says which rule.
 | E7 | A fill counts only with evidence from trades or the account feed. A Clip that vanishes is not a fill ([ADR 0003](adr/0003-invent-fill-needs-evidence.md)). | | test_a_vanished_entry_is_not_a_fill |
 | E8 | If mark is already through the stop when the stop should go on, the venue will not take it. Planner closes what is open with a reduce-only Market order instead, as the stop would have. | | test_a_stop_mark_has_passed_closes_at_market |
 | E9 | A Trail entry that fires sizes from the fire price (P2), checks S1 again, and goes out as a Market entry. If the Reference reaches the stop first, it ends without firing (E4). | | test_a_trail_entry_fires_and_sizes_from_its_price, test_a_trail_entry_through_the_stop_ends |
+
+## Chase and Ladder entries
+
+A Chase or Ladder entry fills in pieces. The stop goes on with the first piece (E2) and the targets once the entry ends (E3), so a growing Position is never without a stop. The entry is Planner's own Clips, not a second algo: Planner stays the one owner on its Market (S5, [ADR 0015](adr/0015-planner-owns-the-exit.md)).
+
+| | Rule | Knob | Pinned by |
+|---|---|---|---|
+| E10 | A Chase entry works the size with one post-only Clip behind the touch, at the offset, inside its band: the same quote as the **Chase** algo. It Amends the Clip as the book walks, at most once every 2s. It never crosses the spread. While the touch is outside the band, the Clip comes off and the entry waits. | 2s is code | test_a_chase_entry_rests_behind_the_touch, test_a_chase_entry_amends_as_the_book_walks, test_a_chase_entry_waits_outside_its_band |
+| E11 | The stop is past the whole band: under its low for a long, over its high for a short. The band's low is under its high. | | test_a_stop_inside_the_chase_band_is_refused |
+| E12 | Until the entry ends, the plan is drawn from the worst fill the band allows: its high for a long, its low for a short. Size from risk (P2) uses it too, so the risk at the stop is at most what was asked. Once the entry ends, E3 redraws the plan from the actual average. | | test_a_chase_entry_is_sized_from_the_worst_fill_in_its_band |
+| E13 | A Clip that leaves the book counts only what the trades or the Position show (E7). When they do not account for all of it, the next Clip waits 3s more for them. A part that never shows is not a fill. | `MISSING_GRACE_MS` | test_a_chase_entry_waits_for_evidence_before_the_next_clip |
+| E14 | **Protect now** ends any entry early: what is left of it comes off, and the targets go on for what filled (E3). With nothing filled it ends the Planner (E6). | | test_protect_now_ends_the_entry, test_protect_now_with_nothing_filled_ends_the_planner |
+| E15 | On shutdown a Chase entry's Clip comes off, like the Chase algo's. On restart the entry carries on from what filled. A stop already on stays on (M7). | | test_shutdown_pulls_a_chase_entry |
+| E16 | Picking Planner from the order ticket while it is set to Chase opens a Chase entry with the ticket's size, band (floor and ceiling), offset and clip. The side is picked in Planner: the ticket has none until Chase buy or Chase sell. | | `starts a Chase entry from the ticket's Chase` |
+
+Ladder is planned, not built. These are the rules it will be built to:
+
+| | Rule | Knob | Pinned by |
+|---|---|---|---|
+| EL1 | A Ladder entry rests N post-only rungs evenly from one price to another, sized by Strength like the **Ladder** algo. A filled rung is not refilled. | | |
+| EL2 | The stop is past the furthest rung. Size from risk is the size at which every rung filling loses the risk % at the stop. Fewer rungs filling loses less. | | |
+| EL3 | The targets go on once every rung has filled, the entry expires, mark reaches the stop (E4), or **Protect now** (E14). | | |
+| EL4 | Rungs count against the venue's open order limits ([lighter-limits.md](lighter-limits.md)). A ladder that would not fit refuses to start. | | |
 
 ## Manage
 

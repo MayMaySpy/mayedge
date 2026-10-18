@@ -32,6 +32,7 @@ import { PlannerDialog } from "@/components/widgets/planner/PlannerDialog";
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
+import type { ChaseParamsState } from "./kinds/ChaseParamsSheet";
 import { LimitParams } from "./kinds/LimitParams";
 import { MarketParams } from "./kinds/MarketParams";
 import { LeverageModal } from "./LeverageModal";
@@ -218,6 +219,22 @@ export function OrderTicket({
     ? snapReduceOnlySize(sizeNum, absPos, decimals)
     : sizeNum;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
+  // Planner E16: a ticket set to Chase opens Planner with a Chase entry from its fields.
+  const plannerFromTicket = (() => {
+    if (kind !== "algo" || algo !== "chase-iceberg") return undefined;
+    const c = pluginState as ChaseParamsState;
+    const qty = trimQty(sizeNum, decimals);
+    return {
+      entryType: "chase" as const,
+      entryChase: {
+        low: c.chaseFloor,
+        high: c.chaseCeiling,
+        offsetBps: c.offsetBps || "4",
+        clip: c.displayQty,
+      },
+      ...(qty ? { sizeMode: "size" as const, size: qty } : {}),
+    };
+  })();
   const pxForSide = (s: "buy" | "sell") => {
     if (kind === "limit" && priceNum > 0) return priceNum;
     const worst = s === "buy" ? worstBuy : worstSell;
@@ -625,6 +642,7 @@ export function OrderTicket({
         mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
         side={signedPos < 0 ? "sell" : "buy"}
         running={runningPlanner}
+        initial={plannerFromTicket}
       />
     </div>
   );

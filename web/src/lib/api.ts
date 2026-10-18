@@ -674,6 +674,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  plannerFinishEntry: (algo_id: string) =>
+    request<AlgoBook>("/algos/planner/finish-entry", {
+      method: "POST",
+      body: JSON.stringify({ algo_id }),
+    }),
   plannerReplan: (body: Record<string, unknown>) =>
     request<AlgoBook>("/algos/planner/replan", {
       method: "POST",

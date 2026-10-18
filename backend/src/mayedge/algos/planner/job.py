@@ -14,9 +14,17 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase import util
+from mayedge.algos.chase.config import ACK_WAIT_MS, MIN_REQUOTE_MS
 from mayedge.algos.chase.execution import ChaseExecution
+from mayedge.algos.chase.iceberg import Action, ChaseIcebergParams, MarketView, decide
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import _is_invalid_nonce, _is_order_not_found, _is_rate_limit
+from mayedge.algos.chase.util import (
+    _is_invalid_nonce,
+    _is_min_size,
+    _is_order_not_found,
+    _is_rate_limit,
+    _is_would_cross,
+)
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import (
@@ -82,6 +90,10 @@ class PlannerRunner:
         self._flat_since: int | None = None
         # Roles Planner gave up placing after a refusal, so it does not resend every tick.
         self._gave_up: set[str] = set()
+        # E10: when a Chase entry's Clip last moved.
+        self._entry_moved_ms = 0
+        # E13: when a Chase entry's Clip last left the book unexplained.
+        self._entry_vanished_ms = 0
 
     @property
     def state(self) -> PlannerState:
@@ -96,6 +108,8 @@ class PlannerRunner:
         entry = self._latest("entry")
         params_json = p.to_json() if p else {}
         runtime = st.runtime_json()
+        # E10: a Chase entry's band draws on the chart while it works.
+        band = p.entry_chase if p and st.phase == "entering" and p.entry_type == "chase" else None
         return {
             "type": "algo",
             "id": ALGO_ID,
@@ -111,8 +125,8 @@ class PlannerRunner:
             "display_qty": None,
             "offset_bps": None,
             # The stop and targets are on the chart as orders, not as a band.
-            "price_floor": None,
-            "price_ceiling": None,
+            "price_floor": _fmt(band.low) if band else None,
+            "price_ceiling": _fmt(band.high) if band else None,
             "remaining": _fmt(max(ZERO, plan.size - st.entry_filled)) if plan else None,
             "filled": _fmt(st.entry_filled),
             "quote_action": "rest" if st.status == ChaseStatus.RUNNING else "pause",
@@ -566,9 +580,12 @@ class PlannerRunner:
         try:
             if params.mode == "enter":
                 check_notional(plan.size, plan.entry, settings.max_order_notional)
-                if params.entry_type in ("limit", "trail") and params.expiry_min:
+                if params.entry_type in ("limit", "trail", "chase") and params.expiry_min:
                     st.entry_deadline_ms = st.created_at + params.expiry_min * 60_000
-                if params.entry_type == "trail":
+                if params.entry_type == "chase":
+                    # E10: the first Clip goes on at the first look at the book.
+                    st.reason = "entry working"
+                elif params.entry_type == "trail":
                     # E9: the desk holds the entry until the price comes back.
                     f = entry_follow(params, self._tick())
                     st.trails["entry"] = engine.follow(f, Point(), self._mark())
@@ -663,6 +680,9 @@ class PlannerRunner:
         st = self._state
         p, plan = st.params, st.plan
         assert p is not None and plan is not None
+        if p.entry_type == "chase":
+            await self._work_chase(now)
+            return
         entry = self._latest("entry")
         if entry is None:
             if p.entry_type == "trail":
@@ -688,6 +708,9 @@ class PlannerRunner:
             elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
                 if await self._cancel_clip(entry):
                     st.reason = "entry expired"  # E5
+            elif st.finish_entry:
+                if await self._cancel_clip(entry):
+                    st.reason = "entry ended early"  # E14
             else:
                 gone = entry.missing_since is not None and (
                     now - entry.missing_since >= MISSING_GRACE_MS
@@ -703,16 +726,186 @@ class PlannerRunner:
                     entry.closed_at = now
         if entry.status == "live":
             return
+        await self._entry_over(now, filled, avg, closed_at=entry.closed_at)
+
+    async def _entry_over(
+        self, now: int, filled: Decimal, avg: Decimal | None, *, closed_at: int | None
+    ) -> None:
+        """E3 and E6: protect what filled, or end with nothing."""
+        st = self._state
+        assert st.plan is not None
         if filled <= 0:
             # The account feed may lag the order leaving the book.
-            if now - (entry.closed_at or now) < MISSING_GRACE_MS:
+            if now - (closed_at or now) < MISSING_GRACE_MS:
                 return
             await self._cancel_all()
             st.status = ChaseStatus.DONE
             st.reason = st.reason or "entry did not fill"  # E6
             self._book.finish(self)
             return
-        await self._enter_managing(filled, avg or plan.entry)
+        await self._enter_managing(filled, avg or st.plan.entry)
+
+    # ── Chase entry (E10–E15) ────────────────────────────────────────────
+
+    def _chase_view(self) -> MarketView | None:
+        ex = self._exec()
+        mi = self._state.market_index
+        if not ex.is_book_synced(mi):
+            return None
+        bid_s, ask_s = ex.best_bid_ask(mi)
+        ctx, _ = venue.market_context(ex, mi)
+        return MarketView(
+            bid=venue.dec(bid_s),
+            ask=venue.dec(ask_s),
+            tick=ctx.tick,
+            min_qty=ctx.min_qty,
+            qty_step=ctx.qty_step,
+        )
+
+    async def _work_chase(self, now: int) -> None:
+        st = self._state
+        p, plan = st.params, st.plan
+        assert p is not None and plan is not None and p.entry_chase is not None
+        ec = p.entry_chase
+        clips = [c for c in st.ledger.clips if self._role(c) == "entry"]
+        pos, avg = self._held()
+        traded = sum((min(c.filled, c.qty) for c in clips), ZERO)
+        # E7, E13: the trades or the Position, whichever shows more, never past the plan.
+        filled = min(plan.size, max(traded, pos, ZERO))
+        st.entry_filled = filled
+        if filled > 0 and self._live("stop") is None and "stop" not in self._gave_up:
+            await self._place_stop()  # E2
+        if st.status != ChaseStatus.RUNNING:
+            return
+        live = self._live("entry")
+        half = self._qty_step() / 2
+        mark = self._mark()
+        over: str | None = None
+        if filled >= plan.size - half:
+            over = "entry filled"
+        elif mark > 0 and (mark - plan.stop) * _sign(p.side) <= 0:
+            over = "stop reached before the entry filled"  # E4
+        elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
+            over = "entry expired"  # E5
+        elif st.finish_entry:
+            over = "entry ended early"  # E14
+        if over is not None:
+            if live is not None and not await self._cancel_clip(live):
+                return
+            if over != "entry filled":
+                st.reason = over
+            last = self._latest("entry")
+            await self._entry_over(now, filled, avg, closed_at=last.closed_at if last else now)
+            return
+        if live is not None:
+            before = sum((min(c.filled, c.qty) for c in clips if c is not live), ZERO)
+            if live.filled >= live.qty - half or pos >= before + live.qty - half:
+                # The trades or the Position account for all of it (E7: the Position is evidence).
+                live.filled = max(live.filled, live.qty)
+                live.status = "filled"
+                live.closed_at = now
+                live = None
+        if live is not None and not live.seen_on_book and now - live.placed_at >= ACK_GRACE_MS:
+            # Never shown on the book: the venue did not take it (post-only, say).
+            live.missing_since = live.missing_since or now - MISSING_GRACE_MS
+        if live is not None and self._gone(live, now):
+            # Off the book and not accounted for: wait for the evidence (E13).
+            live.status = "cancelled"
+            live.closed_at = now
+            live = None
+            self._entry_vanished_ms = now
+        if live is None and self._entry_vanished_ms and now - self._entry_vanished_ms < MISSING_GRACE_MS:
+            st.reason = "entry waits for the last Clip's fills"  # E13
+            return
+        view = self._chase_view()
+        remaining = plan.size - filled
+        quote = None
+        if view is not None:
+            quote = decide(
+                ChaseIcebergParams(
+                    side=p.side,
+                    qty=plan.size,
+                    display_qty=ec.clip if ec.clip is not None else remaining,
+                    offset_bps=ec.offset_bps,
+                    price_floor=ec.low,
+                    price_ceiling=ec.high,
+                ),
+                view,
+                remaining,
+            )
+        if quote is None or quote.action != Action.REST:
+            reason = "book not synced" if quote is None else (quote.reason or "waiting")
+            if quote is not None and quote.reason == "below_min_qty" and filled > 0:
+                # What is left is under the venue minimum: the entry is as full as it gets.
+                if live is not None and not await self._cancel_clip(live):
+                    return
+                await self._entry_over(now, filled, avg, closed_at=now)
+                return
+            if live is not None:
+                await self._cancel_clip(live)
+            st.reason = f"entry waits: {reason.replace('_', ' ')}"
+            return
+        assert quote.price is not None and quote.qty is not None
+        if live is None:
+            await self._rest_chase(quote.price, quote.qty, now)
+            return
+        if live.price == quote.price:
+            st.reason = f"entry resting at {_fmt(live.price)}"
+            return
+        if not live.seen_on_book and now - live.placed_at < ACK_WAIT_MS:
+            return
+        if now - self._entry_moved_ms < MIN_REQUOTE_MS:
+            return
+        await self._amend_chase(live, quote.price, now)
+
+    async def _rest_chase(self, price: Decimal, qty: Decimal, now: int) -> None:
+        st = self._state
+        p = st.params
+        assert p is not None
+        clip = self._place("entry", price=price, qty=qty)
+        try:
+            await self._exec().create_limit_order(
+                market_index=st.market_index,
+                side=p.side,
+                size=_fmt(qty),
+                price=_fmt(price),
+                time_in_force="post_only",
+                reduce_only=False,
+                client_order_index=clip.client_order_index,
+            )
+        except Exception as e:
+            clip.status = "cancelled"
+            clip.closed_at = now
+            if _is_would_cross(e) or _is_min_size(e):
+                st.reason = f"entry waits: {e}"
+                return
+            raise
+        self._entry_moved_ms = now
+        st.reason = f"entry resting at {_fmt(price)}"
+
+    async def _amend_chase(self, clip: Clip, price: Decimal, now: int) -> None:
+        """E10: move the Clip in place as the book walks."""
+        await self._await_order_index(clip)
+        if not clip.order_index or clip.status != "live":
+            return
+        try:
+            await self._exec().modify_order(
+                market_index=self._state.market_index,
+                order_index=clip.order_index,
+                price=_fmt(price) or "0",
+                size=_fmt(clip.remaining if clip.remaining > 0 else clip.qty) or "0",
+            )
+        except Exception as e:
+            if _is_would_cross(e):
+                self._entry_moved_ms = now  # keep the resting price; try again later
+                return
+            if _is_order_not_found(e):
+                clip.missing_since = clip.missing_since or now
+                return
+            raise
+        self._state.ledger.amend(clip, price=price, now=now)
+        self._entry_moved_ms = now
+        self._state.reason = f"entry resting at {_fmt(price)}"
 
     def _end(self, reason: str) -> None:
         st = self._state
@@ -728,6 +921,10 @@ class PlannerRunner:
         if st.entry_deadline_ms and now >= st.entry_deadline_ms:
             await self._cancel_all()
             self._end("entry expired before it fired")  # E5, E6
+            return
+        if st.finish_entry:
+            await self._cancel_all()
+            self._end("entry ended before it fired")  # E14, E6
             return
         f = entry_follow(p, self._tick())
         sign = _sign(p.side)
@@ -1163,6 +1360,19 @@ class PlannerRunner:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
+    async def finish_entry(self) -> None:
+        """E14: Protect now. The rest of the entry comes off and what filled is managed."""
+        st = self._state
+        if st.phase != "entering" or st.status not in ACTIVE_STATUSES:
+            raise PlanRefused("E14", "There is no entry left to end")
+        st.finish_entry = True
+        if st.status == ChaseStatus.PAUSED:
+            st.status = ChaseStatus.RUNNING
+        await self._evaluate()
+        self._publish()
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run())
+
     async def replan(self, params: PlannerParams) -> None:
         """M5: change the stop and the targets of a managed Position, checked as if new."""
         st = self._state
@@ -1259,6 +1469,13 @@ class PlannerRunner:
             self._publish()
 
     async def drain_for_shutdown(self) -> None:
-        """M7: the stop and targets stay on the venue while the desk is down."""
+        """M7: the stop and targets stay on the venue while the desk is down. E15: a Chase entry's Clip does not."""
         await self._halt()
         self._stop.clear()
+        p = self._state.params
+        live = self._live("entry")
+        if p is not None and p.entry_type == "chase" and live is not None:
+            try:
+                await self._cancel_clip(live)
+            except Exception:
+                logger.exception("planner %s: chase entry not pulled at shutdown", self._state.algo_id)

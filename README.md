@@ -172,7 +172,7 @@ Slices a parent size across time into Clips.
 
 ### Planner
 
-Runs one trade from its stop. Enter sends the entry (Market, Limit or Trail); Attach takes over an open Position. Size comes from a risk % of equity, every number is measured in **R**, and the stop is tied to the Position. Each target is a resting Limit, a Trigger, or a Trail. **Stop steps** move the stop to **Breakeven** after the first target, or Step up to each earlier target's price; the **Runner** can trail. Its stop and targets stay on the venue through a desk restart. Rules: [docs/planner-rules.md](docs/planner-rules.md).
+Runs one trade from its stop. Enter sends the entry (Market, Limit, Trail, or Chase, which works it post-only behind the touch inside a band and is sized from the band's worst fill); Attach takes over an open Position. The stop goes on with the first fill and the targets once the entry ends; **Protect now** ends it early. Picking Planner while the ticket is on Chase carries its band, offset, clip and size over. Size comes from a risk % of equity, every number is measured in **R**, and the stop is tied to the Position. Each target is a resting Limit, a Trigger, or a Trail. **Stop steps** move the stop to **Breakeven** after the first target, or Step up to each earlier target's price; the **Runner** can trail. Its stop and targets stay on the venue through a desk restart. Rules: [docs/planner-rules.md](docs/planner-rules.md).
 
 ### Trail
 

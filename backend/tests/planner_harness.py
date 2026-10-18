@@ -47,6 +47,8 @@ class FakeVenue:
     orders: dict[int, dict[str, Any]] = field(default_factory=dict)
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     next_oid: int = 500
+    bid: str = "99.9"
+    ask: str = "100.1"
 
     # ── what the job reads ──
     def payload(self) -> dict[str, Any]:
@@ -99,6 +101,13 @@ class FakeVenue:
             order_type="limit",
         )
         return {"tx_hash": "0x", "client_order_index": kw["client_order_index"]}
+
+    async def modify_order(self, **kw: Any) -> dict[str, Any]:
+        self.calls.append(("modify", kw))
+        for row in self.orders.values():
+            if int(row["order_index"]) == kw["order_index"]:
+                row["price"] = kw["price"]
+        return {"tx_hash": "0x"}
 
     async def create_market_order(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(("market", kw))
@@ -180,11 +189,11 @@ class FakeVenue:
         return ChaseExecution(
             enabled=True,
             get_market_by_index=lambda mi: self.meta if mi == MI else None,
-            best_bid_ask=lambda mi: ("99.9", "100.1"),
+            best_bid_ask=lambda mi: (self.bid, self.ask),
             is_book_synced=lambda mi: True,
             create_limit_order=self.create_limit_order,
             create_market_order=self.create_market_order,
-            modify_order=MagicMock(),
+            modify_order=self.modify_order,
             cancel_order=self.cancel_order,
             cancel_all_orders=MagicMock(),
             cached_account_payload=self.payload,

@@ -27,6 +27,7 @@ function AlgoList({
   onStop,
   onPause,
   onResume,
+  onProtect,
 }: {
   rows: AlgoState[];
   empty: string;
@@ -37,6 +38,7 @@ function AlgoList({
   onStop: (algoId: string, keepStop?: boolean) => void;
   onPause: (algoId: string) => void;
   onResume: (algoId: string) => void;
+  onProtect?: (algoId: string) => void;
 }) {
   if (rows.length === 0) {
     return (
@@ -70,6 +72,9 @@ function AlgoList({
             tradingEnabled={tradingEnabled}
             onStop={showControls && algo.algo_id ? () => onStop(algo.algo_id!) : undefined}
             onResume={showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined}
+            onProtect={
+              showControls && onProtect && algo.algo_id ? () => onProtect(algo.algo_id!) : undefined
+            }
           />
         ) : (
           <AlgoRow
@@ -157,6 +162,20 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
     }
   };
 
+  /** Planner E14: end the entry and protect what filled. */
+  const protectOne = async (algoId: string) => {
+    if (!tradingEnabled || busyId) return;
+    setBusyId(algoId);
+    try {
+      setAlgo(await api.plannerFinishEntry(algoId));
+      notifyOk("Entry ended", "Targets go on for what filled.");
+    } catch (err) {
+      notifyErr(err instanceof Error ? err.message : "Protect now failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const stopAll = async () => {
     if (!tradingEnabled || busyId || working.length === 0) return;
     setBusyId("*");
@@ -231,6 +250,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
               onStop={(id, keep) => void stopOne(id, keep)}
               onPause={(id) => void pauseOne(id)}
               onResume={(id) => void resumeOne(id)}
+              onProtect={(id) => void protectOne(id)}
             />
           </TabsContent>
           <TabsContent value="history" className="mt-0">

@@ -141,4 +141,21 @@ describe("PlannerDialog", () => {
     await waitFor(() => expect(screen.getByText(/S1 · The stop must be/)).toBeTruthy());
     expect(start().disabled).toBe(true);
   });
+
+  it("sends a Chase entry's band, offset and clip, drawn from its worst fill", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Chase" }));
+    expect(screen.queryByLabelText("Entry price")).toBeNull();
+    await user.type(screen.getByLabelText("Chase band low"), "99");
+    await user.type(screen.getByLabelText("Chase band high"), "100.5");
+    await user.type(screen.getByLabelText("Chase clip ETH"), "1");
+    await user.type(screen.getByLabelText("Stop"), "95");
+    await waitFor(() => expect(screen.getByText("Entry, worst fill")).toBeTruthy());
+    const body = vi.mocked(api.plannerPreview).mock.calls.at(-1)?.[0];
+    expect(body).toMatchObject({
+      entry_type: "chase",
+      entry_price: null,
+      entry_chase: { low: "99", high: "100.5", offset_bps: "4", clip: "1" },
+    });
+  });
 });

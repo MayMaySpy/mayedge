@@ -291,4 +291,22 @@ describe("OrderTicket", () => {
 
     expect(await screen.findByRole("heading", { name: "Planner · ETH" })).toBeTruthy();
   });
+
+  it("starts a Chase entry from the ticket's Chase", async () => {
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Size"), "2");
+    await user.type(screen.getByLabelText("Clip"), "1");
+    await user.type(screen.getByLabelText("Floor"), "99");
+    await user.type(screen.getByLabelText("Ceiling"), "100.5");
+    await user.click(button("Chase"));
+    await user.click(await screen.findByRole("menuitem", { name: "Planner…" }));
+
+    const chase = await screen.findByRole("radio", { name: "Chase" });
+    expect(chase.getAttribute("aria-checked") ?? chase.getAttribute("data-state")).toMatch(/true|on|checked/);
+    expect((screen.getByLabelText("Chase band low") as HTMLInputElement).value).toBe("99");
+    expect((screen.getByLabelText("Chase band high") as HTMLInputElement).value).toBe("100.5");
+    expect((screen.getByLabelText("Chase clip ETH") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("Size ETH") as HTMLInputElement).value).toBe("2");
+  });
 });
+

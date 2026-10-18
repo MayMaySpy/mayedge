@@ -16,7 +16,7 @@ ALGO_VERSION = "1"
 
 Side = Literal["buy", "sell"]
 Mode = Literal["enter", "attach"]
-EntryType = Literal["market", "limit", "trail"]
+EntryType = Literal["market", "limit", "trail", "chase"]
 TargetKind = Literal["price", "r"]
 StopSteps = Literal["off", "breakeven", "ladder"]
 # P9: a resting reduce-only limit, a Take Profit Limit that waits off the book, or a Trail.
@@ -137,6 +137,49 @@ class EntryTrail:
 
 
 @dataclass(frozen=True)
+class EntryChase:
+    """E10: a Chase entry works the size behind the touch, inside its band."""
+
+    low: Decimal
+    high: Decimal
+    offset_bps: Decimal = Decimal("4")
+    # The most one Clip shows. None works the whole size at once.
+    clip: Decimal | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "low": fmt_decimal(self.low) or "0",
+            "high": fmt_decimal(self.high) or "0",
+            "offset_bps": fmt_decimal(self.offset_bps) or "0",
+            "clip": fmt_decimal(self.clip),
+        }
+
+    @classmethod
+    def from_json(cls, raw: Any) -> EntryChase:
+        if not isinstance(raw, dict):
+            raise PlanRefused("E11", "Set the Chase entry's band")
+        try:
+            low = parse_decimal(str(raw.get("low") or ""))
+            high = parse_decimal(str(raw.get("high") or ""))
+        except ValueError:
+            raise PlanRefused("E11", "Set the Chase entry's band") from None
+        if low <= 0 or high <= low:
+            raise PlanRefused("E11", "The band's low must be above 0 and under its high")
+        offset = _opt_decimal(raw.get("offset_bps"))
+        if offset is not None and offset < 0:
+            raise PlanRefused("E10", "The offset can't be negative")
+        clip = _opt_decimal(raw.get("clip"))
+        if clip is not None and clip <= 0:
+            clip = None
+        return cls(
+            low=low,
+            high=high,
+            offset_bps=offset if offset is not None else Decimal("4"),
+            clip=clip,
+        )
+
+
+@dataclass(frozen=True)
 class TrailStop:
     """M10: when the stop starts to trail, and how far behind the best price."""
 
@@ -199,10 +242,12 @@ class PlannerParams:
     entry_trail: EntryTrail | None = None
     trail_stop: TrailStop | None = None
     reference: Reference = "mark"
+    entry_chase: EntryChase | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "entry_trail": self.entry_trail.to_json() if self.entry_trail else None,
+            "entry_chase": self.entry_chase.to_json() if self.entry_chase else None,
             "trail_stop": self.trail_stop.to_json() if self.trail_stop else None,
             "reference": self.reference,
             "mode": self.mode,
@@ -228,8 +273,8 @@ class PlannerParams:
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
         entry_type = raw.get("entry_type") or "limit"
-        if entry_type not in ("market", "limit", "trail"):
-            raise ValueError("entry_type must be market, limit or trail")
+        if entry_type not in ("market", "limit", "trail", "chase"):
+            raise ValueError("entry_type must be market, limit, trail or chase")
         reference = raw.get("reference") or "mark"
         if reference not in ("mark", "last"):
             raise ValueError("reference must be mark or last")
@@ -254,6 +299,7 @@ class PlannerParams:
             expiry_min=int(expiry) if expiry not in (None, "", 0, "0") else None,
             slippage=_clamp_slippage(raw.get("slippage")),
             entry_trail=EntryTrail.from_json(raw.get("entry_trail")) if entry_type == "trail" else None,
+            entry_chase=EntryChase.from_json(raw.get("entry_chase")) if entry_type == "chase" else None,
             trail_stop=TrailStop.from_json(raw.get("trail_stop")),
             reference=reference,
         )
@@ -467,10 +513,22 @@ def entry_price(params: PlannerParams, ctx: MarketContext) -> Decimal:
         return ctx.mark
     if params.entry_type == "trail":
         return trail_entry_now(params, ctx)
+    if params.entry_type == "chase":
+        return chase_worst_fill(params, ctx.tick)
     if params.entry_price is None or params.entry_price <= 0:
         raise PlanRefused("S1", "Set the Limit entry price")
     # A buy rests at or below what was typed, a sell at or above.
     return round_price(params.entry_price, ctx.tick, up=params.side == "sell")
+
+
+def chase_worst_fill(params: PlannerParams, tick: Decimal) -> Decimal:
+    """E12: the worst price a Chase entry can fill at, its band's high for a buy, low for a sell."""
+    ec = params.entry_chase
+    if ec is None:
+        raise PlanRefused("E11", "Set the Chase entry's band")
+    if params.side == "buy":
+        return round_price(ec.high, tick, up=False)
+    return round_price(ec.low, tick, up=True)
 
 
 def entry_follow(params: PlannerParams, tick: Decimal) -> engine.Follow:
@@ -753,6 +811,10 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
     if (entry - stop) * sign <= 0:
         raise PlanRefused("S1", "The stop must be on the losing side of entry")
     check_stop_live(params.side, stop, ctx)
+    ec = params.entry_chase if params.entry_type == "chase" else None
+    # E11: past the whole band, not just its worst edge.
+    if ec is not None and ((ec.low if params.side == "buy" else ec.high) - stop) * sign <= 0:
+        raise PlanRefused("E11", "The stop must be past the whole Chase band")
     et = params.entry_trail
     act = et.activation if params.entry_type == "trail" and et is not None else None
     if act is not None and (act - stop) * sign <= 0:

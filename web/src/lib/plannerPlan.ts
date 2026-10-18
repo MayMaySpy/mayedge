@@ -10,6 +10,7 @@ export type PlannerSizeMode = "size" | "risk";
 export type PlannerStopSteps = "off" | "breakeven" | "ladder";
 
 export type PlannerTargetOrder = "limit" | "trigger" | "trail";
+export type PlannerEntryType = "market" | "limit" | "trail" | "chase";
 export type PlannerTrailUnit = "r" | "pct";
 export type PlannerTrailStopStart = "off" | "target" | "last" | "r";
 
@@ -31,6 +32,15 @@ export interface PlannerEntryTrailDraft {
   activation: string;
 }
 
+/** E10: a Chase entry, worked behind the touch inside its band. */
+export interface PlannerEntryChaseDraft {
+  low: string;
+  high: string;
+  offsetBps: string;
+  /** The most one Clip shows; empty works the whole size at once. */
+  clip: string;
+}
+
 /** M10: when the stop starts to trail, and how far behind the best price. */
 export interface PlannerTrailStopDraft {
   start: PlannerTrailStopStart;
@@ -42,8 +52,9 @@ export interface PlannerTrailStopDraft {
 
 export interface PlannerForm {
   side: PlannerSide;
-  entryType: "market" | "limit" | "trail";
+  entryType: PlannerEntryType;
   entryTrail: PlannerEntryTrailDraft;
+  entryChase: PlannerEntryChaseDraft;
   trailStop: PlannerTrailStopDraft;
   reference: "mark" | "last";
   entryPrice: string;
@@ -63,6 +74,7 @@ export function defaultPlannerForm(side: PlannerSide = "buy"): PlannerForm {
     side,
     entryType: "limit",
     entryTrail: { distance: "1", distanceKind: "pct", activation: "" },
+    entryChase: { low: "", high: "", offsetBps: "4", clip: "" },
     trailStop: { start: "off", after: "1", atR: "2", distance: "1", unit: "r" },
     reference: "mark",
     entryPrice: "",
@@ -96,6 +108,13 @@ export function plannerFormBlock(form: PlannerForm, mode: PlannerMode): string |
     if (form.entryType === "limit" && !(num(form.entryPrice) > 0)) return "Set the entry price";
     if (form.entryType === "trail" && !(num(form.entryTrail.distance) > 0)) {
       return "Set the Trail entry's distance";
+    }
+    if (form.entryType === "chase") {
+      const low = num(form.entryChase.low);
+      const high = num(form.entryChase.high);
+      if (!(low > 0) || !(high > 0)) return "Set the Chase band";
+      if (!(high > low)) return "The band's low must be under its high";
+      if (!(num(form.entryChase.offsetBps) >= 0)) return "Set the offset";
     }
     if (form.sizeMode === "size" && !(num(form.size) > 0)) return "Set a size";
     if (form.sizeMode === "risk" && !(num(form.riskPct) > 0)) return "Set the risk %";
@@ -165,6 +184,15 @@ export function plannerBody(
             distance: dec(form.trailStop.distance),
             unit: form.trailStop.unit,
           },
+    entry_chase:
+      enter && form.entryType === "chase"
+        ? {
+            low: dec(form.entryChase.low),
+            high: dec(form.entryChase.high),
+            offset_bps: dec(form.entryChase.offsetBps),
+            clip: canonicalDecimal(form.entryChase.clip) ?? null,
+          }
+        : null,
     reference: form.reference,
     stop: dec(form.stop),
     size: enter && form.sizeMode === "size" ? dec(form.size) : null,
@@ -260,9 +288,21 @@ export function plannerPhaseLabel(algo: AlgoState): string {
   if (algo.status === "done") return "Done";
   if (algo.status === "stopped") return "Stopped";
   if (!rt) return "Running";
-  if (rt.phase === "entering") return "Entering";
+  if (rt.phase === "entering") return entryLabel(algo);
   const at = stepReached(algo);
   return at ? `At ${at}` : "Managing";
+}
+
+/** "Entering", or "Chasing 0.6 / 2" while a Chase entry fills in pieces. */
+export function entryLabel(algo: AlgoState): string {
+  const p = (algo.params_json ?? {}) as Record<string, unknown>;
+  if (p.entry_type !== "chase") return "Entering";
+  return `Chasing ${algo.filled ?? "0"} / ${algo.qty ?? "—"}`;
+}
+
+/** E14: the entry can be ended early while it is still working. */
+export function canProtectNow(algo: AlgoState): boolean {
+  return algo.planner?.phase === "entering" && algoIsWorking(algo.status);
 }
 
 function stepsDone(algo: AlgoState): number {

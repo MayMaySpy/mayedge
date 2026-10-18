@@ -8,11 +8,12 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from mayedge.algos.chase import util
+from mayedge.algos.chase.config import MIN_REQUOTE_MS
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.planner import venue as planner_venue
 from mayedge.algos.planner.config import MISMATCH_GRACE_MS, MISSING_GRACE_MS, PLANNER_COI_BASE
 from mayedge.algos.planner.job import PlannerRunner
-from mayedge.algos.planner.plan import PlannerParams, Target, build_plan
+from mayedge.algos.planner.plan import EntryChase, PlannerParams, Target, build_plan
 
 # Allow `from planner_harness import ...` when discover runs from backend/
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -33,6 +34,14 @@ LONG = PlannerParams(
     entry_type="limit",
     entry_price=D("100"),
     size=D("2"),
+)
+
+# E10: works 2 between 99 and 100.5, one Clip of 1 at a time, 4 bps behind the touch.
+CHASE = dataclasses.replace(
+    LONG,
+    entry_type="chase",
+    entry_price=None,
+    entry_chase=EntryChase(low=D("99"), high=D("100.5"), offset_bps=D("4"), clip=D("1")),
 )
 
 
@@ -432,3 +441,95 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         tps = self.venue.sent("trigger_tp")
         self.assertEqual(tps[-1]["trigger"], "106")
         self.assertEqual(tps[-1]["size"], "2")
+
+    # ── Chase entry ──
+
+    async def _chasing(self) -> PlannerRunner:
+        job = await self._start(CHASE)
+        await self._tick(job)
+        return job
+
+    async def test_a_chase_entry_rests_behind_the_touch(self) -> None:
+        job = await self._chasing()
+        plan = job.state.plan
+        assert plan is not None
+        self.assertEqual(plan.entry, D("100.5"))  # E12: the band's worst fill
+        clip = self.venue.sent("limit")[0]
+        self.assertEqual(clip["time_in_force"], "post_only")
+        self.assertEqual(clip["price"], "99.86")  # 99.9 less 4 bps, rounded down
+        self.assertEqual(clip["size"], "1")
+        self.assertGreater(clip["client_order_index"], PLANNER_COI_BASE)
+        # It fills in pieces: the stop goes on with the first (E2), the next Clip follows.
+        self.venue.fill(self._coi("limit"), "1")
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 1)
+        self.assertEqual(len(self.venue.sent("limit")), 2)
+        self.venue.fill(self._coi("limit", 1), "1", price="99.5")
+        await self._tick(job)
+        self.assertEqual(job.state.phase, "managing")
+        plan = job.state.plan
+        assert plan is not None
+        self.assertEqual(plan.entry, D("99.68"))  # E3: redrawn from the actual average
+        self.assertEqual(len(self.venue.sent("trigger_tp")), 2)
+
+    async def test_a_chase_entry_amends_as_the_book_walks(self) -> None:
+        job = await self._chasing()
+        self.venue.bid, self.venue.ask = "100.2", "100.3"
+        await self._tick(job, 100)
+        self.assertEqual(self.venue.sent("modify"), [])  # not inside 2s of the last move
+        await self._tick(job, MIN_REQUOTE_MS)
+        moved = self.venue.sent("modify")
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0]["price"], "100.15")
+        self.assertEqual(moved[0]["size"], "1")
+        self.assertEqual(len(self.venue.sent("limit")), 1)
+
+    async def test_a_chase_entry_waits_outside_its_band(self) -> None:
+        job = await self._chasing()
+        self.venue.bid, self.venue.ask = "98.8", "98.9"
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("cancel")), 1)
+        self.assertIn("below floor", job.state.reason or "")
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        self.venue.bid, self.venue.ask = "99.9", "100.1"
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("limit")), 2)
+
+    async def test_a_chase_entry_waits_for_evidence_before_the_next_clip(self) -> None:
+        job = await self._chasing()
+        await self._tick(job)  # the feed shows it
+        del self.venue.orders[self._coi("limit")]  # gone, with no trade and no Position
+        await self._tick(job)
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("limit")), 1)
+        self.assertIn("waits for the last Clip", job.state.reason or "")
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(len(self.venue.sent("limit")), 2)
+        self.assertEqual(job.state.entry_filled, D("0"))  # E7: a vanished Clip is not a fill
+
+    async def test_protect_now_ends_the_entry(self) -> None:
+        job = await self._chasing()
+        self.venue.fill(self._coi("limit"), "0.6")
+        await self._tick(job)
+        await job.finish_entry()
+        await job._halt()
+        self.assertEqual(len(self.venue.sent("cancel")), 1)
+        self.assertEqual(job.state.phase, "managing")
+        self.assertEqual([t["size"] for t in self.venue.sent("trigger_tp")], ["0.3", "0.3"])
+
+    async def test_protect_now_with_nothing_filled_ends_the_planner(self) -> None:
+        job = await self._chasing()
+        await job.finish_entry()
+        await job._halt()
+        job._stop.clear()
+        await self._tick(job, MISSING_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.DONE)
+        self.assertEqual(self.venue.orders, {})
+
+    async def test_shutdown_pulls_a_chase_entry(self) -> None:
+        job = await self._chasing()
+        await job.drain_for_shutdown()
+        self.assertEqual(len(self.venue.sent("cancel")), 1)
+        self.assertEqual(self.venue.orders, {})
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)

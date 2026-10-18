@@ -517,6 +517,15 @@ def create_app() -> FastAPI:
             raise HTTPException(400, str(e)) from e
         return desk.algo_book()
 
+    @app.post("/api/algos/planner/finish-entry")
+    async def finish_planner_entry(body: dict[str, Any]) -> dict[str, Any]:
+        _require_trading()
+        try:
+            await desk.planner_book.finish_entry(str(body.get("algo_id") or ""))
+        except (ValueError, ArithmeticError, KeyError) as e:
+            raise HTTPException(400, str(e)) from e
+        return desk.algo_book()
+
     @app.post("/api/algos/trail/preview")
     async def preview_trail(body: dict[str, Any]) -> dict[str, Any]:
         try:

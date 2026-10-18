@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AlgoBook, AlgoState } from "@/lib/api";
 import { orderNotice } from "@/lib/orderNotice";
 import {
+  canProtectNow,
   defaultPlannerForm,
   formFromPlanner,
   livePlannerFor,
@@ -224,3 +225,50 @@ describe("planner labels", () => {
     });
   });
 });
+
+describe("planner Chase entry", () => {
+  const chase = {
+    ...defaultPlannerForm("buy"),
+    entryType: "chase" as const,
+    stop: "95",
+    entryChase: { low: "99", high: "100.5", offsetBps: "4", clip: "1" },
+  };
+
+  it("needs a band whose low is under its high", () => {
+    expect(plannerFormBlock({ ...chase, entryChase: { ...chase.entryChase, low: "" } }, "enter")).toBe(
+      "Set the Chase band"
+    );
+    expect(plannerFormBlock({ ...chase, entryChase: { ...chase.entryChase, low: "101" } }, "enter")).toBe(
+      "The band's low must be under its high"
+    );
+    expect(plannerFormBlock(chase, "enter")).toBeNull();
+  });
+
+  it("sends the band, offset and clip, and no entry price", () => {
+    const body = plannerBody({ ...chase, expiryMin: "30" }, { mode: "enter", marketIndex: 1, slippage: 0.01 });
+    expect(body).toMatchObject({
+      entry_type: "chase",
+      entry_price: null,
+      entry_chase: { low: "99", high: "100.5", offset_bps: "4", clip: "1" },
+      expiry_min: 30,
+    });
+    const whole = plannerBody(
+      { ...chase, entryChase: { ...chase.entryChase, clip: "" } },
+      { mode: "enter", marketIndex: 1, slippage: 0.01 }
+    );
+    expect((whole.entry_chase as { clip: unknown }).clip).toBeNull();
+  });
+
+  it("says how far a Chase entry has filled, and offers Protect now only while entering", () => {
+    const entering = planner({
+      qty: "2",
+      filled: "0.6",
+      params_json: { entry_type: "chase", stop: "95", targets: [] },
+      planner: { ...planner().planner!, phase: "entering" },
+    });
+    expect(plannerPhaseLabel(entering)).toBe("Chasing 0.6 / 2");
+    expect(canProtectNow(entering)).toBe(true);
+    expect(canProtectNow(planner())).toBe(false);
+  });
+});
+

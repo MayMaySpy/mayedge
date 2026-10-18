@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { algoCanResume, algoIsWorking } from "@/lib/algos";
 import type { AlgoState } from "@/lib/api";
 import {
+  canProtectNow,
   plannerClipLabel,
   plannerPhaseLabel,
   stopLabel,
@@ -23,6 +24,7 @@ export function PlannerRow({
   tradingEnabled,
   onStop,
   onResume,
+  onProtect,
 }: {
   algo: AlgoState;
   busy: boolean;
@@ -30,6 +32,8 @@ export function PlannerRow({
   tradingEnabled: boolean;
   onStop?: () => void;
   onResume?: () => void;
+  /** E14: end the entry and put the targets on what filled. */
+  onProtect?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const rt = algo.planner;
@@ -105,6 +109,19 @@ export function PlannerRow({
               >
                 <Play data-icon="inline-start" />
                 Resume
+              </Button>
+            )}
+            {onProtect && canProtectNow(algo) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={onProtect}
+                className="h-6 px-1.5"
+                title="Ends the entry: what is left comes off, and the targets go on for what filled"
+              >
+                Protect now
               </Button>
             )}
             {onStop && (

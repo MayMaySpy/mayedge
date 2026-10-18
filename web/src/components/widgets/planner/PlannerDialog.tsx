@@ -131,6 +131,8 @@ interface PlannerDialogProps {
   side?: PlannerSide;
   /** A live Planner on this Market: the dialog re-plans it. */
   running?: AlgoState;
+  /** E16: fields carried over from the order ticket (its Chase, say). */
+  initial?: Partial<PlannerForm>;
 }
 
 export function PlannerDialog(props: PlannerDialogProps) {
@@ -142,10 +144,10 @@ export function PlannerDialog(props: PlannerDialogProps) {
   );
 }
 
-function PlannerDialogBody({ onOpenChange, market, mode, side, running }: PlannerDialogProps) {
+function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial }: PlannerDialogProps) {
   const replan = running != null;
   const [form, setForm] = useState<PlannerForm>(() =>
-    running ? formFromPlanner(running) : defaultPlannerForm(side ?? "buy")
+    running ? formFromPlanner(running) : { ...defaultPlannerForm(side ?? "buy"), ...initial }
   );
   const [drawn, setDrawn] = useState<{ key: string; preview: PlannerPreview | null } | null>(null);
   const [sending, setSending] = useState(false);
@@ -255,8 +257,60 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
                 { value: "limit", label: "Limit" },
                 { value: "market", label: "Market" },
                 { value: "trail", label: "Trail" },
+                { value: "chase", label: "Chase" },
               ]}
             />
+          </div>
+        )}
+
+        {mode === "enter" && !replan && form.entryType === "chase" && (
+          <div className="flex flex-col gap-1">
+            <FieldGroup className="grid grid-cols-2 items-start gap-3">
+              <TicketField
+                id="planner-chase-low"
+                label="Chase band low"
+                shortLabel="Band low"
+                value={form.entryChase.low}
+                inputMode="decimal"
+                placeholder="Floor"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryChase: { ...form.entryChase, low: v } })}
+              />
+              <TicketField
+                id="planner-chase-high"
+                label="Chase band high"
+                shortLabel="Band high"
+                value={form.entryChase.high}
+                inputMode="decimal"
+                placeholder="Ceiling"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryChase: { ...form.entryChase, high: v } })}
+              />
+              <TicketField
+                id="planner-chase-offset"
+                label="Chase offset bps"
+                shortLabel="Offset bp"
+                value={form.entryChase.offsetBps}
+                inputMode="decimal"
+                placeholder="4"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryChase: { ...form.entryChase, offsetBps: v } })}
+              />
+              <TicketField
+                id="planner-chase-clip"
+                label={`Chase clip ${market.symbol}`}
+                shortLabel="Clip"
+                value={form.entryChase.clip}
+                inputMode="decimal"
+                placeholder="All at once"
+                sanitize={decimalInput}
+                onChange={(v) => set({ entryChase: { ...form.entryChase, clip: v } })}
+              />
+            </FieldGroup>
+            <span className="font-mono text-xs text-muted-foreground">
+              Works post-only behind the touch inside the band. The stop goes on with the first
+              fill; targets once the entry ends. Sized from the band&apos;s worst fill.
+            </span>
           </div>
         )}
 
@@ -614,7 +668,17 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running }: Planne
           </span>
         ) : plan ? (
           <>
-            <Row label={form.entryType === "trail" && mode === "enter" ? "Entry, at the trigger now" : "Entry"}>
+            <Row
+              label={
+                mode !== "enter"
+                  ? "Entry"
+                  : form.entryType === "trail"
+                    ? "Entry, at the trigger now"
+                    : form.entryType === "chase"
+                      ? "Entry, worst fill"
+                      : "Entry"
+              }
+            >
               {formatPrice(plan.entry)}
             </Row>
             <Row label="Stop" tone="ask">

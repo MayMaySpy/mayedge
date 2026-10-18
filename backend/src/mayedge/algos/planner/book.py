@@ -229,6 +229,14 @@ class PlannerBook:
         await job.replan(PlannerParams.from_json(body))
         self._sync_watch(job.state.market_index)
 
+    async def finish_entry(self, algo_id: str) -> None:
+        """E14: Protect now."""
+        job = self._jobs.get(algo_id)
+        if job is None:
+            raise ValueError(f"unknown algo_id {algo_id}")
+        await job.finish_entry()
+        self._sync_watch(job.state.market_index)
+
     # ── lifecycle ────────────────────────────────────────────────────────
 
     async def stop(self, algo_id: str | None = None) -> None:
