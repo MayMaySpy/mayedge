@@ -25,7 +25,10 @@ export type LadderPlanInput = {
   orders: number;
   tick: number;
   qtyStep: number;
+  /** The venue's base minimum. */
   minQty: number;
+  /** The venue's quote minimum, checked at each order's own price (backend `rung_min_qty`). */
+  minQuote?: number;
   sizeVarPct?: number;
   priceVarPct?: number;
   /** -1 more size at low prices, 0 even, +1 more size at high prices. */
@@ -106,6 +109,24 @@ function alignedFromTo(input: LadderPlanInput, side: LadderPlanSide): { from: nu
   return side === "buy" ? { from: hi, to: lo } : { from: lo, to: hi };
 }
 
+/** The venue minimum for one order at this price: base, or quote at this price, rounded up. */
+export function rungMinQty(price: number, minQty: number, minQuote: number, qtyStep: number): number {
+  let need = minQty;
+  if (minQuote > 0 && price > 0) {
+    const raw = minQuote / price;
+    const atPrice = qtyStep > 0 ? Math.ceil(raw / qtyStep - 1e-9) * qtyStep : raw;
+    need = Math.max(need, atPrice);
+  }
+  return need;
+}
+
+function tooSmall(price: number, need: number, minQuote: number): { error: string } {
+  const quote = minQuote > 0 ? ` (the venue's $${minQuote} minimum)` : "";
+  return {
+    error: `The order at ${price} must be ≥ ${Number(need.toFixed(8))}${quote} — fewer orders or more size`,
+  };
+}
+
 export function buildLadderPlan(input: LadderPlanInput): LadderPlan | { error: string } {
   const side = planSide(input);
   const count = Math.round(input.orders);
@@ -164,19 +185,19 @@ export function buildLadderPlan(input: LadderPlanInput): LadderPlan | { error: s
         ? roundQty(input.qty - allocated, input.qtyStep)
         : roundQty(input.qty * weights[i], input.qtyStep);
     if (!(qty > 0)) continue;
-    if (input.minQty > 0 && qty + 1e-12 < input.minQty) {
-      return { error: "Each order is below min size" };
-    }
+    const need = rungMinQty(unique[i], input.minQty, input.minQuote ?? 0, input.qtyStep);
+    if (need > 0 && qty + 1e-12 < need) return tooSmall(unique[i], need, input.minQuote ?? 0);
     allocated += qty;
     orders.push({ price: unique[i], qty });
   }
   if (!orders.length) return { error: "Too many orders for size" };
   const remainder = input.qty - orders.reduce((s, o) => s + o.qty, 0);
   if (remainder !== 0) {
-    const patched = orders[orders.length - 1].qty + remainder;
-    if (!(patched > 0) || (input.minQty > 0 && patched + 1e-12 < input.minQty)) {
-      return { error: "Too many orders for size" };
-    }
+    const lastOrder = orders[orders.length - 1];
+    const patched = lastOrder.qty + remainder;
+    if (!(patched > 0)) return { error: "Too many orders for size" };
+    const need = rungMinQty(lastOrder.price, input.minQty, input.minQuote ?? 0, input.qtyStep);
+    if (need > 0 && patched + 1e-12 < need) return tooSmall(lastOrder.price, need, input.minQuote ?? 0);
     orders[orders.length - 1] = { ...orders[orders.length - 1], qty: patched };
   }
   const qty = orders.reduce((s, o) => s + o.qty, 0);

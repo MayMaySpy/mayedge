@@ -25,6 +25,7 @@ ZRO = MarketContext(
     min_qty=D("5"),
     mark=D("2.19082"),
     equity=D("5537"),
+    min_base=D("5"),
 )
 
 
@@ -411,6 +412,24 @@ class LadderEntryTests(unittest.TestCase):
         with self.assertRaises(PlanRefused) as e:
             build_plan(self._ladder(size=D("20")), ZRO)
         self.assertEqual(e.exception.rule, "EL1")
+
+    def test_a_ladder_rung_must_meet_the_quote_minimum_at_its_own_price(self) -> None:
+        # MON: $10 minimum. 1500 a rung clears it at mark 0.02 (500) but not near 0.005 (2000).
+        mon = MarketContext(
+            tick=D("0.00001"), qty_step=D("0.1"), min_qty=D("500"), mark=D("0.01999"),
+            equity=D("5537"), min_base=D("250"), min_quote=D("10"),
+        )
+        ladder = EntryLadder(price_from=D("0.01"), price_to=D("0.005"), rungs=20, strength=D("0"))
+        params = _enter(
+            entry_type="ladder", entry_price=None, entry_ladder=ladder, stop=D("0.004"), size=D("30000"),
+            targets=[Target("price", D("0.03"), D("100"))],
+        )
+        with self.assertRaises(PlanRefused) as e:
+            build_plan(params, mon)
+        self.assertEqual(e.exception.rule, "EL1")
+        self.assertIn("$10 minimum", e.exception.message)
+        plan = build_plan(replace(params, size=D("80000")), mon)
+        self.assertTrue(all(r.qty * r.price >= D("10") for r in plan.rungs))
 
     def test_a_ladder_entry_survives_a_save(self) -> None:
         params = self._ladder(strength="-1")

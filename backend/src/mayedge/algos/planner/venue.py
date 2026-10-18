@@ -92,6 +92,7 @@ def market_context(ex: ChaseExecution, market_index: int) -> tuple[MarketContext
         mark if mark > 0 else None,
         qty_step,
     )
+    min_base = maker_min_base(meta.min_base_amount, 0, None, qty_step)
     payload = _payload(ex)
     held = position(ex, market_index)
     equity = dec(payload.get("portfolio_margin"))
@@ -99,6 +100,8 @@ def market_context(ex: ChaseExecution, market_index: int) -> tuple[MarketContext
         tick=tick,
         qty_step=qty_step,
         min_qty=min_qty if min_qty > 0 else qty_step,
+        min_base=min_base,
+        min_quote=Decimal(str(meta.min_quote_amount or 0)),
         mark=mark,
         equity=equity if equity and equity > 0 else None,
         taker_bps=dec(payload.get("taker_fee_bps")) or Decimal("0"),

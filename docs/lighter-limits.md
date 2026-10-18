@@ -108,6 +108,6 @@ Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap 
 
 - Default **window 10**, max **20** live rungs — fits Standard 30/market with other algos.
 - Refill is **1 tx per fill** — well under 40 tx/min unless many simultaneous fills.
-- Each rung must pass maker min size at plan time.
+- Each rung must pass maker min size at plan time, at its own price: a $10 quote minimum is 500 at 0.02 but 2000 at 0.005. Checking at the touch let a ladder start whose low rungs the venue then refused.
 - Would-cross rungs stay unplaced until passive (post-only + book check).
 - Planner's Ladder entry rests every rung at once (no window): 2–20 rungs, and refused when its rungs plus the orders already resting on the market pass 30 ([planner-rules.md](planner-rules.md) EL4). It leaves 3 algo sends free for the stop while placing rungs.

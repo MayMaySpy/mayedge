@@ -2,7 +2,7 @@ import {
   LadderParamsSheet,
   type LadderParamsState,
 } from "@/components/widgets/orderTicket/kinds/LadderParamsSheet";
-import { trimQty } from "@/components/widgets/orderTicket/math";
+import { makerMinSize, trimQty } from "@/components/widgets/orderTicket/math";
 import { algoReasonLabel } from "@/lib/algos";
 import { api } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
@@ -77,6 +77,13 @@ export const ladderPlugin: AlgoPlugin<LadderParamsState> = {
     const perMin = (ctx.sizeNum / orders) * (1 - sizeVar / 100) * skewHaircut;
     if (ctx.minSz > 0 && perMin + 1e-9 < ctx.minSz) {
       return `Each order ≥ ${trimQty(ctx.minSz, ctx.decimals)} — fewer orders or more size`;
+    }
+    // A $10 minimum is 4× the size at 0.005 as at 0.02: check the lowest rung, not the touch.
+    const low = Math.min(fromNum, toNum);
+    const need = makerMinSize(ctx.minBase ?? 0, ctx.minQuote ?? 0, low, ctx.decimals);
+    if (need > 0 && perMin + 1e-9 < need) {
+      const quote = (ctx.minQuote ?? 0) > 0 ? ` ($${ctx.minQuote} minimum)` : "";
+      return `Orders near ${low} must be ≥ ${trimQty(need, ctx.decimals)}${quote} — fewer orders or more size`;
     }
     return null;
   },

@@ -73,7 +73,6 @@ function ToggleRow({
 
 export function LadderParamsSheet({
   market,
-  bookMid,
   sizeNum,
   state,
   onStateChange,
@@ -97,13 +96,9 @@ export function LadderParamsSheet({
   const sizeDecimals = market.size_decimals ?? 4;
   const tick = priceDecimals >= 0 ? 10 ** -priceDecimals : 0.01;
   const qtyStep = sizeDecimals >= 0 ? 10 ** -sizeDecimals : 0.01;
-  const mid = bookMid ?? market.mid_price ?? market.mark_price ?? fromNum;
-  const minQty = makerMinSize(
-    market.min_base_amount ?? 0,
-    market.min_quote_amount ?? 0,
-    mid,
-    sizeDecimals
-  );
+  // Base minimum only: the quote minimum is checked at each order's own price.
+  const minQty = makerMinSize(market.min_base_amount ?? 0, 0, null, sizeDecimals);
+  const minQuote = market.min_quote_amount ?? 0;
   const sizeVar = state.advanced ? (parseDecimal(state.sizeVarPct) ?? 0) : 0;
   const priceVar = state.advanced ? (parseDecimal(state.priceVarPct) ?? 0) : 0;
   const sizeSkew =
@@ -122,6 +117,7 @@ export function LadderParamsSheet({
           tick,
           qtyStep,
           minQty,
+          minQuote,
           sizeVarPct: sizeVar,
           priceVarPct: priceVar,
           sizeSkew,

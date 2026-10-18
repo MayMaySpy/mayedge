@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock
 
 from mayedge.algos.ladder.config import DEFAULT_WINDOW, MAX_WINDOW
@@ -48,6 +49,28 @@ class LadderPlanTests(unittest.TestCase):
                 min_qty=Decimal("0.1"),
             )
         self.assertIn("Each order must be", str(ctx.exception))
+
+    def test_each_rung_meets_the_quote_minimum_at_its_own_price(self) -> None:
+        # MON: $10 minimum, 250 base. 40000 over 35 rungs is 1142 a rung: enough at
+        # 0.02 (500) but not near 0.005, where $10 is 2000.
+        def mon(qty: str, rungs: int) -> list[Any]:
+            return build_rungs(
+                side="buy",
+                qty=Decimal(qty),
+                price_from=Decimal("0.01"),
+                price_to=Decimal("0.005"),
+                rungs=rungs,
+                tick=Decimal("0.00001"),
+                qty_step=Decimal("0.1"),
+                min_qty=Decimal("250"),
+                min_quote=Decimal("10"),
+            )
+
+        with self.assertRaises(ValueError) as ctx:
+            mon("40000", 35)
+        self.assertIn("The order at 0.00", str(ctx.exception))
+        self.assertIn("$10 minimum", str(ctx.exception))
+        self.assertTrue(all(r.qty * r.price >= Decimal("10") for r in mon("40000", 8)))
 
     def test_is_passive_buy(self) -> None:
         self.assertTrue(is_passive(side="buy", price=Decimal("99"), bid=Decimal("98"), ask=Decimal("100")))
@@ -320,6 +343,31 @@ class LadderStartFromBodyTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
         self.assertIn("order", str(ctx.exception).lower())
+
+        # The quote minimum is checked at each rung's price, not at the bid.
+        meta.price_decimals = 5
+        meta.size_decimals = 1
+        meta.min_base_amount = 250.0
+        meta.min_quote_amount = 10.0
+        ex.best_bid_ask.return_value = ("0.01999", "0.02001")
+        with self.assertRaises(ValueError) as ctx:
+            await book.start_from_body(
+                {
+                    "market_index": 1,
+                    "side": "buy",
+                    "qty": "40000",
+                    "price_from": "0.01",
+                    "price_to": "0.005",
+                    "rungs": 35,
+                    "window": 20,
+                }
+            )
+        self.assertIn("$10 minimum", str(ctx.exception))
+        meta.price_decimals = 2
+        meta.size_decimals = 2
+        meta.min_base_amount = Decimal("0.01")
+        meta.min_quote_amount = Decimal("0")
+        ex.best_bid_ask.return_value = ("100", "101")
 
         with self.assertRaises(ValueError):
             await book.start_from_body(

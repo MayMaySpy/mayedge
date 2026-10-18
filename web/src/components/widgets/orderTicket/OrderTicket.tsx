@@ -316,6 +316,8 @@ export function OrderTicket({
     slipFrac,
     reduceOnly,
     priceDecimals: market.price_decimals,
+    minBase: market.min_base_amount ?? 0,
+    minQuote: market.min_quote_amount ?? 0,
   };
   const algoBlocked =
     kind === "algo" && plugin

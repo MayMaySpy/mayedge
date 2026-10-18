@@ -384,6 +384,9 @@ class MarketContext:
     position_entry: Decimal | None = None
     # EL4: limit orders already resting on this Market.
     resting_orders: int = 0
+    # EL1: a rung must meet the venue minimum at its own price, not at mark.
+    min_base: Decimal = Decimal("0")
+    min_quote: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -611,7 +614,13 @@ def _entry_ladder(params: PlannerParams) -> EntryLadder:
 
 
 def ladder_rungs(
-    params: PlannerParams, *, size: Decimal, tick: Decimal, qty_step: Decimal, min_qty: Decimal
+    params: PlannerParams,
+    *,
+    size: Decimal,
+    tick: Decimal,
+    qty_step: Decimal,
+    min_qty: Decimal,
+    min_quote: Decimal = Decimal("0"),
 ) -> list[Rung]:
     """EL1: the Ladder algo's rungs for this size. qty_step 0 gives the exact weights."""
     el = _entry_ladder(params)
@@ -627,6 +636,7 @@ def ladder_rungs(
             qty_step=qty_step,
             min_qty=min_qty,
             size_skew=el.strength,
+            min_quote=min_quote,
         )
     except ValueError as e:
         raise PlanRefused("EL1", str(e)) from None
@@ -940,7 +950,14 @@ def build_plan(params: PlannerParams, ctx: MarketContext) -> Plan:
     rungs: tuple[Rung, ...] = ()
     if params.entry_type == "ladder":
         rungs = tuple(
-            ladder_rungs(params, size=size, tick=ctx.tick, qty_step=ctx.qty_step, min_qty=ctx.min_qty)
+            ladder_rungs(
+                params,
+                size=size,
+                tick=ctx.tick,
+                qty_step=ctx.qty_step,
+                min_qty=max(ctx.min_base, ctx.qty_step),
+                min_quote=ctx.min_quote,
+            )
         )
         # EL4: the venue counts every resting order on the Market against one limit.
         if ctx.resting_orders + len(rungs) > MARKET_ORDER_CAP:

@@ -17,6 +17,9 @@ export interface AlgoBlockContext {
   slipFrac?: number;
   reduceOnly?: boolean;
   priceDecimals?: number;
+  /** The venue's base and quote minimums, for algos whose orders rest away from the touch. */
+  minBase?: number;
+  minQuote?: number;
 }
 
 export interface AlgoSubmitContext {

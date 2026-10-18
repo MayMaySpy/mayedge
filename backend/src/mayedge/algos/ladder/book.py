@@ -329,24 +329,21 @@ class LadderBook:
                     logger.exception("flush persist failed for %s", job.state.algo_id)
         store.save_book_counters(ALGO_ID, self._id_seq, self._coi_seq)
 
-    def _market_limits(self, market_index: int) -> tuple[Decimal, Decimal, Decimal]:
+    def _market_limits(self, market_index: int) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+        """Tick, lot, base minimum, and quote minimum. The quote minimum is checked
+        at each rung's own price, not at the touch (a rung at 0.005 needs 4× the size
+        of one at 0.02)."""
         ex = self.execution()
         meta = ex.get_market_by_index(market_index)
         if not meta:
             raise ValueError("Unknown market")
         tick = Decimal(10) ** -meta.price_decimals
         qty_step = Decimal(10) ** -meta.size_decimals
-        bid_s, ask_s = ex.best_bid_ask(market_index)
-        px = Decimal(str(bid_s or ask_s or "0"))
-        min_qty = maker_min_base(
-            meta.min_base_amount,
-            meta.min_quote_amount,
-            px if px > 0 else None,
-            qty_step,
-        )
+        min_qty = maker_min_base(meta.min_base_amount, 0, None, qty_step)
         if min_qty <= 0:
             min_qty = qty_step
-        return tick, qty_step, min_qty
+        min_quote = Decimal(str(meta.min_quote_amount or 0))
+        return tick, qty_step, min_qty, min_quote
 
     async def start_from_body(self, body: dict[str, Any]) -> None:
         side = body.get("side")
@@ -365,14 +362,16 @@ class LadderBook:
             price_var_pct=parse_decimal(str(body.get("price_var_pct") or "0")),
             size_skew=parse_decimal(str(body.get("size_skew") or "0")),
         )
-        tick, qty_step, min_qty = self._market_limits(market_index)
+        tick, qty_step, min_qty, min_quote = self._market_limits(market_index)
         seed_raw = body.get("seed")
         rng = None
         if (params.size_var_pct > 0 or params.price_var_pct > 0) and seed_raw is not None and str(
             seed_raw
         ) != "":
             rng = NumericLcg(int(seed_raw))
-        validate_params(params, tick=tick, qty_step=qty_step, min_qty=min_qty, rng=rng)
+        validate_params(
+            params, tick=tick, qty_step=qty_step, min_qty=min_qty, rng=rng, min_quote=min_quote
+        )
         await self.start(
             market_index=market_index,
             params=params,

@@ -119,6 +119,26 @@ def _round_qty(qty: Decimal, step: Decimal) -> Decimal:
     return n * step
 
 
+def rung_min_qty(price: Decimal, *, min_qty: Decimal, min_quote: Decimal, qty_step: Decimal) -> Decimal:
+    """The venue's minimum for one order at this price: its base minimum, or its
+    quote minimum at this price, whichever is more, rounded up to the lot."""
+    need = min_qty
+    if min_quote > 0 and price > 0:
+        at_price = min_quote / price
+        if qty_step > 0:
+            at_price = (at_price / qty_step).to_integral_value(rounding=ROUND_UP) * qty_step
+        need = max(need, at_price)
+    return need
+
+
+def _too_small(price: Decimal, need: Decimal, min_quote: Decimal) -> ValueError:
+    quote = f" (the venue's ${fmt_decimal(min_quote)} minimum)" if min_quote > 0 else ""
+    return ValueError(
+        f"The order at {fmt_decimal(price)} must be ≥ {fmt_decimal(need)}{quote}"
+        " — use fewer orders or more size"
+    )
+
+
 def _var_frac(pct: Decimal) -> Decimal:
     if pct < 0 or pct > MAX_VAR_PCT:
         raise ValueError(f"Variance 0–{MAX_VAR_PCT}%")
@@ -224,7 +244,10 @@ def build_rungs(
     price_var_pct: Decimal = Decimal("0"),
     size_skew: Decimal = Decimal("0"),
     rng: random.Random | NumericLcg | None = None,
+    min_quote: Decimal = Decimal("0"),
 ) -> list[Rung]:
+    """Rungs from one price to another. Each must meet the venue minimum at its own
+    price: a $10 minimum is 500 at 0.02 but 2000 at 0.005."""
     if side not in ("buy", "sell"):
         raise ValueError("side must be buy or sell")
     if qty <= 0:
@@ -279,10 +302,9 @@ def build_rungs(
             rung_qty = _round_qty(qty * weights[i], qty_step)
         if rung_qty <= 0:
             continue
-        if min_qty > 0 and rung_qty < min_qty:
-            raise ValueError(
-                f"Each order must be ≥ {fmt_decimal(min_qty)} — use fewer orders or more size"
-            )
+        need = rung_min_qty(price, min_qty=min_qty, min_quote=min_quote, qty_step=qty_step)
+        if need > 0 and rung_qty < need:
+            raise _too_small(price, need, min_quote)
         allocated += rung_qty
         out.append(Rung(index=len(out), price=price, qty=rung_qty))
 
@@ -294,10 +316,9 @@ def build_rungs(
         patched = last_rung.qty + remainder
         if patched <= 0:
             raise ValueError("Too many orders for size")
-        if min_qty > 0 and patched < min_qty:
-            raise ValueError(
-                f"Each order must be ≥ {fmt_decimal(min_qty)} — use fewer orders or more size"
-            )
+        need = rung_min_qty(last_rung.price, min_qty=min_qty, min_quote=min_quote, qty_step=qty_step)
+        if need > 0 and patched < need:
+            raise _too_small(last_rung.price, need, min_quote)
         out[-1] = Rung(index=last_rung.index, price=last_rung.price, qty=patched)
     return out
 
@@ -309,6 +330,7 @@ def validate_params(
     qty_step: Decimal,
     min_qty: Decimal,
     rng: random.Random | NumericLcg | None = None,
+    min_quote: Decimal = Decimal("0"),
 ) -> None:
     if p.window < 1 or p.window > MAX_WINDOW:
         raise ValueError(f"Live window 1–{MAX_WINDOW}")
@@ -325,6 +347,7 @@ def validate_params(
         price_var_pct=p.price_var_pct,
         size_skew=p.size_skew,
         rng=rng,
+        min_quote=min_quote,
     )
 
 

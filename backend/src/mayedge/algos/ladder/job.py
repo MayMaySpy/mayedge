@@ -48,6 +48,8 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
         self._book = book
         self._state = LadderState()
         self._cois: set[int] = set()
+        # Why the venue last refused a rung, for the blotter: "below_min_qty", "would_cross".
+        self._place_refused: str | None = None
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
@@ -523,18 +525,18 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 reduce_only=self._state.reduce_only,
                 client_order_index=coi,
             )
-        except ValueError as e:
-            if _is_min_size(e) or _is_would_cross(e):
-                return False
-            if self._handle_tx_err(e):
-                return False
-            raise
         except Exception as e:
-            if _is_min_size(e) or _is_would_cross(e):
+            # The venue's own refusal, so the blotter says why and not a guess.
+            if _is_min_size(e):
+                self._place_refused = "below_min_qty"
+                return False
+            if _is_would_cross(e):
+                self._place_refused = "would_cross"
                 return False
             if self._handle_tx_err(e):
                 return False
             raise
+        self._place_refused = None
         self._last_tx_ms = ladder_util.now_ms()
         found = self._find_open(coi)
         idx = int(found["order_index"]) if found and found.get("order_index") else None
@@ -626,6 +628,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 ask=view.ask,
             )
             placed_any = False
+            self._place_refused = None
             for rung in to_place:
                 now = ladder_util.now_ms()
                 if now < self._backoff_until:
@@ -642,8 +645,10 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 self._state.reason = None
             elif not placed_any:
                 self._state.quote_action = Action.PAUSE.value
-                if not self._state.reason:
-                    self._state.reason = "would_cross" if to_place else "waiting"
+                if self._place_refused:
+                    self._state.reason = self._place_refused
+                elif not self._state.reason:
+                    self._state.reason = "waiting"
 
             if (
                 self._state.remaining <= 0 or leftover_is_dust(self._state.remaining, min_qty)

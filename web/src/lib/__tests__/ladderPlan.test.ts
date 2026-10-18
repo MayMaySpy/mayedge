@@ -100,4 +100,14 @@ describe("ladder plan preview", () => {
     if ("error" in high) return;
     expect(high.orders[0].qty).toBeGreaterThan(high.orders[high.orders.length - 1].qty);
   });
+
+  it("checks each order against the quote minimum at its own price", () => {
+    // MON: $10 minimum, 250 base. 1142 an order is enough at 0.02 but not near 0.005.
+    const mon = { side: "buy" as const, priceFrom: 0.01, priceTo: 0.005, tick: 0.00001, qtyStep: 0.1, minQty: 250, minQuote: 10 };
+    const refused = buildLadderPlan({ ...mon, qty: 40000, orders: 35 });
+    expect("error" in refused && refused.error).toMatch(/^The order at 0\.00\d+ must be ≥ [\d.]+ \(the venue's \$10 minimum\)/);
+    const ok = buildLadderPlan({ ...mon, qty: 40000, orders: 8 });
+    expect("orders" in ok && ok.orders.every((o) => o.qty * o.price >= 10 - 1e-9)).toBe(true);
+  });
 });
+
