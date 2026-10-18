@@ -57,7 +57,7 @@ A plan that breaks a rule here does not start, and says which rule.
 |---|---|---|---|
 | S1 | The stop is on the losing side of both entry and mark. Every target is on the winning side of both. | | test_a_stop_on_the_winning_side_is_refused, test_a_stop_mark_has_passed_is_refused, test_a_target_behind_entry_is_refused |
 | S2 | When the Position has a **Liquidation price**, the stop sits before it. | | test_a_stop_beyond_the_liquidation_price_is_refused |
-| S3 | Enter refuses while a Position is open on the Market. That is what Attach is for. | | test_enter_refuses_with_a_position_open |
+| S3 | Enter refuses while a Position is open on the Market. That is what Attach is for: while one is open, the ticket's Planner opens as Attach (Plan Position…), the same as the Positions row's Plan. | | test_enter_refuses_with_a_position_open, `plans the open Position's exit instead of a new entry` |
 | S4 | Attach refuses without an open Position. | | test_attach_refuses_without_a_position, test_attach_refuses_the_other_side |
 | S5 | One Planner per Market. It refuses while any other desk algo is live on that Market, and Grid refuses while a Planner is ([ADR 0002](adr/0002-grid-is-exclusive-on-a-market.md)). | | test_one_planner_per_market, test_planner_refuses_beside_another_desk_algo, test_grid_and_planner_each_refuse_beside_another_algo |
 | S6 | Attach cancels every **Stop** and **Take Profit** Ticket on the Market and replaces them with its own. Its stop goes on first, so the Position is never without one. The confirm names each one it cancels ([ADR 0015](adr/0015-planner-owns-the-exit.md)). | | test_attach_puts_its_stop_on_before_pulling_tickets |

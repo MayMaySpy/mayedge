@@ -484,7 +484,7 @@ export function OrderTicket({
                     disabled={!tradingEnabled}
                     onSelect={() => setPlannerOpen(true)}
                   >
-                    {runningPlanner ? "Re-plan…" : "Planner…"}
+                    {runningPlanner ? "Re-plan…" : signedPos !== 0 ? "Plan Position…" : "Planner…"}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -622,7 +622,8 @@ export function OrderTicket({
         open={plannerOpen}
         onOpenChange={setPlannerOpen}
         market={market}
-        mode={runningPlanner ? "attach" : "enter"}
+        mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
+        side={signedPos < 0 ? "sell" : "buy"}
         running={runningPlanner}
       />
     </div>

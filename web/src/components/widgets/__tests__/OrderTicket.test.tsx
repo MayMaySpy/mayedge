@@ -273,4 +273,22 @@ describe("OrderTicket", () => {
     expect(api.placeMarketOrder).toHaveBeenCalledTimes(1);
     release({ tx_hash: "0x1" });
   });
+
+  it("plans the open Position's exit instead of a new entry", async () => {
+    liveDesk([position("-2")]);
+    const { user } = setup();
+    await user.click(button("Chase"));
+    await user.click(await screen.findByRole("menuitem", { name: "Plan Position…" }));
+
+    expect(await screen.findByRole("heading", { name: "Plan ETH short" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: "Entry type" })).toBeNull();
+  });
+
+  it("opens a new entry's Planner while the Market is flat", async () => {
+    const { user } = setup();
+    await user.click(button("Chase"));
+    await user.click(await screen.findByRole("menuitem", { name: "Planner…" }));
+
+    expect(await screen.findByRole("heading", { name: "Planner · ETH" })).toBeTruthy();
+  });
 });

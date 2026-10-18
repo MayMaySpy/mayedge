@@ -67,7 +67,7 @@ Every algo works in **Clips**, not Tickets, and persists in SQLite; start, pause
 | **Grid** | Chases inside a price band, takes profit with reduce-only Clips. | Order panel → Algo |
 | **Ladder** | Keeps N live rungs on static prices; refills on fill. | Order panel → Algo |
 | **TWAP** | Slices a parent size across time. | Order panel → Algo |
-| **Planner** | Runs one trade from its stop: entry, stop, targets, **Stop steps**. | Order panel → Algo, or a Positions row |
+| **Planner** | Runs one trade from its stop: entry, stop, targets, **Stop steps**. On an open Position it attaches instead: it takes over the exit and enters nothing. | Order panel → Algo, or a Positions row's Plan |
 | **Trail** | Keeps a trigger a set distance behind the **best price**. Entry, Stop or Take Profit. | Order panel → Algo (Entry), or a Positions row (Stop, Take Profit) |
 
 Grid and Planner will not start on a Market that already has another desk algo live ([ADR 0002](docs/adr/0002-grid-is-exclusive-on-a-market.md)), and a Trail will not start beside either; Planner runs its own trailing parts. Each family has its own client_order_index band ([ADR 0004](docs/adr/0004-partitioned-client-order-index.md)).
