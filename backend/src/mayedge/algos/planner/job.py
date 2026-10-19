@@ -545,7 +545,7 @@ class PlannerRunner:
         if p is None or not p.trails():
             return
         if kind == "prints":
-            if p.reference != "last" or int(msg.get("market_index") or -1) != self._state.market_index:
+            if p.reference != "last" or venue.market_of(msg) != self._state.market_index:
                 return
             for raw in msg.get("prices") or []:
                 px = venue.dec(raw)
@@ -555,7 +555,7 @@ class PlannerRunner:
             return
         if kind == "market_stats":
             for m in msg.get("markets") or []:
-                if isinstance(m, dict) and int(m.get("market_index") or -1) == self._state.market_index:
+                if isinstance(m, dict) and venue.market_of(m) == self._state.market_index:
                     self._wake.set()
                     return
 

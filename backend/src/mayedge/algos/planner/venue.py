@@ -22,6 +22,12 @@ def dec(raw: object) -> Decimal | None:
         return None
 
 
+def market_of(raw: dict[str, Any]) -> int:
+    """The row's market index, or -1 without one. ETH is market 0, so not `or -1`."""
+    mi = raw.get("market_index")
+    return -1 if mi is None or mi == "" else int(mi)
+
+
 @dataclass(frozen=True)
 class HeldPosition:
     size: Decimal  # signed: + long, − short
@@ -35,7 +41,7 @@ def _payload(ex: ChaseExecution) -> dict[str, Any]:
 
 def position(ex: ChaseExecution, market_index: int) -> HeldPosition:
     for raw in _payload(ex).get("positions") or []:
-        if not isinstance(raw, dict) or int(raw.get("market_index") or -1) != market_index:
+        if not isinstance(raw, dict) or market_of(raw) != market_index:
             continue
         size = dec(raw.get("size")) or Decimal("0")
         entry = dec(raw.get("entry_price"))
@@ -56,7 +62,7 @@ def ticket_protects(ex: ChaseExecution, market_index: int) -> list[dict[str, Any
     """S6: the Stop and Take Profit Tickets Attach replaces."""
     out: list[dict[str, Any]] = []
     for o in open_orders(ex):
-        if int(o.get("market_index") or -1) != market_index:
+        if market_of(o) != market_index:
             continue
         if is_algo_client_order(int(o.get("client_order_index") or 0)):
             continue
@@ -70,7 +76,7 @@ def resting_orders(ex: ChaseExecution, market_index: int) -> int:
     """EL4: limit orders on the Market's book. Stops and Take Profits wait off it."""
     n = 0
     for o in open_orders(ex):
-        if int(o.get("market_index") or -1) != market_index:
+        if market_of(o) != market_index:
             continue
         kind = str(o.get("order_type") or "limit")
         if protect_role_kind(kind) is None and "twap" not in kind.lower():

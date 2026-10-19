@@ -454,7 +454,7 @@ class TrailRunner:
             self._wake.set()
             return
         if kind == "prints":
-            if int(msg.get("market_index") or -1) != st.market_index:
+            if venue.market_of(msg) != st.market_index:
                 return
             if st.params is None or st.params.reference != "last":
                 return
@@ -466,7 +466,7 @@ class TrailRunner:
             return
         if kind == "market_stats":
             for m in msg.get("markets") or []:
-                if isinstance(m, dict) and int(m.get("market_index") or -1) == st.market_index:
+                if isinstance(m, dict) and venue.market_of(m) == st.market_index:
                     self._wake.set()
                     return
 

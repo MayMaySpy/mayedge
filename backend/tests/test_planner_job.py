@@ -4,7 +4,7 @@ import dataclasses
 import sys
 from decimal import Decimal as D
 from pathlib import Path
-from unittest import IsolatedAsyncioTestCase
+from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import patch
 
 from mayedge.algos.chase import util
@@ -704,3 +704,27 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         await again._halt()
         self.assertEqual([r["price"] for r in self.venue.sent("limit")[4:]], ["99", "98.5", "98"])
         self.assertEqual(again.state.entry_filled, D("0.5"))
+
+
+class MarketZeroTests(TestCase):
+    """ETH is market 0 on Lighter. A falsy index must still match its rows."""
+
+    def test_attach_finds_a_position_on_market_0(self) -> None:
+        import planner_harness
+
+        with patch.object(planner_harness, "MI", 0):
+            v = FakeVenue(position=D("-0.2"), entry=D("100"))
+            v._rest(7, side="buy", size="0.2", price="110",
+                    order_type="stop-loss", trigger="110")
+            ctx, symbol = planner_venue.market_context(v.execution(), 0)
+            protects = planner_venue.ticket_protects(v.execution(), 0)
+        self.assertEqual(symbol, "ETH")
+        self.assertEqual(ctx.position_size, D("-0.2"))
+        self.assertEqual(len(protects), 1)
+        plan = build_plan(
+            PlannerParams(mode="attach", side="sell", stop=D("110"),
+                          targets=[Target("r", D("1"), D("100"))]),
+            ctx,
+        )
+        self.assertEqual(plan.size, D("0.2"))
+
