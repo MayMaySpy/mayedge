@@ -242,3 +242,11 @@ describe("Auto kill", () => {
     expect(screen.getByText(/Last fired: loss · .*312\.50 · partial/)).toBeTruthy();
   });
 });
+
+describe("Header pages", () => {
+  it("links the Portfolio and the Journal, read-only or not", () => {
+    setup({ tradingEnabled: false });
+    expect(screen.getByRole("link", { name: "Portfolio" }).getAttribute("href")).toBe("/portfolio");
+    expect(screen.getByRole("link", { name: "Journal" }).getAttribute("href")).toBe("/journal");
+  });
+});
