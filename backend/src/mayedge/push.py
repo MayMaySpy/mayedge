@@ -11,6 +11,7 @@ import html
 import logging
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -107,6 +108,8 @@ class PushSettings:
     account_stale_after_s: float = 120
     repeat_s: float = 600
     max_per_min: int = 12
+    # Local HH:MM for yesterday's journal. Empty is off.
+    daily_at: str = ""
 
 
 def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
@@ -127,6 +130,7 @@ def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
         account_stale_after_s=_f(raw.get("account_stale_after_s"), base.account_stale_after_s),
         repeat_s=_f(raw.get("repeat_s"), base.repeat_s),
         max_per_min=max(1, int(_f(raw.get("max_per_min"), base.max_per_min))),
+        daily_at=_daily_at(raw.get("daily_at")),
     )
 
 
@@ -175,10 +179,18 @@ class _SeenAlgo:
 class PushRouter:
     """Turn desk messages into pushes. The first algo snapshot only seeds the diff."""
 
-    def __init__(self, out: PushSink, cfg: PushSettings, clock: Clock) -> None:
+    def __init__(
+        self,
+        out: PushSink,
+        cfg: PushSettings,
+        clock: Clock,
+        journal: Callable[[str], tuple[int, float, float, float]] | None = None,
+    ) -> None:
         self._out = out
         self._cfg = cfg
         self._clock = clock
+        self._journal = journal
+        self._daily_sent_on: str | None = None
         self._algo_seeded = False
         self._algos: dict[str, _SeenAlgo] = {}
         self._live_algos = 0
@@ -211,6 +223,7 @@ class PushRouter:
         self._poll_venue()
         self._poll_account()
         self._maybe_kill_result()
+        self._poll_daily()
 
     def _on_alerts(self, msg: dict[str, Any]) -> None:
         if self._cfg.alerts == "off":
@@ -417,6 +430,33 @@ class PushRouter:
         )
         self._account_announced = True
 
+    def _poll_daily(self) -> None:
+        if self._daily_wait() != 0.0:
+            return
+        today = _local_date(time.localtime(self._clock.now()))
+        self._daily_sent_on = today
+        if self._journal is None:
+            return
+        day = time.strftime("%Y-%m-%d", time.gmtime(self._clock.now() - 86_400))
+        try:
+            count, net, fees, funding = self._journal(day)
+        except Exception:
+            logger.warning("daily journal push skipped")
+            return
+        self._out.push(f"journal:{today}", daily_journal_text(count, net, fees, funding))
+
+    def _daily_wait(self) -> float | None:
+        at = self._cfg.daily_at
+        if not at:
+            return None
+        now = self._clock.now()
+        stamp = time.localtime(now)
+        if self._daily_sent_on == _local_date(stamp):
+            return _seconds_until_hhmm(now + 60, at)
+        if _minutes(stamp) >= _at_minutes(at):
+            return 0.0
+        return _seconds_until_hhmm(now, at)
+
     def due_in(self) -> float | None:
         """Seconds until a debounced push is due. None when nothing is waiting."""
         waits: list[float] = []
@@ -426,6 +466,9 @@ class PushRouter:
         exposed = bool(self._positions) or self._live_algos > 0
         if self._account_down_since is not None and not self._account_announced and exposed:
             waits.append(self._account_down_since + self._cfg.account_stale_after_s - now)
+        daily = self._daily_wait()
+        if daily is not None:
+            waits.append(daily)
         if not waits:
             return None
         return max(0.0, min(waits))
@@ -580,7 +623,7 @@ class TelegramPusher:
         self._window_start: float | None = None
         self._sent_in_window = 0
         self._last_mono: float | None = None
-        self._router = PushRouter(self, self._cfg, self._clock)
+        self._router = PushRouter(self, self._cfg, self._clock, journal=journal_day_totals)
 
     @classmethod
     def from_settings(cls) -> TelegramPusher:
@@ -853,6 +896,71 @@ def _px(value: float) -> str:
 def _trim(value: float) -> str:
     text = f"{value:.4f}".rstrip("0").rstrip(".")
     return text or "0"
+
+
+def daily_journal_text(count: int, net: float, fees: float, funding: float) -> str:
+    """Yesterday's closed Round trips. Fees are a cost; funding keeps its sign."""
+    if count <= 0:
+        return "Yesterday: no Round trips."
+    noun = "Round trip" if count == 1 else "Round trips"
+    return (
+        f"Yesterday: Net {_signed_usd(net)} over {count} {noun}, "
+        f"fees {_usd(abs(fees))}, funding {_signed_usd(funding)}"
+    )
+
+
+def journal_day_totals(day: str) -> tuple[int, float, float, float]:
+    """Closed Round trips whose UTC close date is `day` (`YYYY-MM-DD`)."""
+    from mayedge.api.routes.journal import _trips
+    from mayedge.journal import _group_key, summary
+
+    chosen = [
+        trip for trip in _trips() if trip.close_ts is not None and _group_key(trip, "day") == day
+    ]
+    rows = summary(chosen, "none")
+    if not rows:
+        return (0, 0.0, 0.0, 0.0)
+    row = rows[0]
+    return (row.count, float(row.net), float(row.fees), float(row.funding))
+
+
+def _daily_at(raw: Any) -> str:
+    text = str(raw or "").strip()
+    parts = text.split(":")
+    if len(parts) != 2:
+        return ""
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return ""
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return ""
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _local_date(stamp: time.struct_time) -> str:
+    return f"{stamp.tm_year:04d}-{stamp.tm_mon:02d}-{stamp.tm_mday:02d}"
+
+
+def _minutes(stamp: time.struct_time) -> int:
+    return stamp.tm_hour * 60 + stamp.tm_min
+
+
+def _at_minutes(hhmm: str) -> int:
+    return int(hhmm[:2]) * 60 + int(hhmm[3:])
+
+
+def _seconds_until_hhmm(now: float, hhmm: str) -> float:
+    hour, minute = _at_minutes(hhmm) // 60, _at_minutes(hhmm) % 60
+    stamp = time.localtime(now)
+    if stamp.tm_hour == hour and stamp.tm_min == minute:
+        return 0.0
+    target = time.mktime((stamp.tm_year, stamp.tm_mon, stamp.tm_mday, hour, minute, 0, 0, 0, -1))
+    if target <= now:
+        nxt = time.localtime(now + 86_400)
+        target = time.mktime((nxt.tm_year, nxt.tm_mon, nxt.tm_mday, hour, minute, 0, 0, 0, -1))
+    return max(0.0, target - now)
 
 
 def _usd(value: float) -> str:

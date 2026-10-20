@@ -79,3 +79,5 @@ push:
   repeat_s: 600
   # Above this many pushes in a minute, the rest are folded into one digest.
   max_per_min: 12
+  # Local HH:MM for yesterday's journal. Empty stays off.
+  daily_at: ""

@@ -31,6 +31,7 @@ The first algo snapshot after boot only seeds the diff. A restart does not repla
 | Venue back | the venue is up again after a down push. This one is not dropped by the down message's quiet window. | `Lighter back after 6m` | `venue` | no |
 | Account feed stale | `account_ws` is not `live` for `account_stale_after_s`, and a Position is open or an algo is `running` or `paused`. Once per outage; going live clears it. | `⚠️ Account feed stale 2m with 2 algos live — desk is blind` | `account_stale` | yes |
 | Desk started | after `desk.restore()` | `Desk up (mainnet) — 3 algos restored, 2 Positions open` | `boot` | no |
+| Yesterday's journal | local time is at or past `daily_at`, once that local date, including a start that missed the minute. The numbers are the UTC journal day 24 hours earlier, the same day key the journal uses. Closed Round trips only; partial and open stay out. Empty `daily_at` sends nothing. A failed read is logged and that local date is not tried again. | `Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6`. None closed: `Yesterday: no Round trips.` | `journal:{local date}` | no |
 | Send test | the Alerts panel, or `POST /api/push/test` | `Desk test push ✓` | `test:{time}` | yes |
 
 `algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, and TWAP send an error and nothing else.
@@ -49,6 +50,7 @@ Sizes use a unicode minus (`−2.0`). A loss in dollars does too (`−$812`). Pr
 | `account_stale_after_s` | 120 | how long the account feed stays quiet before the stale push |
 | `repeat_s` | 600 | the same key stays quiet this long. Urgent skips it. The venue-back push skips it too. |
 | `max_per_min` | 12 | past this many sends in a minute, non-urgent items wait and leave as one `N more: a; b` when the minute ends. Urgent still goes. |
+| `daily_at` | empty | local `HH:MM` for yesterday's journal. Empty is off. |
 
 The worker also sends at most one message a second. An HTTP 429 waits `parameters.retry_after` and tries again; it is not one of the three failures. After eight 429s in a row it counts as a failure. Any other error waits 2s, then 4s, then 8s, then the message is dropped and one warning is logged. The warning does not include the exception or the request.
 

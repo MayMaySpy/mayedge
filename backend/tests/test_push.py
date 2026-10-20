@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import unittest
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -14,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from mayedge.api.app import create_app
 from mayedge.config import settings
+from mayedge.journal import RoundTrip
 from mayedge.push import (
     HttpxTransport,
     PushRouter,
@@ -21,6 +23,8 @@ from mayedge.push import (
     SendResult,
     TelegramPusher,
     boot_text,
+    daily_journal_text,
+    journal_day_totals,
     public_push_status,
     push_settings_from_dict,
 )
@@ -121,6 +125,41 @@ def _algo(*rows: dict[str, object]) -> dict[str, object]:
     return {"type": "algo", "working": list(rows), "history": []}
 
 
+def _local_stamp(hour: int, minute: int, *, second: int = 30, day_offset: int = 0) -> float:
+    base = time.localtime(1_700_000_000)
+    return time.mktime(
+        (base.tm_year, base.tm_mon, base.tm_mday + day_offset, hour, minute, second, 0, 0, -1)
+    )
+
+
+def _trip(**overrides: object) -> RoundTrip:
+    fields: dict[str, object] = {
+        "trip_key": "1:1",
+        "market_index": 1,
+        "symbol": "ETH",
+        "side": "long",
+        "open_ts": 1,
+        "close_ts": 1_700_000_000,
+        "size": Decimal("1"),
+        "avg_in": Decimal("1"),
+        "avg_out": Decimal("1"),
+        "pnl": Decimal("0"),
+        "fees": Decimal("0"),
+        "funding": Decimal("0"),
+        "net": Decimal("0"),
+        "algo": "manual",
+        "algo_id": None,
+        "r": None,
+        "partial": False,
+        "partial_reason": None,
+        "open": False,
+        "upnl": None,
+        "fills": (),
+    }
+    fields.update(overrides)
+    return RoundTrip(**fields)  # type: ignore[arg-type]
+
+
 class RouterTests(unittest.TestCase):
     def _router(self, cfg: PushSettings | None = None) -> tuple[PushRouter, Sink, ManualClock]:
         sink = Sink()
@@ -144,6 +183,110 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(cfg.alerts, "held")
         self.assertEqual(cfg.algos, "lifecycle")
         self.assertEqual(cfg.max_per_min, 1)
+        self.assertEqual(cfg.daily_at, "")
+
+    def test_daily_at_parses_hhmm_or_stays_off(self) -> None:
+        self.assertEqual(PushSettings().daily_at, "")
+        self.assertEqual(push_settings_from_dict({"push": {"daily_at": "8:00"}}).daily_at, "08:00")
+        self.assertEqual(push_settings_from_dict({"push": {"daily_at": "25:99"}}).daily_at, "")
+        self.assertEqual(push_settings_from_dict({"push": {}}).daily_at, "")
+
+    def test_daily_journal_text(self) -> None:
+        self.assertEqual(
+            daily_journal_text(9, 412, 38, -6),
+            "Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6",
+        )
+        self.assertEqual(
+            daily_journal_text(1, -12, -3, 1),
+            "Yesterday: Net −$12 over 1 Round trip, fees $3, funding +$1",
+        )
+        self.assertEqual(daily_journal_text(0, 0, 0, 0), "Yesterday: no Round trips.")
+
+    def test_journal_day_totals_keeps_that_utc_day(self) -> None:
+        trips = [
+            _trip(trip_key="a", net=Decimal("400"), fees=Decimal("30"), funding=Decimal("-4")),
+            _trip(trip_key="b", net=Decimal("12"), fees=Decimal("8"), funding=Decimal("-2")),
+            _trip(trip_key="partial", partial=True, net=Decimal("999")),
+            _trip(trip_key="open", open=True, close_ts=None, net=Decimal("999")),
+            _trip(trip_key="other", close_ts=1_700_000_000 - 86_400, net=Decimal("999")),
+        ]
+        with patch("mayedge.api.routes.journal._trips", return_value=trips):
+            self.assertEqual(journal_day_totals("2023-11-14"), (2, 412.0, 38.0, -6.0))
+            self.assertEqual(journal_day_totals("2023-11-13"), (1, 999.0, 0.0, 0.0))
+            self.assertEqual(journal_day_totals("2023-11-12"), (0, 0.0, 0.0, 0.0))
+
+    def test_daily_push_stays_off_until_the_knob_is_set(self) -> None:
+        called = False
+
+        def journal(day: str) -> tuple[int, float, float, float]:
+            nonlocal called
+            called = True
+            return (1, 1.0, 0.0, 0.0)
+
+        sink = Sink()
+        clock = ManualClock(_local_stamp(8, 0))
+        router = PushRouter(sink, PushSettings(), clock, journal=journal)
+        router.poll()
+        self.assertFalse(called)
+        self.assertEqual(sink.rows, [])
+
+    def test_daily_journal_push_is_once_per_local_day(self) -> None:
+        days: list[str] = []
+
+        def journal(day: str) -> tuple[int, float, float, float]:
+            days.append(day)
+            return (9, 412.0, 38.0, -6.0)
+
+        sink = Sink()
+        clock = ManualClock(_local_stamp(7, 59))
+        router = PushRouter(sink, PushSettings(daily_at="08:00"), clock, journal=journal)
+        router.poll()
+        self.assertEqual(sink.rows, [])
+        wait = router.due_in()
+        self.assertIsNotNone(wait)
+        assert wait is not None
+        self.assertGreater(wait, 0)
+        self.assertLess(wait, 120)
+
+        clock.t = _local_stamp(8, 0)
+        router.poll()
+        today = time.strftime("%Y-%m-%d", time.localtime(clock.t))
+        yesterday = time.strftime("%Y-%m-%d", time.gmtime(clock.t - 86_400))
+        self.assertEqual(days, [yesterday])
+        self.assertEqual(
+            sink.rows,
+            [
+                (
+                    f"journal:{today}",
+                    "Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6",
+                    False,
+                )
+            ],
+        )
+        later = router.due_in()
+        self.assertIsNotNone(later)
+        assert later is not None
+        self.assertGreater(later, 3_600)
+        router.poll()
+        self.assertEqual(len(sink.rows), 1)
+
+        clock.t = _local_stamp(8, 0, day_offset=1)
+        router.poll()
+        self.assertEqual(len(sink.rows), 2)
+        self.assertEqual(len(days), 2)
+
+    def test_a_failed_journal_read_does_not_stop_the_push(self) -> None:
+        def journal(day: str) -> tuple[int, float, float, float]:
+            raise RuntimeError("locked")
+
+        sink = Sink()
+        clock = ManualClock(_local_stamp(8, 0))
+        router = PushRouter(sink, PushSettings(daily_at="08:00"), clock, journal=journal)
+        with self.assertLogs("mayedge.push", level="WARNING") as logs:
+            router.poll()
+        router.poll()
+        self.assertEqual(sink.rows, [])
+        self.assertIn("daily journal push skipped", logs.output[0])
 
     def test_status_hides_the_token(self) -> None:
         token = "super-secret-token"
