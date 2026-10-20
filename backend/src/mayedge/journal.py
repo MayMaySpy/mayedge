@@ -358,23 +358,25 @@ def _with_funding(
 ) -> list[RoundTrip]:
     if not trips:
         return []
-    ordered = sorted(rows, key=lambda row: row.ts)
+    # The venue stamps fills in ms and funding in seconds. Compare in seconds.
+    ordered = sorted(((seconds_of(row.ts), row.amount) for row in rows), key=lambda row: row[0])
     out: list[RoundTrip] = []
     for index, trip in enumerate(trips):
-        end = trip.close_ts
+        start = seconds_of(trip.open_ts)
+        end = seconds_of(trip.close_ts) if trip.close_ts is not None else None
         prev_close = trips[index - 1].close_ts if index else None
         # A print on the shared flip timestamp stays with the trip that closed.
         start_after = prev_close is not None and prev_close == trip.open_ts
         amount = ZERO
-        for row in ordered:
+        for ts, paid in ordered:
             if start_after:
-                if row.ts <= trip.open_ts:
+                if ts <= start:
                     continue
-            elif row.ts < trip.open_ts:
+            elif ts < start:
                 continue
-            if end is not None and row.ts > end:
+            if end is not None and ts > end:
                 continue
-            amount += row.amount
+            amount += paid
         net = trip.pnl - trip.fees + amount
         risk = None if trip.partial else _risk(trip.algo, trip.algo_id, trip.size, planner_risk)
         upnl = live if trip.open else None

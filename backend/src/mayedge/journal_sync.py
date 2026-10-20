@@ -11,11 +11,13 @@ from typing import Any
 
 from mayedge.lighter.budget import BudgetRefused
 from mayedge.persist_journal import (
+    journal_backfilled,
     journal_insert_fills,
     journal_insert_funding,
     journal_known_funding,
     journal_known_trade_ids,
     journal_last_synced_at,
+    journal_note_backfilled,
     journal_note_oldest,
     journal_note_synced,
 )
@@ -77,13 +79,17 @@ async def sync_once(
         known=lambda rows: journal_known_trade_ids([str(row["trade_id"]) for row in rows]),
         insert=journal_insert_fills,
     )
-    await _page(
+    funding_end, _ = await _page(
         fetch_funding,
         take,
         kind="funding",
         known=_known_funding,
         insert=journal_insert_funding,
     )
+    if trade_end:
+        journal_note_backfilled("trades")
+    if funding_end:
+        journal_note_backfilled("funding")
     # Oldest is how far the fill history reached. Funding is not a Position's open.
     if trade_end and trade_oldest is not None:
         journal_note_oldest(trade_oldest)
@@ -104,7 +110,12 @@ async def _page(
     known: Callable[[list[dict[str, Any]]], set[str]],
     insert: Callable[[list[dict[str, Any]]], None],
 ) -> tuple[bool, int | None]:
-    """Returns whether the venue had no further page, and the oldest ts seen."""
+    """Returns whether the venue had no further page, and the oldest ts seen.
+
+    Until one walk has reached the venue's oldest page, a known row does not stop
+    the walk: an interrupted first backfill would otherwise leave a hole for good.
+    """
+    complete = journal_backfilled(kind)
     cursor: str | None = None
     oldest: int | None = None
     while True:
@@ -122,7 +133,7 @@ async def _page(
             oldest = ts if oldest is None else min(oldest, ts)
         nxt = page.get("next")
         cursor = None if nxt in (None, "") else str(nxt)
-        if not rows or hit or cursor is None:
+        if not rows or (hit and complete) or cursor is None:
             # A known id stops the walk. An empty cursor means the venue has nothing older.
             return cursor is None, oldest
         await asyncio.sleep(0)

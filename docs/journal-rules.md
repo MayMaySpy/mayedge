@@ -18,7 +18,7 @@ Replay each Market on its own, from flat, in timestamp order. The same timestamp
 
 ## Funding
 
-Funding in a Round trip is the funding rows on that Market with `open_ts <= ts <= close_ts`. A print on the exact close stays with the trip that closed. The next trip, even when it opens on that same timestamp, starts after it. An open Round trip takes funding from its open through the latest row.
+Funding in a Round trip is the funding rows on that Market with `open_ts <= ts <= close_ts`. The venue stamps fills in milliseconds and funding in seconds, so both are compared in seconds. A print on the exact close stays with the trip that closed. The next trip, even when it opens on that same timestamp, starts after it. An open Round trip takes funding from its open through the latest row.
 
 **Net** is the venue's realized PnL, less fees, plus funding received (or less funding paid).
 
@@ -33,7 +33,7 @@ Two Round trips are not in the headline stats. They are still listed.
 
 Each fill may name an `algo_id` (`PL-`, `CH-`, `CG-`, `LD-`, `TW-`, `TR-`). The Round trip's algo is the family with the most opening size. No linked opening size means `manual`.
 
-**R** is Net divided by `|entry − stop| × size`. Entry and stop are the plan stored on that Planner run when it started (`plan.entry`, `plan.stop`), and size is the size this Round trip opened. A Planner run with no stored stop, a zero risk, or any other family has no R.
+**R** is Net divided by `|entry − stop| × size`. Entry and stop are the plan that Planner run holds (`plan.entry`, `plan.stop`): the actual average entry once it filled (planner-rules P1), and the stop it was planned with. A Re-plan replaces that stop; Stop steps and a Trail stop do not. Size is the size this Round trip opened. A Planner run with no stored stop, a zero risk, or any other family has no R.
 
 ## Summary
 
@@ -47,6 +47,6 @@ A day is the UTC date of the close. Win rate is wins divided by wins plus losses
 
 ## Sync
 
-Sync pages the venue newest first, 100 a page, and stops at the first page that already contains a stored `trade_id`. Funding pages the same way. Each page waits for the shared REST budget and then yields. Writes are `INSERT OR IGNORE`.
+Sync pages the venue newest first, 100 a page, and stops at the first page that already contains a stored `trade_id`. Funding pages the same way. That stop applies only once a walk has reached the venue's oldest page (`journal_backfilled_trades`, `journal_backfilled_funding`). Until then a sync walks past stored rows, so a first backfill cut short by the budget or the network is finished by a later sync instead of leaving a hole. Each page waits for the shared REST budget and then yields. Writes are `INSERT OR IGNORE`.
 
 Nothing syncs when trading is off. The first backfill runs as far as the venue still has rows, and the oldest timestamp reached is `journal_oldest_ts`. After boot, sync waits 30 seconds, then repeats every 5 minutes, and again 10 seconds after the account feed reports a fill.

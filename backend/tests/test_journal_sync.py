@@ -11,8 +11,10 @@ from mayedge import db as store
 from mayedge.config import settings
 from mayedge.journal_sync import sync_once
 from mayedge.persist_journal import (
+    journal_backfilled,
     journal_insert_fills,
     journal_load_fills,
+    journal_note_backfilled,
     journal_oldest_ts,
 )
 
@@ -53,6 +55,7 @@ class JournalSyncTests(IsolatedAsyncioTestCase):
 
     async def test_paging_stops_at_a_known_trade_and_a_replay_inserts_nothing(self) -> None:
         journal_insert_fills([_fill("1", 10)])
+        journal_note_backfilled("trades")
         calls: list[tuple[str, str | None]] = []
 
         async def trades(cursor: str | None) -> dict[str, Any]:
@@ -81,6 +84,28 @@ class JournalSyncTests(IsolatedAsyncioTestCase):
         self.assertEqual(calls, [("t", None), ("f", None)])
         self.assertEqual(self.takes, 2)
         self.assertEqual({row["trade_id"] for row in journal_load_fills()}, {"1", "2", "3"})
+
+    async def test_an_interrupted_backfill_walks_past_known_fills_until_it_reaches_the_end(self) -> None:
+        # The first walk stored the newest page and then stopped (budget, network).
+        journal_insert_fills([_fill("3", 30)])
+        pages = {
+            None: {"rows": [_fill("4", 40), _fill("3", 30)], "next": "p2"},
+            "p2": {"rows": [_fill("2", 20)], "next": "p3"},
+            "p3": {"rows": [_fill("1", 10)], "next": None},
+        }
+
+        async def trades(cursor: str | None) -> dict[str, Any]:
+            return pages[cursor]
+
+        async def funding(cursor: str | None) -> dict[str, Any]:
+            return {"rows": [], "next": None}
+
+        self.assertFalse(journal_backfilled("trades"))
+        await sync_once(trades, funding, self._take, enabled=True)
+        self.assertEqual({row["trade_id"] for row in journal_load_fills()}, {"1", "2", "3", "4"})
+        self.assertTrue(journal_backfilled("trades"))
+        self.assertTrue(journal_backfilled("funding"))
+        self.assertEqual(journal_oldest_ts(), 10)
 
     async def test_a_full_backfill_records_the_oldest_timestamp(self) -> None:
         async def trades(cursor: str | None) -> dict[str, Any]:

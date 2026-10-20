@@ -111,6 +111,24 @@ def journal_note_oldest(ts: int) -> None:
         conn.commit()
 
 
+def journal_backfilled(kind: str) -> bool:
+    """A walk of ``kind`` (trades or funding) once reached the venue's oldest page."""
+    with _lock:
+        conn = _connect()
+        done = _meta(conn, f"journal_backfilled_{kind}") is not None
+        # Desks that finished a trades backfill before this marker existed.
+        if not done and kind == "trades":
+            done = _meta(conn, _OLDEST) is not None
+    return done
+
+
+def journal_note_backfilled(kind: str) -> None:
+    with _lock:
+        conn = _connect()
+        _set_meta(conn, f"journal_backfilled_{kind}", "1")
+        conn.commit()
+
+
 def journal_last_synced_at() -> int | None:
     with _lock:
         conn = _connect()

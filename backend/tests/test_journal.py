@@ -225,6 +225,23 @@ class RoundTripTests(TestCase):
         self.assertEqual(trips[0].funding, D("6"))
         self.assertEqual(trips[0].net, D("10") + D("6"))
 
+    def test_funding_in_seconds_counts_against_fills_in_ms(self) -> None:
+        # The venue stamps fills in ms and funding in seconds (a live LIT trip).
+        trips = round_trips(
+            [
+                fill(trade_id="a", ts=1792514997035, size=D("1"), usd=D("100")),
+                fill(
+                    trade_id="b", side="sell", price=D("110"), pnl=D("10"), ts=1792516065376,
+                    size=D("1"), usd=D("110"),
+                ),
+            ],
+            [fund(1792508400, "-0.023922"), fund(1792515600, "0.136353"), fund(1792519200, "5")],
+            {},
+            {},
+        )
+        self.assertEqual(trips[0].funding, D("0.136353"))
+        self.assertEqual(trips[0].net, D("10.136353"))
+
     def test_algo_is_the_family_with_the_most_opening_size(self) -> None:
         trips = round_trips(
             [
