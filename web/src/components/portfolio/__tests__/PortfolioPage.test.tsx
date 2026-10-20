@@ -3,21 +3,25 @@ import "@/test/dom";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PortfolioPage } from "@/components/PortfolioPage";
+import { PortfolioPage as Page } from "@/components/PortfolioPage";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { api, type PortfolioHistory, type PortfolioNow } from "@/lib/api";
-import { heldKinds, historyKinds } from "@/lib/portfolioDay";
+import { flowEvents, heldKinds, historyKinds } from "@/lib/portfolioDay";
 
 vi.mock("@/lib/notify", () => ({ notifyErr: vi.fn(), notifyOk: vi.fn() }));
 
-const markers = vi.fn();
 vi.mock("lightweight-charts", () => ({
   ColorType: { Solid: "solid" },
   HistogramSeries: "Histogram",
   LineSeries: "Line",
-  createSeriesMarkers: (...args: unknown[]) => markers(...args),
   createChart: () => ({
     addSeries: () => ({ setData() {} }),
-    timeScale: () => ({ fitContent() {} }),
+    timeScale: () => ({
+      fitContent() {},
+      timeToCoordinate: () => 120,
+      subscribeSizeChange() {},
+      unsubscribeSizeChange() {},
+    }),
     subscribeCrosshairMove() {},
     unsubscribeCrosshairMove() {},
     remove() {},
@@ -72,8 +76,16 @@ const HISTORY: PortfolioHistory = {
   ],
 };
 
+/** The app wraps every page in one TooltipProvider; the Flow chips need it. */
+function PortfolioPage() {
+  return (
+    <TooltipProvider>
+      <Page />
+    </TooltipProvider>
+  );
+}
+
 beforeEach(() => {
-  markers.mockClear();
   vi.spyOn(api, "portfolio").mockResolvedValue(NOW);
   vi.spyOn(api, "portfolioHistory").mockResolvedValue(HISTORY);
   vi.spyOn(api, "portfolioDays").mockResolvedValue({
@@ -116,13 +128,14 @@ describe("PortfolioPage", () => {
     expect(await screen.findByText("Last 24h")).toBeTruthy();
   });
 
-  it("charts a kind held earlier in the range, and marks each Flow on its kind", async () => {
+  it("charts a kind held earlier in the range, and puts each Flow in a lane under the plot", async () => {
     render(<PortfolioPage />);
     await screen.findByText("$5,681.19");
     // LLP holds nothing now but did in the range: it keeps a column and a line.
     const days = screen.getByText("2026-10-19").closest("table") as HTMLElement;
     expect(within(days).getByText("LLP")).toBeTruthy();
-    expect(markers).toHaveBeenCalledTimes(2);
+    // LLP −539.41 and Perps +539.41 at one moment: one move, not two arrows.
+    expect(await screen.findByRole("button", { name: "Moved $539.41 LLP → Perps" })).toBeTruthy();
     expect(within(days).getByText("Day (UTC)")).toBeTruthy();
   });
 
@@ -145,9 +158,93 @@ describe("PortfolioPage", () => {
   });
 });
 
+describe("PortfolioPage days, calendar and card", () => {
+  // 25 UTC days ending today, so the calendar's default month holds the last one.
+  const today = Date.now() - (Date.now() % 86_400_000);
+  const label = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const newest = label(today);
+  const oldest = label(today - 24 * 86_400_000);
+  const many = Array.from({ length: 25 }, (_, i) => {
+    const start = today - (24 - i) * 86_400_000;
+    return {
+      day: new Date(start).toISOString().slice(0, 10),
+      start,
+      kinds: { perps: String(i + 1), spot: "0", llp: "0", staking: "0" },
+      total: String(i + 1),
+    };
+  });
+
+  it("pages the days, newest first, and exports them all as CSV", async () => {
+    vi.mocked(api.portfolioDays).mockResolvedValue({ range: "30d", days: many });
+    const saved: Blob[] = [];
+    URL.createObjectURL = vi.fn((b: Blob) => {
+      saved.push(b);
+      return "blob:x";
+    });
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<PortfolioPage />);
+    await screen.findByText("$5,681.19");
+    const table = (await screen.findByText("Day (UTC)")).closest("table") as HTMLElement;
+    expect(within(table).getByText(newest)).toBeTruthy();
+    expect(within(table).queryByText(oldest)).toBeNull();
+    expect(screen.getByText("1–20 of 25")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Older" }));
+    expect(within(table).getByText(oldest)).toBeTruthy();
+    expect(screen.getByText("21–25 of 25")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    expect(click).toHaveBeenCalledOnce();
+    const csv = await saved[0].text();
+    expect(csv.split("\n")[0]).toBe("day_utc,perps,spot,llp,staking,total");
+    expect(csv.trim().split("\n")).toHaveLength(26);
+  });
+
+  it("opens the calendar in a modal, loading every day only then", async () => {
+    vi.mocked(api.portfolioDays).mockResolvedValue({ range: "all", days: many });
+    render(<PortfolioPage />);
+    await screen.findByText("$5,681.19");
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(vi.mocked(api.portfolioDays).mock.calls.map((c) => c[0])).not.toContain("all");
+    await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
+    expect(vi.mocked(api.portfolioDays).mock.calls.map((c) => c[0])).toContain("all");
+    const grid = await screen.findByRole("grid", { name: /PnL calendar/ });
+    const cell = within(grid).getByTitle(new RegExp(`^${newest}: \\+25`));
+    expect(cell.getAttribute("style")).toContain("color-mix");
+  });
+
+  it("opens the PnL card with its range picker and $ switch", async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as never;
+    render(<PortfolioPage />);
+    await screen.findByText("$5,681.19");
+    await userEvent.click(screen.getByRole("button", { name: "PnL card" }));
+    expect(await screen.findByRole("img", { name: "PnL card preview" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Show $" }).getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(screen.getByRole("radio", { name: "30d" }));
+    expect(vi.mocked(api.portfolioHistory).mock.calls.map((c) => c[0])).toContain("30d");
+  });
+});
+
 describe("portfolio kinds", () => {
   it("keeps the stack order and never drops a kind the history held", () => {
     expect(heldKinds(NOW)).toEqual(["perps", "spot", "staking"]);
     expect(historyKinds(HISTORY.points, heldKinds(NOW))).toEqual(["perps", "spot", "llp", "staking"]);
+  });
+});
+
+describe("flow events", () => {
+  it("reads a moment whose Flows cancel as a move, and a net as money in or out", () => {
+    const events = flowEvents([
+      { ts: 1, kind: "llp", amount: "-539.41" },
+      { ts: 1, kind: "perps", amount: "539.41" },
+      { ts: 2, kind: "perps", amount: "500" },
+      { ts: 3, kind: "spot", amount: "-120.5" },
+      { ts: 4, kind: "perps", amount: "0" },
+    ]);
+    expect(events.map((e) => [e.ts, e.kind, e.label])).toEqual([
+      [1, "move", "Moved $539.41 LLP → Perps"],
+      [2, "in", "Deposit $500.00 into Perps"],
+      [3, "out", "Withdrawal $120.50 from Spot"],
+    ]);
   });
 });

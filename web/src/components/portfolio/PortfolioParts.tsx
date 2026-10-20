@@ -3,13 +3,11 @@ import {
   type AutoscaleInfoProvider,
   ColorType,
   createChart,
-  createSeriesMarkers,
   LineSeries,
   type MouseEventParams,
-  type SeriesMarker,
-  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -18,9 +16,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PortfolioDay, PortfolioHistory, PortfolioKind, PortfolioNow } from "@/lib/api";
 import { magnitude, money, pctPoints, pnlClass, price, size } from "@/lib/journalFormat";
-import { PORTFOLIO_KIND_COLORS, PORTFOLIO_KIND_LABELS, PORTFOLIO_KINDS } from "@/lib/portfolioDay";
+import {
+  type FlowEvent,
+  flowEvents,
+  PORTFOLIO_KIND_COLORS,
+  PORTFOLIO_KIND_LABELS,
+  PORTFOLIO_KINDS,
+} from "@/lib/portfolioDay";
+import { pageOf } from "@/lib/portfolioShare";
 import { theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +135,41 @@ function when(ts: number, hourly: boolean): string {
   return hourly ? `${text} UTC` : text;
 }
 
+/** The value axis in whole dollars, short: $800, $8k, $12.5k. */
+function axisUsd(value: number): string {
+  const abs = Math.abs(value);
+  const text =
+    abs >= 1000
+      ? `${(abs / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k`
+      : abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return `${value < 0 ? "-" : ""}$${text}`;
+}
+
+const FLOW_GLYPHS = { move: "⇄", in: "↑", out: "↓" } as const;
+
+/** W4: one chip per moment money moved, under the plot at that moment's x. Hover or focus says what moved. */
+function FlowLane({ events }: { events: (FlowEvent & { x: number })[] }) {
+  return (
+    <div className="relative h-6" aria-label="Flows">
+      {events.map((e) => (
+        <Tooltip key={e.ts}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={e.label}
+              className="absolute top-0.5 flex size-5 -translate-x-1/2 items-center justify-center rounded-full border bg-panel text-xs leading-none text-text outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              style={{ left: e.x, borderColor: e.color }}
+            >
+              {FLOW_GLYPHS[e.kind]}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="font-mono tabular-nums">{e.label}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
+  );
+}
+
 /** W4: each kind's value over time, the total, and where money moved in or out. */
 export function ValueChart({
   history,
@@ -144,6 +185,8 @@ export function ValueChart({
   const points = history.points;
   const hourly = history.resolution === "1h";
   const index = useMemo(() => new Map(points.map((p, i) => [Math.floor(p.ts / 1000), i])), [points]);
+  const events = useMemo(() => flowEvents(history.flows), [history.flows]);
+  const [placed, setPlaced] = useState<(FlowEvent & { x: number })[]>([]);
 
   useEffect(() => {
     const el = ref.current;
@@ -158,14 +201,15 @@ export function ValueChart({
         fontSize: theme.chartFontSize,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: theme.rule } },
+      localization: { priceFormatter: axisUsd },
       // Zero sits on the bottom edge: no margin below it to draw negative ticks into.
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0 } },
+      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0 } },
       timeScale: { borderVisible: false, timeVisible: hourly },
       handleScroll: false,
       handleScale: false,
     });
     const at = (ts: number) => Math.floor(ts / 1000) as UTCTimestamp;
-    // Values are never below zero; without this the scale pads down past it around the markers.
+    // Values are never below zero; without this the scale pads down past it.
     const floorAtZero: AutoscaleInfoProvider = (base) => {
       const info = base();
       if (info?.priceRange) info.priceRange.minValue = Math.max(0, info.priceRange.minValue);
@@ -188,36 +232,42 @@ export function ValueChart({
         autoscaleInfoProvider: floorAtZero,
       });
       line.setData(points.map((p) => ({ time: at(p.ts), value: num(p[kind]) })));
-      const markers: SeriesMarker<Time>[] = history.flows
-        .filter((f) => f.kind === kind && index.has(Math.floor(f.ts / 1000)))
-        .map((f) => ({
-          time: at(f.ts),
-          // On the line itself: above or below it, the scale reserves room and pads past zero.
-          position: "inBar",
-          shape: num(f.amount) > 0 ? "arrowUp" : "arrowDown",
-          color: PORTFOLIO_KIND_COLORS[kind],
-          size: 1,
-        }));
-      if (markers.length) createSeriesMarkers(line, markers);
     }
     chart.timeScale().fitContent();
+    // Flows sit in their own lane under the plot, at the x of their bucket: never on a line.
+    let frame = 0;
+    const place = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        setPlaced(
+          events.flatMap((e) => {
+            const x = index.has(Math.floor(e.ts / 1000)) ? chart.timeScale().timeToCoordinate(at(e.ts)) : null;
+            return x == null ? [] : [{ ...e, x }];
+          }),
+        ),
+      );
+    };
+    place();
+    chart.timeScale().subscribeSizeChange(place);
     const onMove = (param: MouseEventParams) => {
       const time = typeof param.time === "number" ? param.time : null;
       setHover(time == null ? null : (index.get(time) ?? null));
     };
     chart.subscribeCrosshairMove(onMove);
     return () => {
+      cancelAnimationFrame(frame);
+      chart.timeScale().unsubscribeSizeChange(place);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
     };
-  }, [height, history.flows, hourly, index, kinds, points]);
+  }, [events, height, hourly, index, kinds, points]);
 
   if (points.length === 0) {
     return <div className="px-2 py-6 text-muted-foreground">No history stored yet. The desk fills it within a few minutes.</div>;
   }
   const at = hover ?? points.length - 1;
   const point = points[at];
-  const flows = history.flows.filter((f) => f.ts === point.ts);
+  const moment = events.find((e) => e.ts === point.ts);
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-2 font-mono text-sm tabular-nums" aria-live="polite">
@@ -234,21 +284,34 @@ export function ValueChart({
             <span className="text-muted-foreground">{PORTFOLIO_KIND_LABELS[k]}</span>
           </span>
         ))}
-        {flows.map((f) => (
-          <span key={f.kind} className="text-muted-foreground">
-            {PORTFOLIO_KIND_LABELS[f.kind]} flow {money(f.amount)}
-          </span>
+        {moment ? <span className="text-muted-foreground">{moment.label}</span> : null}
+      </div>
+      <div className="relative">
+        <div ref={ref} className="w-full" style={{ height }} />
+        {placed.map((e) => (
+          <div
+            key={`guide-${e.ts}`}
+            aria-hidden
+            className="pointer-events-none absolute top-0 border-l border-dashed border-muted-foreground/35"
+            style={{ left: e.x, height }}
+          />
         ))}
       </div>
-      <div ref={ref} className="w-full" style={{ height }} />
+      {placed.length > 0 ? <FlowLane events={placed} /> : null}
     </div>
   );
 }
 
 /** W5: one day per row, each kind's Day change. The table behind the daily chart. */
+const DAYS_PER_PAGE = 20;
+
+/** W5, W7: the days newest first, a page at a time. */
 export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: PortfolioKind[] }) {
-  const rows = [...days].reverse();
+  const [want, setWant] = useState(0);
+  const all = useMemo(() => [...days].reverse(), [days]);
+  const { rows, page, pages } = pageOf(all, want, DAYS_PER_PAGE);
   return (
+    <div className="flex flex-col gap-1">
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
@@ -276,6 +339,27 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
           ))}
         </TableBody>
       </Table>
+    </div>
+      {pages > 1 ? (
+        <div className="flex items-center justify-end gap-2 px-2 text-muted-foreground">
+          <span className="font-mono tabular-nums">
+            {page * DAYS_PER_PAGE + 1}–{page * DAYS_PER_PAGE + rows.length} of {all.length}
+          </span>
+          <Button type="button" variant="ghost" size="sm" className="h-6 px-2" disabled={page === 0} onClick={() => setWant(page - 1)}>
+            Newer
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2"
+            disabled={page >= pages - 1}
+            onClick={() => setWant(page + 1)}
+          >
+            Older
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
