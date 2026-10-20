@@ -45,6 +45,14 @@ from mayedge.lighter.parse import (
 
 logger = logging.getLogger(__name__)
 
+_fill_listener: Callable[[], None] | None = None
+
+
+def set_fill_listener(fn: Callable[[], None] | None) -> None:
+    """Called when the account feed reports fills. The journal sync debounces on it."""
+    global _fill_listener
+    _fill_listener = fn
+
 # Auth tokens last up to 8h. Reconnect before a 7h token dies.
 _AUTH_TTL_S = 7 * 60 * 60
 _ACCOUNT_WS_TTL = _AUTH_TTL_S - 10 * 60
@@ -502,6 +510,8 @@ class AccountService:
         ]
         if trades:
             gateway.broadcast({"type": "account_trades", "trades": trades})
+            if _fill_listener is not None:
+                _fill_listener()
 
     def _apply_positions(self, raw: Any, *, snapshot: bool) -> None:
         self._summary.positions = merge_positions(self._summary.positions, raw, snapshot=snapshot)
@@ -676,11 +686,13 @@ class AccountService:
         market_id: int | None = None,
         cursor: str | None = None,
         limit: int = 50,
+        budgeted: bool = True,
     ) -> dict[str, Any]:
         account_index = settings.lighter_account_index
         if not account_index or not self._auth_token_fn:
             raise ValueError("Account not configured")
-        await budget.take()
+        if budgeted:
+            await budget.take()
         try:
             auth = await self._auth_token_fn()
             order_api = lighter.OrderApi(gateway.client)
@@ -709,6 +721,7 @@ class AccountService:
         market_id: int | None = None,
         cursor: str | None = None,
         limit: int = 50,
+        budgeted: bool = True,
     ) -> dict[str, Any]:
         account_index = settings.lighter_account_index
         if not account_index or not self._auth_token_fn:
@@ -720,7 +733,8 @@ class AccountService:
             cursor=cursor,
             market_id=market_id,
         )
-        await budget.take()
+        if budgeted:
+            await budget.take()
         try:
             auth = await self._auth_token_fn()
             async with httpx.AsyncClient(base_url=settings.base_url, timeout=20.0) as client:

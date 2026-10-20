@@ -18,8 +18,11 @@ from mayedge.api.spa import mount_spa
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.auto_kill import auto_kill
 from mayedge.config import settings
+from mayedge.journal_sync import note_fill
+from mayedge.journal_sync import start as start_journal
+from mayedge.journal_sync import stop as stop_journal
 from mayedge.kill import FLATTEN_SLIPPAGE, KillResult, kill
-from mayedge.lighter.account import account_service
+from mayedge.lighter.account import account_service, set_fill_listener
 from mayedge.lighter.budget import KILL_LANE, budget
 from mayedge.lighter.errors import VenueBlocked
 from mayedge.lighter.gateway import gateway
@@ -92,6 +95,8 @@ async def lifespan(app: FastAPI):
     feed_health.set_emitter(publish)
     auto_kill.start(run_kill=run_kill, emit=publish, positions=_cached_positions)
     gateway.subscribe(auto_kill.on_gateway)
+    set_fill_listener(note_fill)
+    start_journal()
     await desk.start()
     await desk.restore()
     n_algos = len(desk.algo_book().get("working") or [])
@@ -102,6 +107,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        set_fill_listener(None)
+        await stop_journal()
         gateway.unsubscribe(auto_kill.on_gateway)
         auto_kill.stop()
         feed_health.set_emitter(None)

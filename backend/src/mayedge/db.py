@@ -15,6 +15,38 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
+_JOURNAL_TABLES = """
+CREATE TABLE IF NOT EXISTS journal_fills (
+    trade_id TEXT PRIMARY KEY,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    is_maker INTEGER NOT NULL,
+    price TEXT NOT NULL,
+    size TEXT NOT NULL,
+    usd TEXT NOT NULL,
+    fee TEXT NOT NULL,
+    pnl TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_fills_ts ON journal_fills(market_index, ts);
+
+CREATE TABLE IF NOT EXISTS journal_funding (
+    market_index INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
+    amount TEXT NOT NULL,
+    PRIMARY KEY (market_index, ts)
+);
+
+CREATE TABLE IF NOT EXISTS journal_notes (
+    trip_key TEXT PRIMARY KEY,
+    note TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+);
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -189,7 +221,7 @@ CREATE TABLE IF NOT EXISTS funding_days (
     rate REAL NOT NULL,
     PRIMARY KEY (market_index, day_index)
 );
-"""
+""" + _JOURNAL_TABLES
 
 _LIQ_TABLE = """
 CREATE TABLE liquidations (
@@ -222,7 +254,7 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
 
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def _meta_int(
@@ -435,6 +467,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
             """
         )
+    if version < 13:
+        conn.executescript(_JOURNAL_TABLES)
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 
