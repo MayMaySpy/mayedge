@@ -1,13 +1,12 @@
 import { useRef, useState } from "react";
-import { notifyErr, notifyOrder } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { useTradingReady } from "@/hooks/useTradingReady";
-import { api, type Market } from "@/lib/api";
+import type { Market } from "@/lib/api";
 import { useLiveAccount, useLiveBbo } from "@/lib/liveData";
 import { useQuickSize } from "@/lib/quickSizes";
-import { parseQuickSize } from "@/lib/quickTrade";
+import { submitQuickMarket } from "@/lib/quickTrade";
 import { useAxisTicket } from "@/lib/axisTicket";
 import { useQuickPanel } from "@/lib/quickPanel";
 import { cn } from "@/lib/utils";
@@ -122,31 +121,20 @@ export function QuickTradePanel({ market, tradingEnabled, connected }: QuickTrad
     });
   };
 
-  const fire = async (side: "buy" | "sell") => {
-    if (!market || !tradingEnabled || !feed.ready || loading) {
-      if (!feed.ready && feed.reason) notifyErr(feed.reason);
-      return;
-    }
-    const sized = parseQuickSize(qty, market, side, account, bbo);
-    if (!sized.ok) {
-      notifyErr(sized.error);
-      return;
-    }
+  const fire = (side: "buy" | "sell") => {
+    if (loading) return;
     setLoading(true);
-    try {
-      await api.placeMarketOrder({
-        market_index: market.market_index,
-        side,
-        size: sized.size,
-        slippage: slipFrac(),
-        reduce_only: false,
-      });
-      notifyOrder({ kind: "market", side, size: sized.size, symbol: market.symbol });
-    } catch (err) {
-      notifyErr(err instanceof Error ? err.message : "Order failed");
-    } finally {
-      setLoading(false);
-    }
+    void submitQuickMarket({
+      market,
+      tradingEnabled,
+      ready: feed.ready,
+      reason: feed.reason,
+      qty,
+      side,
+      account,
+      bbo,
+      slippage: slipFrac(),
+    }).finally(() => setLoading(false));
   };
 
   const live = parseFloat(qty) > 0;

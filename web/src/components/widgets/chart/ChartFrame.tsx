@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { lazy, Suspense, useEffect, useMemo, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { SquareArrowOutUpRight } from "lucide-react";
 
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
@@ -15,6 +15,7 @@ import { isSettled, type FundingBar } from "@/lib/funding";
 import { rankRelativeStrength } from "@/lib/relativeStrength";
 import { snapTick, type TicketAmend } from "@/lib/ticketAmend";
 import { theme } from "@/lib/theme";
+import { subscribeHotkeys } from "@/lib/hotkeys";
 import { parseTimeframe, persistPins, persistTimeframe, supportsOpenInterest } from "@/lib/timeframe";
 import { WATCH_WINDOWS, WATCH_WINDOW_SEC, persistWatchWindow, type WatchWindow } from "@/lib/watchWindow";
 
@@ -137,6 +138,16 @@ export function ChartFrame(props: {
       /* ignore */
     }
   };
+
+  useEffect(() => subscribeHotkeys((id) => {
+    if (id === "chart") selectMode("price");
+    else if (id === "scan") selectMode("scan");
+    else if (id === "watch") selectMode("watch");
+    else if (id.startsWith("tf-")) {
+      const label = pins[Number(id.slice(3)) - 1];
+      if (label) selectTf(label);
+    }
+  }));
 
   const selectScanTab = (next: ScanTab) => {
     if (next === scanTab) return;
