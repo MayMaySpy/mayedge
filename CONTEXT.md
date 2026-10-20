@@ -205,8 +205,8 @@ An algo that runs one trade from the stop out: it sends the entry (or takes over
 _Avoid_: Planer, bracket, OCO, setup
 
 **R**:
-The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R.
-_Avoid_: risk unit (unqualified), ATR, a second "suggested" stop
+The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R. A Round trip's R is its Net divided by the risk at that stop when it opened. Only Planner Round trips have one.
+_Avoid_: risk unit (unqualified), ATR, a second "suggested" stop, RR, risk-reward (for the result)
 
 **Breakeven**:
 A Planner stop moved to entry plus round-trip fees, so closing there loses nothing.
@@ -257,6 +257,14 @@ _Avoid_: wallet, L1 address, account_id (unqualified)
 **Position**:
 An open perp on a Market. Not an Asset.
 _Avoid_: holding, balance, inventory (for the perp)
+
+**Round trip**:
+A Position in one Market from flat to flat. A flip ends one Round trip and starts the next at the same fill.
+_Avoid_: trade (a Lighter trade is one fill), position (that is the live thing)
+
+**Net**:
+Realized PnL less fees, plus funding received (or less funding paid).
+_Avoid_: PnL (unqualified), equity, a limit for Auto kill
 
 **Asset**:
 A token holding on the account (USDC, ETH, …). Not a Position; not a Market.
