@@ -6,6 +6,7 @@ The rules are docs/push-rules.md. The ``push:`` block in alerts.yaml is the sour
 from __future__ import annotations
 
 import asyncio
+import calendar
 import contextlib
 import html
 import logging
@@ -185,11 +186,13 @@ class PushRouter:
         cfg: PushSettings,
         clock: Clock,
         journal: Callable[[str], tuple[int, float, float, float]] | None = None,
+        portfolio: Callable[[str], dict[str, float] | None] | None = None,
     ) -> None:
         self._out = out
         self._cfg = cfg
         self._clock = clock
         self._journal = journal
+        self._portfolio = portfolio
         self._daily_sent_on: str | None = None
         self._algo_seeded = False
         self._algos: dict[str, _SeenAlgo] = {}
@@ -443,7 +446,14 @@ class PushRouter:
         except Exception:
             logger.warning("daily journal push skipped")
             return
-        self._out.push(f"journal:{today}", daily_journal_text(count, net, fees, funding))
+        portfolio: dict[str, float] | None = None
+        if self._portfolio is not None:
+            try:
+                portfolio = self._portfolio(day)
+            except Exception:
+                # D1: the journal part still goes out.
+                logger.warning("daily portfolio part skipped")
+        self._out.push(f"journal:{today}", daily_text(count, net, fees, funding, portfolio))
 
     def _daily_wait(self) -> float | None:
         at = self._cfg.daily_at
@@ -623,7 +633,9 @@ class TelegramPusher:
         self._window_start: float | None = None
         self._sent_in_window = 0
         self._last_mono: float | None = None
-        self._router = PushRouter(self, self._cfg, self._clock, journal=journal_day_totals)
+        self._router = PushRouter(
+            self, self._cfg, self._clock, journal=journal_day_totals, portfolio=portfolio_day_totals
+        )
 
     @classmethod
     def from_settings(cls) -> TelegramPusher:
@@ -909,6 +921,34 @@ def daily_journal_text(count: int, net: float, fees: float, funding: float) -> s
     )
 
 
+_KIND_NAMES = {"perps": "Perps", "spot": "Spot", "llp": "LLP", "staking": "Staking"}
+
+
+def daily_text(
+    count: int, net: float, fees: float, funding: float, portfolio: dict[str, float] | None = None
+) -> str:
+    """D1: the Portfolio's day first, when the desk has it, then the journal's."""
+    journal = daily_journal_text(count, net, fees, funding)
+    if portfolio is None:
+        return journal
+    total = sum(portfolio.values())
+    moved = [f"{_KIND_NAMES[k]} {_signed_usd(v)}" for k, v in portfolio.items() if round(v) != 0]
+    head = f"Yesterday: Portfolio {_signed_usd(total)}" + (f" ({', '.join(moved)})" if moved else "")
+    return f"{head} · {journal.removeprefix('Yesterday: ')}"
+
+
+def portfolio_day_totals(day: str) -> dict[str, float] | None:
+    """D1: each kind's change over the UTC day `day` (`YYYY-MM-DD`), or None without both midnights."""
+    from mayedge.persist_portfolio import portfolio_buckets
+    from mayedge.portfolio import utc_day_change
+
+    start_ms = calendar.timegm(time.strptime(day, "%Y-%m-%d")) * 1000
+    change = utc_day_change(portfolio_buckets("1d", "pnl", start_ms), start_ms)
+    if change is None:
+        return None
+    return {kind: float(value) for kind, value in change.items()}
+
+
 def journal_day_totals(day: str) -> tuple[int, float, float, float]:
     """Closed Round trips whose UTC close date is `day` (`YYYY-MM-DD`)."""
     from mayedge.api.routes.journal import _trips
@@ -968,8 +1008,9 @@ def _usd(value: float) -> str:
 
 
 def _signed_usd(value: float) -> str:
+    """Whole dollars with a sign; an amount that rounds to $0 has none."""
     sign = "−" if value < 0 else "+"
-    if value == 0:
+    if round(abs(value)) == 0:
         sign = ""
     return f"{sign}{_usd(value)}"
 

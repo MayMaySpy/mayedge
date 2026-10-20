@@ -406,3 +406,15 @@ def days(
         end = starts[i + 1] if i + 1 < len(starts) else now_ms
         row(_day_label(start, tz_min), start, False, _at(hourly, start), _at(hourly, end))
     return out
+
+
+def utc_day_change(daily_pnl: list[dict[str, Any]], start_ms: int) -> dict[Kind, Decimal] | None:
+    """D1: each kind's change over one UTC day, from the buckets at both of its midnights.
+
+    None unless both are stored: a missing boundary is left out, never guessed.
+    """
+    stamped = {b.ts_ms: b for b in buckets(daily_pnl)}
+    open_b, close_b = stamped.get(start_ms), stamped.get(start_ms + DAY_MS)
+    if open_b is None or close_b is None:
+        return None
+    return {kind: close_b.get(FIELDS[kind][0]) - open_b.get(FIELDS[kind][0]) for kind in KINDS}

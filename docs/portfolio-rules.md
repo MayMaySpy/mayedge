@@ -84,3 +84,9 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 | W4 | **Value** draws one line per kind that held money at any point in the range, plus the total, on one axis that never goes below 0. Each Flow (H5) is an arrow on its kind's line: up in, down out. The readout above the chart lists every line's value at the hovered point, and the Flows there. | `charts a kind held earlier…` |
 | W5 | **Daily change** is a bar per day in gain and loss colors, with the running total, from H6. The table under it splits each day by kind and marks UTC days. Bars sit on the day's own date. | `charts a kind held earlier…` |
 | W6 | **Holdings**: Perps (value and change; trades are in the Journal), Spot rows (N6), Staking (LIT staked, LIT put in, value, APY) with pending unlocks, and LLP (shares, put in, value, APY). A kind not held says so. A mismatch (N5) is a warning above everything. | `lists what each Holding is made of`, `says so when value and PnL disagree` |
+
+## Daily push
+
+| | Rule | Pinned by |
+|---|---|---|
+| D1 | The daily Telegram push ([push-rules.md](push-rules.md), `push.daily_at`) leads with yesterday's Portfolio change: each kind's cumulative PnL at the end of that UTC day less at its start (V1, V4), from the stored `1d` buckets (H1), and the total. Only kinds that moved are named. It needs buckets stamped at **both** UTC midnights; with either missing it is left out rather than guessed, and the journal part goes out alone. The UTC day matches the journal part's day. | test_portfolio_day_totals_need_both_midnights, test_daily_text_leads_with_the_portfolio |

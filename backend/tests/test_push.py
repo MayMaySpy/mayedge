@@ -5,17 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import tempfile
 import time
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 from httpx import ASGITransport, AsyncClient
 
+from mayedge import db as store
 from mayedge.api.app import create_app
 from mayedge.config import settings
 from mayedge.journal import RoundTrip
+from mayedge.persist_portfolio import portfolio_put_buckets
 from mayedge.push import (
     HttpxTransport,
     PushRouter,
@@ -24,7 +28,9 @@ from mayedge.push import (
     TelegramPusher,
     boot_text,
     daily_journal_text,
+    daily_text,
     journal_day_totals,
+    portfolio_day_totals,
     public_push_status,
     push_settings_from_dict,
 )
@@ -201,6 +207,11 @@ class RouterTests(unittest.TestCase):
             "Yesterday: Net −$12 over 1 Round trip, fees $3, funding +$1",
         )
         self.assertEqual(daily_journal_text(0, 0, 0, 0), "Yesterday: no Round trips.")
+        self.assertEqual(
+            daily_journal_text(1, 6.54, 0, 0.049),
+            "Yesterday: Net +$7 over 1 Round trip, fees $0, funding $0",
+            "an amount that rounds to $0 carries no sign",
+        )
 
     def test_journal_day_totals_keeps_that_utc_day(self) -> None:
         trips = [
@@ -274,6 +285,44 @@ class RouterTests(unittest.TestCase):
         router.poll()
         self.assertEqual(len(sink.rows), 2)
         self.assertEqual(len(days), 2)
+
+    def test_daily_text_leads_with_the_portfolio(self) -> None:
+        # LLP moved less than a dollar: in the total, not named.
+        portfolio = {"perps": 380.0, "spot": 40.0, "llp": 0.2, "staking": -8.0}
+        self.assertEqual(
+            daily_text(9, 380, 38, -6, portfolio),
+            "Yesterday: Portfolio +$412 (Perps +$380, Spot +$40, Staking −$8) · "
+            "Net +$380 over 9 Round trips, fees $38, funding −$6",
+        )
+        self.assertEqual(
+            daily_text(0, 0, 0, 0, {"perps": 0.0, "spot": 0.0, "llp": 0.0, "staking": 25.0}),
+            "Yesterday: Portfolio +$25 (Staking +$25) · no Round trips.",
+        )
+        self.assertEqual(daily_text(9, 412, 38, -6, None), daily_journal_text(9, 412, 38, -6))
+
+    def test_the_daily_push_carries_the_portfolio_and_survives_its_failure(self) -> None:
+        def journal(day: str) -> tuple[int, float, float, float]:
+            return (9, 380.0, 38.0, -6.0)
+
+        def portfolio(day: str) -> dict[str, float] | None:
+            return {"perps": 380.0, "spot": 40.0, "llp": 0.0, "staking": -8.0}
+
+        def broken(day: str) -> dict[str, float] | None:
+            raise RuntimeError("locked")
+
+        sink = Sink()
+        router = PushRouter(
+            sink, PushSettings(daily_at="08:00"), ManualClock(_local_stamp(8, 0)), journal=journal, portfolio=portfolio
+        )
+        router.poll()
+        self.assertTrue(sink.rows[0][1].startswith("Yesterday: Portfolio +$412 (Perps +$380"))
+        sink = Sink()
+        router = PushRouter(
+            sink, PushSettings(daily_at="08:00"), ManualClock(_local_stamp(8, 0)), journal=journal, portfolio=broken
+        )
+        with self.assertLogs("mayedge.push", level="WARNING"):
+            router.poll()
+        self.assertEqual(sink.rows[0][1], "Yesterday: Net +$380 over 9 Round trips, fees $38, funding −$6")
 
     def test_a_failed_journal_read_does_not_stop_the_push(self) -> None:
         def journal(day: str) -> tuple[int, float, float, float]:
@@ -824,3 +873,31 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status.json()["enabled"])
         self.assertEqual(tested.json(), {"ok": True})
         self.assertIn("Desk test push ✓", [text for _t, text in transport.sent])
+
+
+class PortfolioDayTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.old = settings.db_path
+        store.close_db()
+        settings.db_path = str(Path(self.tmp.name) / "push.db")
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        store.close_db()
+        settings.db_path = self.old
+
+    def test_portfolio_day_totals_need_both_midnights(self) -> None:
+        day_ms = 1_700_006_400_000  # 2023-11-15 00:00 UTC
+
+        def bucket(ts_ms: int, trade: float, staking: float) -> tuple[int, dict[str, object]]:
+            return ts_ms, {"timestamp": ts_ms // 1000, "trade_pnl": trade, "staking_pnl": staking}
+
+        portfolio_put_buckets("1d", "pnl", [bucket(day_ms, 100.0, 50.0)])
+        self.assertIsNone(portfolio_day_totals("2023-11-15"), "no bucket at the day's end yet")
+        portfolio_put_buckets("1d", "pnl", [bucket(day_ms + 86_400_000, 480.0, 42.0)])
+        self.assertEqual(
+            portfolio_day_totals("2023-11-15"), {"perps": 380.0, "spot": 0.0, "llp": 0.0, "staking": -8.0}
+        )
+        self.assertIsNone(portfolio_day_totals("2023-11-14"), "no bucket at that day's start")
