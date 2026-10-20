@@ -85,10 +85,17 @@ class KindTests(TestCase):
     def test_a_drift_over_a_dollar_is_a_mismatch(self) -> None:
         self.assertEqual(mismatches(buckets(PNL), buckets(VALUES)), [])
         off = copy.deepcopy(VALUES)
-        off[-1]["trade_pnl"] += 5
+        off[-2]["trade_pnl"] += 5
         found = mismatches(buckets(PNL), buckets(off))
         self.assertEqual([m.kind for m in found], ["perps"])
         self.assertAlmostEqual(float(found[0].drift), 5, delta=0.6)
+
+    def test_the_partial_bucket_never_reads_as_a_mismatch(self) -> None:
+        # Each request stamps its partial bucket "now"; LIT moved between the two.
+        off = copy.deepcopy(VALUES)
+        off[-1]["staking_pnl"] += 1.78
+        off[-1]["timestamp"] += 1
+        self.assertEqual(mismatches(buckets(PNL), buckets(off)), [])
 
 
 class HoldingTests(TestCase):

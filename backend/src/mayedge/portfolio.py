@@ -142,13 +142,20 @@ def change_pct(change: Decimal, value_at_open: Decimal, flows: Decimal) -> Decim
 
 
 def mismatches(pnl: list[Bucket], values: list[Bucket]) -> list[Mismatch]:
-    """N5, V3 on the latest bucket of each series."""
-    if not pnl or not values:
+    """N5, V3 on the latest closed bucket the two series share.
+
+    The last bucket is partial and stamped with its own request's time (V5): the two
+    requests land a moment apart, and a LIT or ETH move between them reads as drift.
+    """
+    closed = {b.ts_ms: b for b in values[:-1]}
+    shared = [b for b in pnl[:-1] if b.ts_ms in closed]
+    if not shared:
         return []
+    p, v = shared[-1], closed[shared[-1].ts_ms]
     out: list[Mismatch] = []
     for kind in KINDS:
         name = FIELDS[kind][0]
-        drift = values[-1].get(name) - pnl[-1].get(name) - _flow(pnl[-1], kind)
+        drift = v.get(name) - p.get(name) - _flow(p, kind)
         if abs(drift) > MISMATCH_USD:
             out.append(Mismatch(kind, drift))
     return out
