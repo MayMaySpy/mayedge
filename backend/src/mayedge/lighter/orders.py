@@ -304,6 +304,10 @@ class OrderService:
     async def get_account_funding(self, **kwargs: Any) -> dict[str, Any]:
         return await account_service.fetch_account_funding(**kwargs)
 
+    async def auth_token(self) -> str:
+        """A short-lived read token, for account reads outside this service."""
+        return await self._auth_token()
+
     async def _auth_token(self) -> str:
         if not self.enabled:
             raise ValueError("Trading not configured")

@@ -9,6 +9,7 @@ from mayedge.api.routes.journal import router as journal_router
 from mayedge.api.routes.kill import router as kill_router
 from mayedge.api.routes.markets import router as markets_router
 from mayedge.api.routes.orders import router as orders_router
+from mayedge.api.routes.portfolio import router as portfolio_router
 from mayedge.api.routes.scan import router as scan_router
 
 
@@ -18,6 +19,7 @@ def include_api(app: FastAPI) -> None:
     app.include_router(markets_router)
     app.include_router(account_router)
     app.include_router(journal_router)
+    app.include_router(portfolio_router)
     app.include_router(orders_router)
     app.include_router(algos_router)
     app.include_router(kill_router)

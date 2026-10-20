@@ -48,3 +48,15 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 - The account and pool reads add only what `pnl` lacks: quantities (ETH, staked LIT), share counts, APY, unlocks.
 - A **Day open** at local midnight uses `1h` buckets; at UTC midnight, `1d` works as well.
 - The mismatch check in the scope becomes V3: if value less PnL drifts from net Flows by more than a dollar, a field changed meaning.
+
+## Now (`GET /api/portfolio`)
+
+| | Rule | Pinned by |
+|---|---|---|
+| N1 | The **Day open** is a time the caller sends as `open` (ms). The page sends the viewer's local midnight. The desk rounds it down to the hour, because buckets are hourly (V5). Without `open`, it is today's UTC midnight. An `open` in the future, or more than 30 days back, is refused. | test_open_rounds_down_to_the_hour, test_open_out_of_range_is_refused |
+| N2 | A kind's **value now** is the last bucket of the `ignore_transfers` series (V2, V5). Its **value at the open** is the bucket stamped at the open hour, or the latest one before it. With none before it, the account did not exist yet and the value at open is 0. | test_values_now_and_at_open |
+| N3 | A kind's **Day change** is its cumulative PnL now less at the open (V1, V4). Its **Flows** today are its net inflow now less at the open. | test_day_change_is_cumulative_pnl_now_less_at_open |
+| N4 | The Portfolio total is the sum of Perps, Spot, LLP and Staking. **Day change %** is the Day change ÷ (value at open + Flows today). With that base at 0 or below, there is no %. | test_day_change_pct_counts_todays_flows_in_the_base |
+| N5 | **Mismatch**: on the latest bucket, a kind whose value less cumulative PnL drifts from its net Flows by more than $1 is listed with the drift (V3). The page says so. It does not hide it. | test_a_drift_over_a_dollar_is_a_mismatch |
+| N6 | **Holding detail** adds quantities to the totals; it never changes them. Spot rows are the desk's live asset rows, USDC left out (A1). Staking and LLP rows are the account's shares: units behind a share = `shares_amount × pool units ÷ total_shares` (P4, P5). Staked LIT is valued at the live LIT index price. LLP is valued at the pool's `total_asset_value ÷ total_shares`. Pending unlocks are listed with their date (A4). | test_staking_row_from_the_share_and_the_pool, test_usdc_is_never_a_spot_row |
+| N7 | One answer reads at most two `pnl` series, the account, and one pool account per share held. Each read takes the shared budget's read lane. An answer is reused for 30s per Day open. | test_the_answer_is_reused_for_30s |

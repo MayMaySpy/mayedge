@@ -306,6 +306,30 @@ _Avoid_: mark, Last, index (unqualified)
 Unrealized PnL of an Asset versus its spot average entry at the Asset index. Quote has none. Unknown without an entry.
 _Avoid_: Position uPnL, mixing into Positions
 
+### Portfolio
+
+The rules are in [docs/portfolio-rules.md](docs/portfolio-rules.md).
+
+**Portfolio**:
+Everything the account holds on Lighter, valued in USD: Perps, Spot, LLP and Staking.
+_Avoid_: balance, equity, TAV (TAV is the Perps part)
+
+**Holding**:
+One part of the Portfolio. Its kind is Perps (USDC collateral plus open uPnL), Spot (assets, held or used as collateral), LLP (shares in the Lighter liquidity pool) or Staking (LIT in the staking pool). Pending unlocks are listed with their date.
+_Avoid_: position (that is a perp), asset (that is a spot balance)
+
+**Flow**:
+Money moved into or out of a Holding: a deposit, a withdrawal, a transfer between Perps and Spot, joining or leaving LLP, staking or unstaking. A Flow is not a gain.
+_Avoid_: transfer (one kind of Flow), PnL
+
+**Day open**:
+When the Portfolio's day starts: the viewer's local midnight, down to the hour.
+_Avoid_: 00:00 (unqualified), session open
+
+**Day change**:
+A Holding's cumulative PnL now less at the Day open. Its value moved by that much plus its Flows.
+_Avoid_: 24h change, return
+
 ### Open interest
 
 **Open interest**:
