@@ -35,6 +35,10 @@ function alert(id: string, extra: Partial<AlertEvent> = {}): AlertEvent {
 }
 
 describe("eventLine", () => {
+  it("says when it fired, in UTC", () => {
+    expect(eventLine(alert("a")).tooltip).toContain("Fired 08:00:00 UTC");
+  });
+
   it("reads as what spiked, by how much, then what the tape showed", () => {
     const line = eventLine(
       alert("a", {

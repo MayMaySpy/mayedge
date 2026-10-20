@@ -4,19 +4,10 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { logExplorerUrl } from "@/lib/explorer";
 import { formatPrice, formatSize } from "@/lib/utils";
+import { utcClock } from "@/lib/utcTime";
 import { useLiveTrades } from "@/lib/liveData";
 
 const TAPE_ROWS = 48;
-
-function formatClock(ts: number): string {
-  if (!ts) return "—";
-  const ms = ts > 1e12 ? ts : ts * 1000;
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
 
 export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { onClose?: () => void }) {
   const trades = useLiveTrades();
@@ -28,7 +19,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
       <div className="grid h-6 shrink-0 grid-cols-[1fr_1fr_auto_3.25rem] px-2 font-mono text-sm leading-6 text-muted-foreground">
         <span>Price</span>
         <span>Size</span>
-        <span className="text-right">Time</span>
+        <span className="text-right">Time (UTC)</span>
         <span />
       </div>
       <ScrollArea className="min-h-0 flex-1">
@@ -51,7 +42,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
                   {formatPrice(t.price)}
                 </span>
                 <span className="text-muted-foreground">{formatSize(t.size)}</span>
-                <span className="text-right text-muted-foreground">{formatClock(t.timestamp)}</span>
+                <span className="text-right text-muted-foreground">{utcClock(t.timestamp)}</span>
                 {logUrl ? (
                   <a
                     href={logUrl}

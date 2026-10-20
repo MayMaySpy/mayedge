@@ -16,20 +16,12 @@ import {
 } from "@/lib/algos";
 import type { AlgoClip, AlgoFill, AlgoState } from "@/lib/api";
 import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+import { utcClock } from "@/lib/utcTime";
 
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
   if (value < 0) return "text-ask";
   return "text-muted-foreground";
-}
-
-function clock(ts: number | null | undefined) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }
 
 function venueRef(row: {
@@ -328,7 +320,7 @@ export function AlgoRow({
               <span className="text-muted-foreground">
                 {formatSize(live.remaining)} @ {formatPrice(live.price)}
               </span>
-              <span className="ml-auto text-muted-foreground">{clock(live.placed_at)}</span>
+              <span className="ml-auto text-muted-foreground" title="Placed, UTC">{utcClock(live.placed_at)}</span>
             </div>
           )}
           {fills.length === 0 && !live && !liveBid && !liveAsk && liveTps.length === 0 && (
@@ -341,7 +333,7 @@ export function AlgoRow({
               <span className="text-text">
                 {formatSize(f.qty)} @ {formatPrice(f.price)}
               </span>
-              <span className="ml-auto text-muted-foreground">{clock(f.ts)}</span>
+              <span className="ml-auto text-muted-foreground" title="Filled, UTC">{utcClock(f.ts)}</span>
             </div>
           ))}
         </div>

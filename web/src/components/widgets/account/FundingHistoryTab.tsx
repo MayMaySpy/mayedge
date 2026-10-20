@@ -15,17 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api, type AccountFunding, type Market } from "@/lib/api";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { cn, formatSigned, formatSize } from "@/lib/utils";
-
-function fundingTime(ts: number) {
-  if (!ts) return "—";
-  const ms = ts > 1e12 ? ts : ts * 1000;
-  return new Date(ms).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { utcDateTime } from "@/lib/utcTime";
 
 function pnlClass(value: number) {
   if (value > 0) return "text-bid";
@@ -147,7 +137,7 @@ export function FundingHistoryTab({
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Time</TableHead>
+                <TableHead>Time (UTC)</TableHead>
                 <TableHead>Market</TableHead>
                 <TableHead>Side</TableHead>
                 <TableHead className="text-right">Size</TableHead>
@@ -172,7 +162,7 @@ export function FundingHistoryTab({
                     }
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >
-                    <TableCell className="text-muted-foreground">{fundingTime(f.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{utcDateTime(f.timestamp)}</TableCell>
                     <TableCell>{f.symbol}</TableCell>
                     <TableCell className={f.side === "long" ? "text-bid" : "text-ask"}>
                       {f.side}

@@ -15,16 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api, type AccountTrade, type Market } from "@/lib/api";
 import { useLiveAccountTrades } from "@/lib/liveData";
 import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
-
-function tradeTime(ts: number) {
-  if (!ts) return "—";
-  const ms = ts > 1e12 ? ts : ts * 1000;
-  return new Date(ms).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { utcClock } from "@/lib/utcTime";
 
 function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[] {
   const byId = new Map<string, AccountTrade>();
@@ -182,7 +173,7 @@ export function TradeHistoryTab({
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Time</TableHead>
+                <TableHead>Time (UTC)</TableHead>
                 <TableHead>Market</TableHead>
                 <TableHead>Side</TableHead>
                 <TableHead className="text-right">Size</TableHead>
@@ -208,7 +199,7 @@ export function TradeHistoryTab({
                     }
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >
-                    <TableCell className="text-muted-foreground">{tradeTime(t.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{utcClock(t.timestamp)}</TableCell>
                     <TableCell>{t.symbol}</TableCell>
                     <TableCell className={t.side === "buy" ? "text-bid" : "text-ask"}>
                       {t.side}

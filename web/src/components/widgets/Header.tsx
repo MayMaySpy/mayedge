@@ -284,7 +284,7 @@ export function Header({
   // Lighter refusing everyone (maintenance, restart) is not our feed going stale: say so.
   const venueDown = worst !== "live" && health.venue_down_since > 0;
   const venueDownTitle = venueDown
-    ? `Lighter unavailable since ${formatClock(health.venue_down_since)}` +
+    ? `Lighter unavailable since ${formatClock(health.venue_down_since)} UTC` +
       (health.venue_down_reason ? ` (${health.venue_down_reason})` : "") +
       " — usually venue maintenance. Reconnecting on its own."
     : undefined;
@@ -420,7 +420,7 @@ export function Header({
                 <DropdownMenuLabel>Feeds</DropdownMenuLabel>
                 {venueDown && (
                   <DropdownMenuItem disabled className="text-ask">
-                    Lighter down since {formatClock(health.venue_down_since)}
+                    Lighter down since {formatClock(health.venue_down_since)} UTC
                     {health.venue_down_reason ? ` · ${health.venue_down_reason}` : ""}
                   </DropdownMenuItem>
                 )}

@@ -97,7 +97,11 @@ export const TonesTable = memo(function TonesTable({ symbol, onSymbolChange }: T
             <TableRow className="h-8 hover:bg-transparent">
               <TableHead className="text-left font-mono text-xs tracking-wide uppercase">Market</TableHead>
               {timeframes.map((label) => (
-                <TableHead key={label} className="text-right font-mono text-xs tracking-wide uppercase">
+                <TableHead
+                  key={label}
+                  className="text-right font-mono text-xs tracking-wide uppercase"
+                  title="Tone and when its bar closed, UTC"
+                >
                   {label}
                 </TableHead>
               ))}

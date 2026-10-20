@@ -18,6 +18,7 @@ import { isSignificantLiq, liqUsd } from "@/lib/liqs";
 import { useLiveLiquidations, type LiquidationEvent } from "@/lib/liveData";
 import { liqIdentity, pairLabel } from "@/lib/venuePair";
 import { cn, formatPrice, formatSize } from "@/lib/utils";
+import { utcClock } from "@/lib/utcTime";
 
 const MIN_USD_KEY = "mayedge-liqs-min-usd";
 const SIG_USD_KEY = "mayedge-liqs-sig-usd";
@@ -67,16 +68,6 @@ function formatUsd(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return n.toFixed(0);
-}
-
-function formatTime(ts: number): string {
-  if (!ts) return "—";
-  const ms = ts > 1e12 ? ts : ts * 1000;
-  const d = new Date(ms);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
 }
 
 function sigRowClass(l: LiquidationEvent, tint: boolean): string | undefined {
@@ -158,7 +149,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
             <TableRow className="hover:bg-transparent">
-              <TableHead>Time</TableHead>
+              <TableHead>Time (UTC)</TableHead>
               <TableHead>Pair</TableHead>
               <TableHead>Kind</TableHead>
               <TableHead className="text-right">Size</TableHead>
@@ -191,7 +182,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                     title={`${kind} ${pairLabel(l.symbol)}${l.fill_count != null && l.fill_count > 1 ? ` · ${l.fill_count} fills` : ""}${significant ? " · significant" : ""}`}
                     onClick={() => onOpenPair?.(l.symbol)}
                   >
-                    <TableCell className="text-muted-foreground">{formatTime(l.timestamp)}</TableCell>
+                    <TableCell className="text-muted-foreground">{utcClock(l.timestamp)}</TableCell>
                     <TableCell className={cn(l.side === "buy" ? "text-bid" : "text-ask")}>
                       {pairLabel(l.symbol)}
                     </TableCell>

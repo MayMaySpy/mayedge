@@ -1,5 +1,6 @@
 import type { AlertEvent, AlertFact } from "@/lib/api";
 import { formatUsdCompact } from "@/lib/utils";
+import { utcClock } from "@/lib/utcTime";
 import { pairLabel } from "@/lib/venuePair";
 
 const RULE_NAME: Record<string, string> = {
@@ -123,10 +124,9 @@ export function alertStartMs(ev: AlertEvent): number {
   return eventMs(ev.started_at ?? ev.ts);
 }
 
+/** "16:49", UTC. */
 export function formatClock(ms: number): string {
-  if (!ms) return "—";
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return utcClock(ms, false);
 }
 
 export function alertName(symbol: string, marketIndex?: number): string {
@@ -173,7 +173,7 @@ export function eventLine(ev: AlertEvent): AlertLine {
     tooltip: [
       `${name} · ${ruleName(ev.rule)}`,
       ...detail,
-      `Fired ${new Date(atMs).toLocaleTimeString()}`,
+      `Fired ${utcClock(atMs)} UTC`,
     ].join("\n"),
   };
 }
