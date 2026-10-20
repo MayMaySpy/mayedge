@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.ledger import Clip
+from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import (
     MISMATCH_GRACE_MS,
     MISSING_GRACE_MS,
@@ -14,6 +15,7 @@ from mayedge.algos.planner.config import (
 from mayedge.algos.planner.plan import (
     PlannedStep,
     PlannedTarget,
+    resize_targets,
     stop_price,
     trail_price_distance,
 )
@@ -69,8 +71,18 @@ async def _evaluate_manage(runner: PlannerRunner, now: int, prices: list[Decimal
     if abs(pos - expected) > half:
         runner._mismatch_since = runner._mismatch_since or now
         if now - runner._mismatch_since >= MISMATCH_GRACE_MS and st.status == ChaseStatus.RUNNING:
-            st.status = ChaseStatus.PAUSED
-            st.reason = "position changed"  # M6
+            if pos < expected:
+                # M6: smaller by an outside close. Targets take their share of what is left.
+                # Not while a target's own fill may still be on its way: that is not outside.
+                pending = st.trail_fired or any(
+                    c.status == "live" and c.missing_since is not None for c in runner._tp_clips()
+                )
+                if not pending:
+                    resize_to_position(runner, pos)
+                    st.reason = f"Position reduced to {_fmt(pos)}: targets resized"
+            else:
+                st.status = ChaseStatus.PAUSED
+                st.reason = "position changed"  # M6
     else:
         runner._mismatch_since = None
     if st.status != ChaseStatus.RUNNING:
@@ -89,6 +101,36 @@ async def _evaluate_manage(runner: PlannerRunner, now: int, prices: list[Decimal
         await runner._trail_stop(now, prices)
     if st.status == ChaseStatus.RUNNING and st.phase == "managing":
         await runner._trail_targets(now, prices)
+
+def resize_to_position(runner: PlannerRunner, pos: Decimal) -> None:
+    """M6: resize every target's unfilled part to its share of ``pos``. The venue follows in _place_targets."""
+    st = runner._state
+    assert st.plan is not None and st.params is not None
+    filled: dict[int, Decimal] = {}
+    for clip in runner._tp_clips():
+        role = runner._role(clip)
+        if role.startswith("tp") and role[2:].isdigit():
+            filled[int(role[2:])] = filled.get(int(role[2:]), ZERO) + min(clip.filled, clip.qty)
+    ctx, _ = venue.market_context(runner._exec(), st.market_index)
+    st.plan, _ = resize_targets(
+        st.plan,
+        filled=filled,
+        expected=st.expected_size,
+        held=pos,
+        stop_steps=st.params.stop_steps,
+        ctx=ctx,
+    )
+    st.entry_filled = pos + runner._tp_filled()
+    st.expected_size = pos
+    runner._mismatch_since = None
+    # A target dropped for the venue minimum may go back on at a new size.
+    runner._gave_up = {r for r in runner._gave_up if not r.startswith("tp")}
+
+
+def _wrong_size(clip: Clip, left: Decimal, half: Decimal) -> bool:
+    """A live target that no longer closes what its target has left (M6)."""
+    return abs(clip.remaining - left) > half
+
 
 def _due_step(runner: PlannerRunner) -> PlannedStep | None:
     """The furthest Stop step whose target has filled in full and is not taken yet."""
@@ -251,6 +293,10 @@ async def _trail_target(runner: PlannerRunner, t: PlannedTarget, now: int, price
         return
     wanted = runner._venue_wanted(f, point)
     clip = live[0] if live else None
+    if clip is not None and _wrong_size(clip, left, runner._qty_step() / 2):
+        if not await runner._cancel_clip(clip):
+            return
+        clip = None
     if clip is None:
         clip = runner._place(role, price=wanted, qty=left)
         try:

@@ -17,6 +17,7 @@ from mayedge.algos.planner.plan import (
     breakeven_price,
     build_plan,
     price_plan,
+    resize_targets,
 )
 
 ZRO = MarketContext(
@@ -443,3 +444,70 @@ class LadderEntryTests(unittest.TestCase):
                  "entry_ladder": {"price_from": "2", "price_to": "2", "rungs": 5}, "targets": []}
             )
         self.assertEqual(e.exception.rule, "EL1")
+
+
+class ResizeTests(unittest.TestCase):
+    """M6: an outside close resizes what each target has left. P10: each target's $."""
+
+    def _plan(self, size: str, *pcts: str) -> Plan:
+        targets = [Target("r", D(str(i + 2)), D(pct)) for i, pct in enumerate(pcts)]
+        return build_plan(_enter(size=D(size), targets=targets), ZRO)
+
+    def test_an_outside_close_keeps_each_targets_share(self) -> None:
+        plan = self._plan("1000", "50", "30")
+        resized, warnings = resize_targets(
+            plan, filled={}, expected=D("1000"), held=D("300"), stop_steps="breakeven", ctx=ZRO
+        )
+        self.assertEqual([t.qty for t in resized.targets], [D("150"), D("90")])
+        self.assertEqual(resized.runner, D("60"))
+        self.assertEqual(resized.size, D("300"))
+        self.assertEqual(resized.risk_usd, plan.risk_usd * D("0.3"))
+        self.assertEqual([t.price for t in resized.targets], [t.price for t in plan.targets])
+        self.assertEqual(warnings, [])
+
+    def test_a_filled_target_stays_and_the_rest_resize(self) -> None:
+        plan = self._plan("1000", "50", "30")
+        resized, _ = resize_targets(
+            plan, filled={1: D("500")}, expected=D("500"), held=D("250"), stop_steps="breakeven", ctx=ZRO
+        )
+        self.assertEqual([t.qty for t in resized.targets], [D("500"), D("150")])
+        self.assertEqual(resized.runner, D("100"))
+        self.assertEqual(resized.size, D("750"))
+        self.assertEqual([s.after for s in resized.steps], [1])
+
+    def test_a_resized_target_under_the_minimum_joins_the_next_and_takes_its_step(self) -> None:
+        plan = self._plan("100", "10", "60")
+        self.assertEqual([s.after for s in plan.steps], [1])
+        resized, warnings = resize_targets(
+            plan, filled={}, expected=D("100"), held=D("40"), stop_steps="breakeven", ctx=ZRO
+        )
+        self.assertEqual([t.qty for t in resized.targets], [D("0"), D("28")])
+        self.assertEqual(resized.runner, D("12"))
+        self.assertEqual([s.after for s in resized.steps], [2])
+        self.assertTrue(warnings)
+
+    def test_a_position_too_small_for_any_target_rides_on_the_stop(self) -> None:
+        plan = self._plan("100", "50", "20")
+        resized, warnings = resize_targets(
+            plan, filled={}, expected=D("100"), held=D("6"), stop_steps="breakeven", ctx=ZRO
+        )
+        self.assertEqual([t.qty for t in resized.targets], [D("0"), D("0")])
+        self.assertEqual(resized.runner, D("6"))
+        self.assertTrue(warnings)
+
+    def test_a_larger_position_scales_the_targets_up(self) -> None:
+        plan = self._plan("100", "50", "30")
+        resized, _ = resize_targets(
+            plan, filled={}, expected=D("100"), held=D("200"), stop_steps="breakeven", ctx=ZRO
+        )
+        self.assertEqual([t.qty for t in resized.targets], [D("100"), D("60")])
+        self.assertEqual(resized.runner, D("40"))
+
+    def test_each_target_shows_what_it_makes_less_the_taker_fee(self) -> None:
+        plan = build_plan(_enter(), ZRO)
+        # 50 × (2.40166 − 2.19082) = 10.542
+        self.assertEqual(plan.targets[0].usd, D("10.54200"))
+        with_fee = build_plan(_enter(), _ctx(taker_bps=D("5")))
+        # less 50 × 2.40166 × 0.0005 = 0.0600415
+        self.assertEqual(with_fee.targets[0].usd, D("10.4819585"))
+        self.assertEqual(with_fee.targets[0].to_json()["usd"], "10.4819585")

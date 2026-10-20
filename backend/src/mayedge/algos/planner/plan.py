@@ -37,6 +37,7 @@ MIN_TRAIL_TICKS = 2
 
 HUNDRED = Decimal("100")
 BPS = Decimal("10000")
+ZERO = Decimal("0")
 
 
 class PlanRefused(ValueError):
@@ -401,6 +402,8 @@ class PlannedTarget:
     # A Trail target's distance, in price ("price") or % of the best price ("pct").
     trail_distance: Decimal | None = None
     trail_kind: engine.DistanceKind = "price"
+    # P10: what closing qty at price makes, less the taker fee there.
+    usd: Decimal = Decimal("0")
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -413,6 +416,7 @@ class PlannedTarget:
             "order": self.order,
             "trail_distance": fmt_decimal(self.trail_distance),
             "trail_kind": self.trail_kind,
+            "usd": fmt_decimal(self.usd) or "0",
         }
 
     @classmethod
@@ -427,6 +431,7 @@ class PlannedTarget:
             order=raw["order"] if raw.get("order") in ("limit", "trail") else "trigger",
             trail_distance=_opt_decimal(raw.get("trail_distance")),
             trail_kind="pct" if raw.get("trail_kind") == "pct" else "price",
+            usd=Decimal(str(raw.get("usd") or "0")),
         )
 
 
@@ -725,6 +730,8 @@ class _Leg:
     qty: Decimal = Decimal("0")
     trail_distance: Decimal | None = None
     trail_unit: TrailUnit = "r"
+    # The target this leg sizes, when resizing a plan already on (M6).
+    index: int = 0
 
 
 def _target_prices(
@@ -864,7 +871,97 @@ def _planned_target(
         order=leg.order,
         trail_distance=distance,
         trail_kind=kind,
+        usd=target_usd(entry, leg.price, leg.qty, taker_bps=ctx.taker_bps),
     )
+
+
+def target_usd(entry: Decimal, price: Decimal, qty: Decimal, *, taker_bps: Decimal) -> Decimal:
+    """P10: closing qty at a target from entry, less the taker fee at the target."""
+    return qty * (abs(price - entry) - price * taker_bps / BPS)
+
+
+def resize_targets(
+    plan: Plan,
+    *,
+    filled: dict[int, Decimal],
+    expected: Decimal,
+    held: Decimal,
+    stop_steps: StopSteps,
+    ctx: MarketContext,
+) -> tuple[Plan, list[str]]:
+    """M6: what each target has left becomes the same share of the Position now.
+
+    ``filled`` is what each target has closed so far, ``expected`` the Position
+    from Planner's own fills, ``held`` the Position now. Filled parts stay as
+    they are. P6 rounding and P7 joins apply to what is left.
+    """
+    if expected <= 0 or held <= 0:
+        return plan, []
+    left = {t.index: max(ZERO, t.qty - filled.get(t.index, ZERO)) for t in plan.targets}
+    open_targets = [t for t in plan.targets if left[t.index] > 0]
+    legs = [
+        _Leg(price=t.price, pct=left[t.index] / expected * HUNDRED, order=t.order, index=t.index)
+        for t in open_targets
+    ]
+    warnings: list[str] = []
+    try:
+        sized, warnings = _size_targets(legs, size=held, qty_step=ctx.qty_step, min_qty=ctx.min_qty)
+    except PlanRefused:
+        sized = []
+        warnings = ["The Position is too small for any target at the venue minimum. The stop covers it"]
+    new_left = {t.index: ZERO for t in open_targets}
+    for leg in sized:
+        new_left[leg.index] = leg.qty
+    joined_into: dict[int, int] = {}
+    for t in open_targets:
+        if new_left[t.index] > 0:
+            continue
+        later = [o.index for o in open_targets if o.index > t.index and new_left[o.index] > 0]
+        earlier = [o.index for o in open_targets if o.index < t.index and new_left[o.index] > 0]
+        if later:
+            joined_into[t.index] = later[0]
+        elif earlier:
+            joined_into[t.index] = earlier[-1]
+    closed = sum(filled.get(t.index, ZERO) for t in plan.targets)
+    size = closed + held
+    targets = tuple(
+        dataclasses.replace(
+            t,
+            qty=filled.get(t.index, ZERO) + new_left.get(t.index, ZERO),
+            usd=target_usd(
+                plan.entry,
+                t.price,
+                filled.get(t.index, ZERO) + new_left.get(t.index, ZERO),
+                taker_bps=ctx.taker_bps,
+            ),
+        )
+        for t in plan.targets
+    )
+    still_open = held
+    keep_after: set[int] = set()
+    for t in targets:
+        still_open -= new_left.get(t.index, ZERO)
+        if still_open > 0:
+            keep_after.add(t.index)
+    steps: list[PlannedStep] = []
+    if stop_steps != "off":
+        for step in plan.steps:
+            after = joined_into.get(step.after, step.after)
+            # A step after which nothing would be left open is not drawn (M2).
+            if after in keep_after or filled.get(after, ZERO) > 0:
+                steps.append(dataclasses.replace(step, after=after))
+    scale = size / plan.size if plan.size > 0 else Decimal("1")
+    resized = dataclasses.replace(
+        plan,
+        size=size,
+        targets=targets,
+        runner=held - sum(new_left.values(), ZERO),
+        risk_usd=plan.risk_usd * scale,
+        risk_pct=plan.risk_pct * scale if plan.risk_pct is not None else None,
+        warnings=tuple(warnings),
+        steps=tuple(steps),
+    )
+    return resized, warnings
 
 
 def plan_steps(

@@ -385,6 +385,12 @@ export function signedPct(raw: string | null | undefined, digits = 2): string {
   return `${n > 0 ? "+" : n < 0 ? "−" : ""}${s}%`;
 }
 
+/** Dollars with their sign, to the cent: +$10.54, −$5.27. */
+export function signedUsd(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
+}
+
 export function rLabel(raw: string | null | undefined): string {
   const n = parseFloat(raw ?? "");
   if (!Number.isFinite(n)) return "—";

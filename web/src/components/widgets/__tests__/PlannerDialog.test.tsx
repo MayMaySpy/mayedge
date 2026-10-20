@@ -32,8 +32,8 @@ const DRAWN: PlannerPreview = {
     r: "5",
     size: "20",
     targets: [
-      { index: 1, price: "110", qty: "10", pct: "50", r: "2", move_pct: "10" },
-      { index: 2, price: "115", qty: "10", pct: "50", r: "3", move_pct: "15" },
+      { index: 1, price: "110", qty: "10", pct: "50", r: "2", move_pct: "10", usd: "99.45" },
+      { index: 2, price: "115", qty: "10", pct: "50", r: "3", move_pct: "15", usd: "149.43" },
     ],
     runner: "0",
     risk_usd: "100",
@@ -72,6 +72,16 @@ function field(label: string): HTMLInputElement {
 }
 
 describe("PlannerDialog", () => {
+  it("shows the dollars at the stop, at each target and at every target", async () => {
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Entry price"), "100");
+    await user.type(screen.getByLabelText("Stop"), "95");
+    await waitFor(() => expect(screen.getByText(/−\$100\.00/)).toBeTruthy());
+    expect(screen.getByText(/\+\$99\.45/)).toBeTruthy();
+    expect(screen.getByText(/\+\$149\.43/)).toBeTruthy();
+    expect(screen.getByText("+$248.88")).toBeTruthy();
+  });
+
   it("opens on a Draft's entry, stop and targets", () => {
     render(
       <PlannerDialog

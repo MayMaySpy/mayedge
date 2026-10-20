@@ -39,6 +39,7 @@ import {
   type PlannerForm,
   type PlannerMode,
   type PlannerSide,
+  signedUsd,
 } from "@/lib/plannerPlan";
 import { cn, formatPrice, formatSize } from "@/lib/utils";
 
@@ -744,7 +745,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
               </Row>
             )}
             <Row label="Stop" tone="ask">
-              {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)})
+              {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)}) · {signedUsd(-parseFloat(plan.risk_usd))}
             </Row>
             <Row label="R">{formatPrice(plan.r)}</Row>
             <Row label="Size">
@@ -761,8 +762,14 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
                 tone="bid"
               >
                 {formatPrice(t.price)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}
+                {t.usd != null ? ` · ${signedUsd(parseFloat(t.usd))}` : ""}
               </Row>
             ))}
+            {plan.targets.length > 1 && plan.targets.every((t) => t.usd != null) && (
+              <Row label="At every target" tone="bid">
+                {signedUsd(plan.targets.reduce((sum, t) => sum + parseFloat(t.usd ?? "0"), 0))}
+              </Row>
+            )}
             {parseFloat(plan.runner) > 0 && <Row label="Runner">{formatSize(plan.runner)}</Row>}
             {(plan.steps ?? []).map((step) => {
               const gap = step.to === "breakeven" ? null : stepGapPct(plan, step.after, step.price);

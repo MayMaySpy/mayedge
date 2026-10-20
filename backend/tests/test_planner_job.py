@@ -365,6 +365,40 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         self.assertEqual(job.state.status, ChaseStatus.RUNNING)
         self.assertEqual(job.state.expected_size, D("3"))
 
+    async def test_an_outside_close_resizes_the_targets(self) -> None:
+        job = await self._managed()
+        await self._tick(job)
+        self.venue.move("-1.4", "100")
+        await self._tick(job)
+        await self._tick(job, MISMATCH_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+        assert job.state.plan is not None
+        self.assertEqual([t.qty for t in job.state.plan.targets], [D("0.3"), D("0.3")])
+        self.assertEqual(job.state.expected_size, D("0.6"))
+        self.assertEqual(len(self.venue.sent("cancel")), 2)
+        tps = self.venue.sent("trigger_tp")
+        self.assertEqual([t["size"] for t in tps[2:]], ["0.3", "0.3"])
+        # The stop is tied to the Position: it is neither replaced nor amended.
+        self.assertEqual(len(self.venue.sent("trigger_sl")), 1)
+        self.assertEqual(self.venue.sent("amend"), [])
+        await self._tick(job)
+        self.assertEqual(len(self.venue.sent("trigger_tp")), 4)
+
+    async def test_resume_after_an_outside_add_resizes_the_targets(self) -> None:
+        job = await self._managed()
+        await self._tick(job)
+        self.venue.move("1", "100")
+        await self._tick(job)
+        await self._tick(job, MISMATCH_GRACE_MS)
+        self.assertEqual(job.state.status, ChaseStatus.PAUSED)
+        await job.unpause()
+        await job._halt()
+        job._stop.clear()
+        assert job.state.plan is not None
+        self.assertEqual([t.qty for t in job.state.plan.targets], [D("1.5"), D("1.5")])
+        await self._tick(job)
+        self.assertEqual([t["size"] for t in self.venue.sent("trigger_tp")[2:]], ["1.5", "1.5"])
+
     async def test_a_restart_applies_the_target_fill_it_missed(self) -> None:
         job = await self._managed()
         await job.drain_for_shutdown()

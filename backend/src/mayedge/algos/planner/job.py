@@ -366,9 +366,14 @@ class PlannerRunner:
             if role in self._gave_up or t.order == "trail":
                 continue
             clips = [c for c in st.ledger.clips if self._role(c) == role]
-            if any(c.status == "live" for c in clips):
-                continue
             left = t.qty - sum((c.filled for c in clips), ZERO)
+            live = [c for c in clips if c.status == "live"]
+            if live:
+                # M6: a resize leaves the live target at its old size. Put it back on at the new one.
+                if not manage_phase._wrong_size(live[0], left, self._qty_step() / 2):
+                    continue
+                if not await self._cancel_clip(live[0]):
+                    continue
             if left <= 0:
                 continue
             try:
@@ -876,7 +881,10 @@ class PlannerRunner:
         async with self._lock:
             if st.phase == "managing":
                 pos, _ = self._held()
-                if pos > 0:
+                if pos > 0 and st.expected_size > 0 and pos != st.expected_size:
+                    # M6: targets take their share of the Position as it is now.
+                    manage_phase.resize_to_position(self, pos)
+                elif pos > 0:
                     st.entry_filled = pos + self._tp_filled()
                     st.expected_size = pos
             st.status = ChaseStatus.RUNNING

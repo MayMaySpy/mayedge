@@ -382,6 +382,8 @@ export interface PlannerTargetPlan {
   /** A Trail target's distance: a price, or a % of the best price. */
   trail_distance?: string | null;
   trail_kind?: "price" | "pct";
+  /** What closing qty at price makes from entry, less the taker fee there (P10). */
+  usd?: string;
 }
 
 /** What Planner will send: every number comes from one stop (docs/planner-rules.md). */
