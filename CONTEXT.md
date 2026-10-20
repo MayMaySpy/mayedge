@@ -204,6 +204,10 @@ _Avoid_: VWAP, iceberg
 An algo that runs one trade from the stop out: it sends the entry (or takes over an open Position), places the stop and targets as Clips, and takes a Stop step as targets fill. It owns the exit on its Market. The rules are in [docs/planner-rules.md](docs/planner-rules.md).
 _Avoid_: Planer, bracket, OCO, setup
 
+**Draft**:
+A Planner drawn on the chart before it exists: entry, stop and targets, with no orders behind them. One per Market, in memory only. Nothing reaches the venue until Start in the Planner dialog.
+_Avoid_: plan (unqualified, that's the algo), ghost order, bracket
+
 **R**:
 The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R. A Round trip's R is its Net divided by the risk at that stop when it opened. Only Planner Round trips have one.
 _Avoid_: risk unit (unqualified), ATR, a second "suggested" stop, RR, risk-reward (for the result)

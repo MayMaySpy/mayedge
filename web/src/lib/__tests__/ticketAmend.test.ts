@@ -25,6 +25,7 @@ function harness(opts?: {
   prices?: Record<number, number | null>;
 }) {
   const amends: TicketAmend[] = [];
+  const drafts: { overlayId: string; price: string }[] = [];
   const pan: boolean[] = [];
   const prices = opts?.prices ?? {};
   const host: TicketAmendHost = {
@@ -36,8 +37,11 @@ function harness(opts?: {
     },
     hit: opts?.hit ?? (() => null),
   };
-  const session = createTicketAmend(host, { onAmend: (a) => amends.push(a) });
-  return { session, amends, pan, host };
+  const session = createTicketAmend(host, {
+    onAmend: (a) => amends.push(a),
+    onDraft: (m) => drafts.push(m),
+  });
+  return { session, amends, drafts, pan, host };
 }
 
 describe("createTicketAmend", () => {
@@ -134,6 +138,29 @@ describe("createTicketAmend", () => {
     session.destroy();
     expect(pan.at(-1)).toBe(true);
     expect(session.preview()).toBeNull();
+  });
+
+  it("drags a Draft line to a tick and does not Amend", () => {
+    const overlay = ticket({
+      id: "draft-entry",
+      kind: "draft",
+      orderIndex: undefined,
+      marketIndex: undefined,
+    });
+    const { session, amends, drafts } = harness({
+      hit: () => ({ overlay, region: "body" }),
+      prices: { 80: 100, 20: 101.234 },
+    });
+    session.setPriceDecimals(2);
+    session.setOverlays([overlay]);
+
+    expect(session.pointerDown({ x: 12, y: 80 })).toBe(true);
+    session.pointerMove({ x: 12, y: 20 });
+    session.pointerUp();
+
+    expect(drafts).toEqual([{ overlayId: "draft-entry", price: "101.23" }]);
+    expect(amends).toEqual([]);
+    expect(session.pointerDown({ x: 12, y: 80 })).toBe(true);
   });
 
   it("ignores a second drag of the same Ticket until overlays refresh", () => {

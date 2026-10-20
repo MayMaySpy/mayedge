@@ -4,7 +4,7 @@ What the **Planner** algo does, start to finish. Change a rule here first, then 
 
 Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means the number is not a knob.
 
-Last checked against the code: 2026-10-18.
+Last checked against the code: 2026-10-20.
 
 ## Example
 
@@ -132,3 +132,17 @@ A Ladder entry rests all its rungs at once and the Position grows as price walks
 | N2 | **Kill**, or Cancel all on its Market, stops Planner and cancels its stop with every other working order. Without a flatten, the Position is left with no stop. The Kill dialog says so while a Planner is live. | | test_cancel_all_on_its_market_stops_the_planner, warns that Stop + cancel leaves a Planner's Position with no stop |
 | N3 | Auto kill is independent of Planner. | | |
 | N4 | Stopping a Planner cancels all its Clips, the stop with them. The confirm says the Position is left with no stop. | | test_stopping_cancels_every_clip |
+
+## Drafting on the chart
+
+A **Draft** is a Planner drawn on the price chart before it exists ([ADR 0018](adr/0018-the-chart-drafts-a-planner.md)). The lines have no orders behind them. Nothing reaches the venue until **Start** in the Planner dialog. [ADR 0007](adr/0007-chart-amends-tickets-only.md) still holds for live Tickets. A running Planner's lines stay display-only ([ADR 0015](adr/0015-planner-owns-the-exit.md)).
+
+The Draft is per Market and lives in memory. Esc clears it. Closing the dialog does not, and edits in the dialog do not move the drawing.
+
+| | Rule | Knob | Pinned by |
+|---|---|---|---|
+| D1 | With Plan on, the first click is the entry and the second is the stop. The side is long when the stop is below the entry, and short when it is above. A later click does nothing; drag the line. | | `click order picks the side` |
+| D2 | While a Position is open, the entry is that Position's average and the click sets the stop. The chart does not draw a second entry. Open in Planner, and Enter, open the dialog as Attach: stop and targets only. | | `a Position's Draft is a stop`, `opens as Attach when a Position is open` |
+| D3 | Targets start at the dialog's default R multiples. Dragging a line snaps to the tick. Dragging a target changes its R. Dragging the entry or the stop keeps each target's R. Labels show price, distance from entry in %, R on targets, and size once the preview has it. | | `drag snaps a Draft line to the tick`, `a dragged target changes its R`, `labels show price, distance, R and size` |
+| D4 | The preview is `POST /api/algos/planner/preview`, debounced 250ms, the same call the dialog makes. Its warnings and a refusal show on the Draft. The preview does not start a Planner. | 250ms | `the Draft preview waits 250ms and does not start` |
+| D5 | Open in Planner fills the dialog with the Draft's entry, stop and targets. With a Position open the entry price is left out. | | `opens on a Draft's entry, stop and targets` |

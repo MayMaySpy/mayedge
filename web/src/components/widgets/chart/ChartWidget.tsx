@@ -11,6 +11,7 @@ import {
   type OpenInterestSample,
 } from "@/lib/api";
 import { useAxisTicket } from "@/lib/axisTicket";
+import { chartDraftFor, clearChartDraft, draftReady, requestChartDraftOpen, useChartPlan } from "@/lib/chartDraft";
 import { aggregateCandles, candleTime, foldMinutes, mergeCandles } from "@/lib/chartCandles";
 import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
 import { TradingLinesPrimitive, type ChartOverlay, type OverlayAction } from "@/lib/chartTradingLines";
@@ -29,7 +30,7 @@ import {
 } from "@/lib/liveData";
 import { bucketOpen, buildOiLine, type OiLinePoint } from "@/lib/openInterest";
 import { useQuickPanel } from "@/lib/quickPanel";
-import { createTicketAmend, type TicketAmend } from "@/lib/ticketAmend";
+import { createTicketAmend, type DraftMove, type TicketAmend } from "@/lib/ticketAmend";
 import { createTicketPlace, type TicketPlace } from "@/lib/ticketPlace";
 import { candleSource, loadPins, loadTimeframe, parseTimeframe, supportsOpenInterest } from "@/lib/timeframe";
 import { loadWatchWindow, type WatchWindow } from "@/lib/watchWindow";
@@ -54,6 +55,8 @@ interface ChartWidgetProps {
   onOverlayAction?: (action: OverlayAction, overlay: ChartOverlay) => void;
   onTicketAmend?: (amend: TicketAmend) => void;
   onTicketPlace?: (place: TicketPlace) => void;
+  onPlanClick?: (price: number) => void;
+  onDraftMove?: (move: DraftMove) => void;
   onClose?: () => void;
   children?: ReactNode;
   markets?: readonly Market[];
@@ -79,6 +82,8 @@ export const ChartWidget = memo(function ChartWidget({
   onOverlayAction,
   onTicketAmend,
   onTicketPlace,
+  onPlanClick,
+  onDraftMove,
   onClose,
   children,
   markets = [],
@@ -153,6 +158,25 @@ export const ChartWidget = memo(function ChartWidget({
   const sizeClickRef = useRef<ChartOverlay | null>(null);
   const paintLinesRef = useRef<() => void>(() => {});
   const { armed: axisArmed, setArmed: setAxisArmed } = useAxisTicket();
+  const { armed: planArmed } = useChartPlan();
+  const planArmedRef = useRef(planArmed);
+  const onPlanClickRef = useRef(onPlanClick);
+  const onDraftMoveRef = useRef(onDraftMove);
+  const onDraftClearRef = useRef<() => void>(() => {});
+  const onDraftEnterRef = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    planArmedRef.current = planArmed;
+    onPlanClickRef.current = onPlanClick;
+    onDraftMoveRef.current = onDraftMove;
+  }, [planArmed, onPlanClick, onDraftMove]);
+  useEffect(() => {
+    onDraftClearRef.current = () => clearChartDraft(symbol);
+    onDraftEnterRef.current = () => {
+      if (!draftReady(chartDraftFor(symbol))) return false;
+      requestChartDraftOpen();
+      return true;
+    };
+  }, [symbol]);
   const { open: quickOn, setOpen: setQuickOn } = useQuickPanel();
   const axisArmedRef = useRef(axisArmed);
   const volOnRef = useRef(volOn);
@@ -354,6 +378,11 @@ export const ChartWidget = memo(function ChartWidget({
     sizeClickRef,
     paintLinesRef,
     axisArmedRef,
+    planArmedRef,
+    onPlanClickRef,
+    onDraftMoveRef,
+    onDraftClearRef,
+    onDraftEnterRef,
     volOnRef,
     primedRef,
     lastMetaRef,

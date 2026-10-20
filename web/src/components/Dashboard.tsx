@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import GridLayout, {
   type LayoutItem,
   useContainerWidth,
@@ -43,6 +43,22 @@ import { toggleFavorite } from "@/lib/favorites";
 import { buildQuickLimit, submitQuickMarket } from "@/lib/quickTrade";
 import { getQuickSize } from "@/lib/quickSizes";
 import {
+  clickChartDraft,
+  draftNotice,
+  draftOpenMode,
+  draftOverlays,
+  draftReady,
+  draftToForm,
+  moveChartDraft,
+  setChartDraftNotice,
+  useChartDraft,
+  useChartPlan,
+} from "@/lib/chartDraft";
+import { useDraftPreview } from "@/hooks/useDraftPreview";
+import { defaultPlannerForm, plannerBody } from "@/lib/plannerPlan";
+import type { DraftMove } from "@/lib/ticketAmend";
+
+import {
   defaultPanelVisibility,
   PANEL_CATALOG,
   PANEL_IDS,
@@ -50,6 +66,10 @@ import {
 } from "@/lib/panels";
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { formatSize } from "@/lib/utils";
+
+const PlannerDialog = lazy(() =>
+  import("@/components/widgets/planner/PlannerDialog").then((m) => ({ default: m.PlannerDialog })),
+);
 
 const LAYOUT_KEY = "mayedge-layout-v16";
 const VISIBILITY_KEY = "mayedge-visibility-v10";
@@ -142,12 +162,49 @@ function ChartPanel({
   const bookMid = bid > 0 && ask > 0 ? (bid + ask) / 2 : bid > 0 ? bid : ask > 0 ? ask : 0;
   const lastClose = minuteCandles[minuteCandles.length - 1]?.close ?? 0;
   const liveMark = bookMid || lastClose;
+  const position =
+    accountSnap?.positions.find((p) => p.symbol === symbol && parseFloat(p.size) !== 0) ?? null;
+  const positionEntry = position ? parseFloat(position.entry_price) : null;
+  const draftEntry = positionEntry != null && positionEntry > 0 ? positionEntry : null;
+  const { armed: planArmed, openSeq } = useChartPlan();
+  const draft = useChartDraft(symbol);
+  const draftForm = useMemo(() => {
+    if (!planArmed || !market || !draftReady(draft)) return null;
+    const partial = draftToForm(draft, market.price_decimals ?? 2, draftEntry);
+    if (!partial?.side) return null;
+    const form = { ...defaultPlannerForm(partial.side), ...partial };
+    const slippage = Math.min(0.05, Math.max(0, (parseFloat(loadSlipPct()) || 1) / 100));
+    return {
+      partial,
+      body: plannerBody(form, {
+        mode: draftOpenMode(draftEntry != null),
+        marketIndex: market.market_index,
+        slippage,
+      }),
+    };
+  }, [planArmed, market, draft, draftEntry]);
+  const preview = useDraftPreview(planArmed ? (draftForm?.body ?? null) : null);
+  useEffect(() => {
+    setChartDraftNotice(symbol, planArmed ? draftNotice(preview) : "");
+  }, [symbol, planArmed, preview]);
+  const onPlanClick = useCallback(
+    (price: number) => clickChartDraft(symbol, price, draftEntry),
+    [symbol, draftEntry],
+  );
+  const onDraftMove = useCallback(
+    (move: DraftMove) => moveChartDraft(symbol, move.overlayId, move.price, draftEntry),
+    [symbol, draftEntry],
+  );
+  const [seenOpen, setSeenOpen] = useState(openSeq);
+  const [plannerOpen, setPlannerOpen] = useState(false);
+  if (openSeq !== seenOpen) {
+    setSeenOpen(openSeq);
+    if (draftForm) setPlannerOpen(true);
+  }
 
   const overlays = useMemo(() => {
     const lines: ChartOverlay[] = [];
-    const pos = accountSnap?.positions.find(
-      (p) => p.symbol === symbol && parseFloat(p.size) !== 0
-    );
+    const pos = position;
     if (pos) {
       const size = parseFloat(pos.size);
       const entry = parseFloat(pos.entry_price);
@@ -267,8 +324,32 @@ function ChartPanel({
         });
       }
     }
+    if (planArmed) {
+      const plan = preview?.plan;
+      lines.push(
+        ...draftOverlays({
+          draft,
+          decimals: market?.price_decimals ?? 2,
+          positionEntry: draftEntry,
+          size: plan?.size,
+          targetQty: plan?.targets.map((t) => t.qty),
+        }),
+      );
+    }
     return lines;
-  }, [accountSnap, algoBook.working, symbol, tradingEnabled, liveMark, market]);
+  }, [
+    accountSnap,
+    algoBook.working,
+    symbol,
+    tradingEnabled,
+    liveMark,
+    market,
+    position,
+    planArmed,
+    preview,
+    draft,
+    draftEntry,
+  ]);
 
   const handleTicketAmend = useCallback(async (amend: TicketAmend) => {
     try {
@@ -325,20 +406,36 @@ function ChartPanel({
   );
 
   return (
-    <ChartWidget
-      symbol={symbol}
-      priceDecimals={market?.price_decimals ?? 2}
-      livePrice={liveMark > 0 ? liveMark : null}
-      overlays={overlays}
-      onOverlayAction={onOverlayAction}
-      onTicketAmend={handleTicketAmend}
-      onTicketPlace={handleTicketPlace}
-      onClose={onClose}
-      markets={markets}
-      onSymbolChange={onSymbolChange}
-    >
-      <QuickTradePanel market={market} tradingEnabled={tradingEnabled} connected={connected} />
-    </ChartWidget>
+    <>
+      <ChartWidget
+        symbol={symbol}
+        priceDecimals={market?.price_decimals ?? 2}
+        livePrice={liveMark > 0 ? liveMark : null}
+        overlays={overlays}
+        onOverlayAction={onOverlayAction}
+        onTicketAmend={handleTicketAmend}
+        onTicketPlace={handleTicketPlace}
+        onPlanClick={planArmed ? onPlanClick : undefined}
+        onDraftMove={onDraftMove}
+        onClose={onClose}
+        markets={markets}
+        onSymbolChange={onSymbolChange}
+      >
+        <QuickTradePanel market={market} tradingEnabled={tradingEnabled} connected={connected} />
+      </ChartWidget>
+      {plannerOpen && market && draftForm ? (
+        <Suspense fallback={null}>
+          <PlannerDialog
+            open
+            onOpenChange={setPlannerOpen}
+            market={market}
+            mode={draftOpenMode(draftEntry != null)}
+            side={draftForm.partial.side}
+            initial={draftForm.partial}
+          />
+        </Suspense>
+      ) : null}
+    </>
   );
 }
 

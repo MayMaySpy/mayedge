@@ -13,7 +13,7 @@ import type {
 import { LineStyle } from "lightweight-charts";
 import { theme } from "@/lib/theme";
 
-export type ChartOverlayKind = "position" | "order" | "liq" | "algo" | "band";
+export type ChartOverlayKind = "position" | "order" | "liq" | "algo" | "band" | "draft";
 
 export interface ChartOverlay {
   id: string;
@@ -387,7 +387,7 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number, hideQty: boole
     } else if (showCancel) {
       hits.push({ x: tx, y: pillY, w: BTN, h: PILL_H, id: line.id, action: "cancel" });
     }
-    if (interactive && line.kind === "order") {
+    if (interactive && (line.kind === "order" || line.kind === "draft")) {
       if (splitQty) {
         const prefixW = measure(`${prefixText} `, FONT);
         const qtyW = measure(qtyText!, FONT);

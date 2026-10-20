@@ -67,7 +67,35 @@ afterEach(() => {
 
 const start = () => screen.getByRole("button", { name: "Plan long" }) as HTMLButtonElement;
 
+function field(label: string): HTMLInputElement {
+  return screen.getByLabelText(label) as HTMLInputElement;
+}
+
 describe("PlannerDialog", () => {
+  it("opens on a Draft's entry, stop and targets", () => {
+    render(
+      <PlannerDialog
+        open
+        onOpenChange={vi.fn()}
+        market={ETH}
+        mode="enter"
+        side="buy"
+        initial={{
+          entryPrice: "100",
+          stop: "95",
+          targets: [
+            { kind: "r", value: "2", pct: "50", order: "limit" },
+            { kind: "r", value: "4", pct: "50", order: "limit" },
+          ],
+        }}
+      />,
+    );
+    expect(field("Entry price").value).toBe("100");
+    expect(field("Stop").value).toBe("95");
+    expect(field("Target 1 R").value).toBe("2");
+    expect(field("Target 2 R").value).toBe("4");
+  });
+
   it("draws the plan from the desk before it can start", async () => {
     const { user } = setup();
     expect(start().disabled).toBe(true);

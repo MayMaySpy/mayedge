@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, type Dispatch, type ReactNode, type
 import { SquareArrowOutUpRight } from "lucide-react";
 
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
+import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -15,6 +16,13 @@ import { isSettled, type FundingBar } from "@/lib/funding";
 import { rankRelativeStrength } from "@/lib/relativeStrength";
 import { snapTick, type TicketAmend } from "@/lib/ticketAmend";
 import { theme } from "@/lib/theme";
+import {
+  draftReady,
+  requestChartDraftOpen,
+  useChartDraft,
+  useChartDraftNotice,
+  useChartPlan,
+} from "@/lib/chartDraft";
 import { subscribeHotkeys } from "@/lib/hotkeys";
 import { parseTimeframe, persistPins, persistTimeframe, supportsOpenInterest } from "@/lib/timeframe";
 import { WATCH_WINDOWS, WATCH_WINDOW_SEC, persistWatchWindow, type WatchWindow } from "@/lib/watchWindow";
@@ -117,6 +125,10 @@ export function ChartFrame(props: {
     wrapRef, containerRef, shownQtyEdit, setQtyEdit, marketByIndex, amendRef, onAmendRef,
     display, hover, hoverBar, seriesKey, liveOi, fundBars, hoverFills,
   } = props;
+  const { armed: planArmed, setArmed: setPlanArmed } = useChartPlan();
+  const draft = useChartDraft(symbol);
+  const draftNote = useChartDraftNotice(symbol);
+  const canOpenDraft = planArmed && draftReady(draft);
   const selectTf = (next: string) => {
     const parsed = parseTimeframe(next);
     if (!parsed || parsed.label === tf) return;
@@ -324,6 +336,16 @@ export function ChartFrame(props: {
               <Toggle
                 variant="seg"
                 size="sm"
+                pressed={planArmed}
+                title="Draw a Draft: click the entry, then the stop. Esc clears it. Nothing is sent until Start."
+                className="h-6 px-1.5 font-mono text-sm"
+                onPressedChange={(next) => setPlanArmed(next)}
+              >
+                Plan
+              </Toggle>
+              <Toggle
+                variant="seg"
+                size="sm"
                 pressed={quickOn}
                 title={quickOn ? "Hide quick trade" : "Quick trade"}
                 className="h-6 px-1.5 font-mono text-sm"
@@ -462,6 +484,26 @@ export function ChartFrame(props: {
           {onClose ? <PanelCloseButton onClose={onClose} /> : null}
         </div>
       </div>
+      {isPrice && planArmed && (canOpenDraft || draftNote) ? (
+        <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border px-2">
+          {canOpenDraft ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-6 px-2 font-mono text-sm"
+              onClick={() => requestChartDraftOpen()}
+            >
+              Open in Planner
+            </Button>
+          ) : null}
+          {draftNote ? (
+            <span className="min-w-0 truncate font-mono text-sm text-ask" title={draftNote}>
+              {draftNote}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div ref={wrapRef} className="relative flex min-h-0 flex-1 flex-col">
         {isPrice ? (
           <>

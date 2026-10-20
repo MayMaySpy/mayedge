@@ -38,9 +38,11 @@ function amendable(overlay: ChartOverlay): boolean {
   );
 }
 
+export type DraftMove = { overlayId: string; price: string };
+
 export function createTicketAmend(
   host: TicketAmendHost,
-  opts: { onAmend: (a: TicketAmend) => void }
+  opts: { onAmend: (a: TicketAmend) => void; onDraft?: (move: DraftMove) => void }
 ) {
   let overlays: readonly ChartOverlay[] = [];
   let decimals = 2;
@@ -84,7 +86,8 @@ export function createTicketAmend(
       const hit = host.hit(pt);
       if (!hit || hit.region !== "body") return false;
       const live = overlays.find((l) => l.id === hit.overlay.id) ?? hit.overlay;
-      if (!amendable(live) || locked.has(live.id)) return false;
+      const draft = live.kind === "draft" && Boolean(live.interactive);
+      if (!draft && (!amendable(live) || locked.has(live.id))) return false;
       const fromY = snapTick(host.priceAtY(pt.y) ?? live.price, decimals);
       const originTick = snapTick(live.price, decimals);
       if (originTick == null) return false;
@@ -108,6 +111,10 @@ export function createTicketAmend(
       captured = null;
       restorePan();
       if (drop.priceTick == null || drop.priceTick === drop.originTick) return;
+      if (drop.overlay.kind === "draft") {
+        opts.onDraft?.({ overlayId: drop.overlay.id, price: drop.priceTick });
+        return;
+      }
       if (drop.overlay.marketIndex == null || drop.overlay.orderIndex == null) return;
       locked.add(drop.overlay.id);
       opts.onAmend({

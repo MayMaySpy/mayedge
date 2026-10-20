@@ -15,6 +15,8 @@ import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "r
 import { FillMarksPrimitive, type FillSpot } from "@/lib/fillMarkPrimitive";
 import { isSettled } from "@/lib/funding";
 import { parseOverlayAction, TradingLinesPrimitive, type ChartOverlay } from "@/lib/chartTradingLines";
+import { hotkeyBlocked } from "@/lib/hotkeys";
+import { snapTick, type DraftMove } from "@/lib/ticketAmend";
 import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
 import { getQuickSize } from "@/lib/quickSizes";
 import { createTicketAmend, type TicketAmendHost } from "@/lib/ticketAmend";
@@ -112,6 +114,11 @@ type Refs = {
   sizeClickRef: RefObject<ChartOverlay | null>;
   paintLinesRef: RefObject<() => void>;
   axisArmedRef: RefObject<boolean>;
+  planArmedRef: RefObject<boolean>;
+  onPlanClickRef: RefObject<((price: number) => void) | undefined>;
+  onDraftMoveRef: RefObject<((move: DraftMove) => void) | undefined>;
+  onDraftClearRef: RefObject<() => void>;
+  onDraftEnterRef: RefObject<() => boolean>;
   volOnRef: RefObject<boolean>;
   primedRef: RefObject<boolean>;
   lastMetaRef: RefObject<{ first: number; time: number; len: number } | null>;
@@ -126,7 +133,8 @@ export function useChartTicketInteraction(input: Refs) {
     oiSeriesRef, fundSeriesRef, tradingLinesRef, topOfBookRef, overlaysRef,
     topRef, bboOnRef, onActionRef, onAmendRef, onPlaceRef, livePriceRef,
     priceDecimalsRef, amendRef, placeRef, ghostRef, suppressClickRef,
-    sizeClickRef, paintLinesRef, axisArmedRef, volOnRef, primedRef,
+    sizeClickRef, paintLinesRef, axisArmedRef, planArmedRef, onPlanClickRef,
+    onDraftMoveRef, onDraftClearRef, onDraftEnterRef, volOnRef, primedRef,
     lastMetaRef, seriesKeyRef, fillSpotRef,
   } = input;
   useEffect(() => {
@@ -235,6 +243,7 @@ export function useChartTicketInteraction(input: Refs) {
 
     const amend = createTicketAmend(host, {
       onAmend: (a) => onAmendRef.current?.(a),
+      onDraft: (move) => onDraftMoveRef.current?.(move),
     });
     amend.setPriceDecimals(priceDecimalsRef.current);
     amend.setOverlays(overlaysRef.current);
@@ -337,13 +346,19 @@ export function useChartTicketInteraction(input: Refs) {
       paintLines();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setQtyEdit(null);
-      sizeClickRef.current = null;
-      amend.pointerCancel();
-      place.pointerCancel();
-      ghostRef.current = null;
-      paintLines();
+      if (e.key === "Escape") {
+        setQtyEdit(null);
+        sizeClickRef.current = null;
+        amend.pointerCancel();
+        place.pointerCancel();
+        ghostRef.current = null;
+        paintLines();
+        if (!hotkeyBlocked(e.target)) onDraftClearRef.current();
+        return;
+      }
+      if (e.key === "Enter" && planArmedRef.current && !e.repeat && !hotkeyBlocked(e.target)) {
+        if (onDraftEnterRef.current()) e.preventDefault();
+      }
     };
     el?.addEventListener("pointerdown", onPointerDown);
     el?.addEventListener("pointermove", onPointerMove);
@@ -352,15 +367,24 @@ export function useChartTicketInteraction(input: Refs) {
     document.addEventListener("keydown", onKeyDown);
     paintLines();
 
-    const onClick = (param: { hoveredInfo?: { objectId?: unknown }; hoveredObjectId?: unknown }) => {
+    const onClick = (param: MouseEventParams) => {
       if (suppressClickRef.current) {
         suppressClickRef.current = false;
         return;
       }
       const action = parseOverlayAction(param.hoveredInfo?.objectId ?? param.hoveredObjectId);
-      if (!action) return;
-      const overlay = overlaysRef.current.find((o) => o.id === action.id);
-      if (overlay) onActionRef.current?.(action, overlay);
+      if (action) {
+        const overlay = overlaysRef.current.find((o) => o.id === action.id);
+        if (overlay) onActionRef.current?.(action, overlay);
+        return;
+      }
+      if (!planArmedRef.current || param.point == null) return;
+      if (chartRegion(chart, param.point) !== "pane") return;
+      const raw = series.coordinateToPrice(param.point.y);
+      if (raw == null || !Number.isFinite(raw)) return;
+      const snapped = snapTick(raw, priceDecimalsRef.current);
+      if (!snapped) return;
+      onPlanClickRef.current?.(Number(snapped));
     };
     chart.subscribeClick(onClick);
 
