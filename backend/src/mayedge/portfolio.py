@@ -328,7 +328,6 @@ def portfolio_now(
 
 
 FLOW_MARKER_USD = Decimal("1")
-HOURLY_HORIZON_MS = 90 * DAY_MS
 
 
 def history(value_rows: list[dict[str, Any]], pnl_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -354,19 +353,8 @@ def history(value_rows: list[dict[str, Any]], pnl_rows: list[dict[str, Any]]) ->
     return {"points": points, "flows": flows}
 
 
-def _local_midnights(since_ms: int, now_ms: int, tz_min: int) -> list[int]:
-    """H6: local midnights from the one at or before since, to now. tz is UTC minus local, in minutes."""
-    shift = tz_min * 60_000
-    local = since_ms - shift
-    first = local - local % DAY_MS + shift
-    out = [first]
-    while out[-1] + DAY_MS <= now_ms:
-        out.append(out[-1] + DAY_MS)
-    return out
-
-
-def _day_label(start_ms: int, tz_min: int) -> str:
-    day = time.gmtime((start_ms - tz_min * 60_000) / 1000)
+def _day_label(start_ms: int) -> str:
+    day = time.gmtime(start_ms / 1000)
     return f"{day.tm_year:04d}-{day.tm_mon:02d}-{day.tm_mday:02d}"
 
 
@@ -376,35 +364,32 @@ def days(
     *,
     since_ms: int,
     now_ms: int,
-    tz_min: int,
 ) -> list[dict[str, Any]]:
-    """H6: Day change per kind for each day. Local days on hourly buckets; UTC days before them."""
+    """H6: Day change per kind for each UTC day. Today runs from 00:00 UTC to the last hourly bucket."""
     hourly, daily = buckets(hourly_pnl), buckets(daily_pnl)
-    hourly_from = max(now_ms - HOURLY_HORIZON_MS, hourly[0].ts_ms if hourly else now_ms)
+    today = now_ms - now_ms % DAY_MS
     out: list[dict[str, Any]] = []
 
-    def row(label: str, start: int, utc: bool, open_b: Bucket | None, close_b: Bucket | None) -> None:
-        if close_b is None:
+    def row(start: int, open_b: Bucket | None, close_b: Bucket | None) -> None:
+        if open_b is None or close_b is None:
             return
         kinds = {}
         total = ZERO
         for kind in KINDS:
             name = FIELDS[kind][0]
-            change = close_b.get(name) - (open_b.get(name) if open_b else ZERO)
+            change = close_b.get(name) - open_b.get(name)
             kinds[kind] = _s(change)
             total += change
-        out.append({"day": label, "start": start, "utc": utc, "kinds": kinds, "total": _s(total)})
+        out.append({"day": _day_label(start), "start": start, "kinds": kinds, "total": _s(total)})
 
-    # UTC days before the hourly series begins.
+    first = since_ms - since_ms % DAY_MS
     for open_b, close_b in pairwise(daily):
-        if open_b.ts_ms < since_ms - DAY_MS or close_b.ts_ms > hourly_from:
-            continue
-        row(_day_label(open_b.ts_ms, 0), open_b.ts_ms, True, open_b, close_b)
-    # Local days on the hourly series; the last one runs to the latest stored bucket.
-    starts = [m for m in _local_midnights(max(since_ms, hourly_from), now_ms, tz_min) if m >= hourly_from]
-    for i, start in enumerate(starts):
-        end = starts[i + 1] if i + 1 < len(starts) else now_ms
-        row(_day_label(start, tz_min), start, False, _at(hourly, start), _at(hourly, end))
+        if open_b.ts_ms >= first and close_b.ts_ms - open_b.ts_ms == DAY_MS:
+            row(open_b.ts_ms, open_b, close_b)
+    # Today, so far: the bucket at 00:00 UTC (daily, or hourly when the daily one is not in yet).
+    opening = next((b for b in daily if b.ts_ms == today), None) or next((b for b in hourly if b.ts_ms == today), None)
+    latest = hourly[-1] if hourly and hourly[-1].ts_ms > today else None
+    row(today, opening, latest)
     return out
 
 

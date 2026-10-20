@@ -49,15 +49,13 @@ afterEach(() => {
 });
 
 describe("PortfolioToday", () => {
-  it("shows today's change since local midnight from the plain answer", async () => {
+  it("shows today's change since 00:00 UTC from the plain answer", async () => {
     const read = vi.spyOn(api, "portfolio").mockResolvedValue(NOW);
     show();
     expect(await screen.findByText("+187.88")).toBeTruthy();
     expect(screen.getByText("+3.42%")).toBeTruthy();
     const [open, detail] = read.mock.calls[0];
-    const midnight = new Date();
-    midnight.setHours(0, 0, 0, 0);
-    expect(open).toBe(midnight.getTime());
+    expect(open).toBe(Date.now() - (Date.now() % 86_400_000));
     expect(detail).toBe(false);
   });
 

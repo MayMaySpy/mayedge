@@ -52,19 +52,16 @@ async def get_portfolio_history(range: str = "7d") -> dict[str, Any]:
 
 
 @router.get("/api/portfolio/days")
-async def get_portfolio_days(range: str = "30d", tz: int = 0) -> dict[str, Any]:
-    """H6: Day change per kind per local day. No venue read."""
+async def get_portfolio_days(range: str = "30d") -> dict[str, Any]:
+    """H6: Day change per kind per UTC day. No venue read."""
     now = int(time.time() * 1000)
     if range == "1d":
         raise HTTPException(400, "range must be 7d, 30d, 90d, or all")
     since = _since(range, now)
-    if not -14 * 60 <= tz <= 14 * 60:
-        raise HTTPException(400, "tz is minutes from UTC, -840 to 840")
     rows = days(
-        portfolio_buckets("1h", "pnl", since - DAY_MS),
+        portfolio_buckets("1h", "pnl", now - now % DAY_MS - DAY_MS),
         portfolio_buckets("1d", "pnl", since - DAY_MS),
         since_ms=since,
         now_ms=now,
-        tz_min=tz,
     )
-    return {"range": range, "tz": tz, "days": rows}
+    return {"range": range, "days": rows}

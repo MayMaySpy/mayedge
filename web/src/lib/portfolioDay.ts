@@ -1,10 +1,8 @@
 import type { PortfolioKind, PortfolioNow } from "@/lib/api";
 
-/** The viewer's Day open: local midnight today, in ms (docs/portfolio-rules.md N1). */
-export function localMidnightMs(now = new Date()): number {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+/** The Day open: 00:00 UTC today, in ms. The desk never uses local time (docs/portfolio-rules.md N1). */
+export function utcMidnightMs(now = Date.now()): number {
+  return now - (now % 86_400_000);
 }
 
 /** Stack and legend order. Never re-sorted by size, so a kind keeps its color. */

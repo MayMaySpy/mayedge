@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { price, rValue, ratio, size } from "@/lib/journalFormat";
+import { price, rValue, ratio, size, when } from "@/lib/journalFormat";
 import { isJournalPath, parsePath } from "@/lib/deskRoute";
 
 describe("journal numbers", () => {
@@ -27,5 +27,13 @@ describe("journal route", () => {
     expect(isJournalPath("/Journal/")).toBe(true);
     expect(isJournalPath("/ETH")).toBe(false);
     expect(parsePath("/journal").symbol).not.toBe("JOURNAL");
+  });
+});
+
+describe("journal times", () => {
+  it("are UTC whatever the viewer's zone", () => {
+    // 2026-10-20 16:49:57 UTC, in ms and in seconds.
+    expect(when(1_792_514_997_035)).toContain("16:49");
+    expect(when(1_792_514_997)).toContain("16:49");
   });
 });

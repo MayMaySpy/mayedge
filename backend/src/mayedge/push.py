@@ -109,7 +109,7 @@ class PushSettings:
     account_stale_after_s: float = 120
     repeat_s: float = 600
     max_per_min: int = 12
-    # Local HH:MM for yesterday's journal. Empty is off.
+    # HH:MM UTC for yesterday's journal. Empty is off.
     daily_at: str = ""
 
 
@@ -408,9 +408,9 @@ class PushRouter:
             return
         if self._clock.now() - self._venue_since < self._cfg.venue_down_after_s:
             return
-        when = time.strftime("%H:%M", time.localtime(self._venue_since))
+        when = time.strftime("%H:%M", time.gmtime(self._venue_since))
         reason = f" ({self._venue_reason})" if self._venue_reason else ""
-        self._out.push("venue", f"Lighter down since {when}{reason}")
+        self._out.push("venue", f"Lighter down since {when} UTC{reason}")
         self._venue_announced = True
 
     def _poll_account(self) -> None:
@@ -436,7 +436,7 @@ class PushRouter:
     def _poll_daily(self) -> None:
         if self._daily_wait() != 0.0:
             return
-        today = _local_date(time.localtime(self._clock.now()))
+        today = _utc_date(time.gmtime(self._clock.now()))
         self._daily_sent_on = today
         if self._journal is None:
             return
@@ -460,8 +460,8 @@ class PushRouter:
         if not at:
             return None
         now = self._clock.now()
-        stamp = time.localtime(now)
-        if self._daily_sent_on == _local_date(stamp):
+        stamp = time.gmtime(now)
+        if self._daily_sent_on == _utc_date(stamp):
             return _seconds_until_hhmm(now + 60, at)
         if _minutes(stamp) >= _at_minutes(at):
             return 0.0
@@ -979,7 +979,7 @@ def _daily_at(raw: Any) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _local_date(stamp: time.struct_time) -> str:
+def _utc_date(stamp: time.struct_time) -> str:
     return f"{stamp.tm_year:04d}-{stamp.tm_mon:02d}-{stamp.tm_mday:02d}"
 
 
@@ -992,14 +992,14 @@ def _at_minutes(hhmm: str) -> int:
 
 
 def _seconds_until_hhmm(now: float, hhmm: str) -> float:
+    """Seconds until the next HH:MM UTC."""
     hour, minute = _at_minutes(hhmm) // 60, _at_minutes(hhmm) % 60
-    stamp = time.localtime(now)
+    stamp = time.gmtime(now)
     if stamp.tm_hour == hour and stamp.tm_min == minute:
         return 0.0
-    target = time.mktime((stamp.tm_year, stamp.tm_mon, stamp.tm_mday, hour, minute, 0, 0, 0, -1))
+    target = calendar.timegm((stamp.tm_year, stamp.tm_mon, stamp.tm_mday, hour, minute, 0, 0, 0, 0))
     if target <= now:
-        nxt = time.localtime(now + 86_400)
-        target = time.mktime((nxt.tm_year, nxt.tm_mon, nxt.tm_mday, hour, minute, 0, 0, 0, -1))
+        target += 86_400
     return max(0.0, target - now)
 
 

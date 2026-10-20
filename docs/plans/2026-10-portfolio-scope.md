@@ -25,7 +25,7 @@ Read [the October plan](2026-10-improvement-plan.md) §0 first. Its ground rules
   - **Unlocking**: pending unlocks, at the asset price, with the date they free up.
 - **Flow**: money moved into or out of a Holding — deposit, withdrawal, a transfer between perps and spot, joining or leaving LLP, staking or unstaking. A Flow is not a gain. *Avoid: transfer (that is one kind of Flow), PnL.*
 - **Day change**: a Holding's value now, less its value at the day's open, less the net Flows into it since then. *Avoid: 24h change (that is the rolling one, below), return.*
-- **Day open**: local midnight by default. A `portfolio.day_start` knob takes `local` or `utc`. A toggle on the page also shows a rolling 24h.
+- **Day open**: 00:00 UTC (decided 2026-10-20: the desk never uses local time). A toggle on the page also shows a rolling 24h.
 
 ---
 

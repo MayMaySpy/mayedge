@@ -323,8 +323,8 @@ Money moved into or out of a Holding: a deposit, a withdrawal, a transfer betwee
 _Avoid_: transfer (one kind of Flow), PnL
 
 **Day open**:
-When the Portfolio's day starts: the viewer's local midnight, down to the hour.
-_Avoid_: 00:00 (unqualified), session open
+When the Portfolio's day starts: 00:00 UTC. The desk does not use local time.
+_Avoid_: local midnight, 00:00 (unqualified), session open
 
 **Day change**:
 A Holding's cumulative PnL now less at the Day open. Its value moved by that much plus its Flows.

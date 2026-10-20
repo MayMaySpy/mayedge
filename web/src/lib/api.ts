@@ -283,10 +283,10 @@ export interface PortfolioHistory {
   flows: { ts: number; kind: PortfolioKind; amount: string | null }[];
 }
 
+/** One UTC day (docs/portfolio-rules.md H6). */
 export interface PortfolioDay {
   day: string;
   start: number;
-  utc: boolean;
   kinds: Record<PortfolioKind, string | null>;
   total: string | null;
 }
@@ -822,10 +822,8 @@ export const api = {
     request<PortfolioNow>(`/portfolio?open=${open}${detail ? "" : "&detail=false"}`),
   portfolioHistory: (range: string) =>
     request<PortfolioHistory>(`/portfolio/history?range=${encodeURIComponent(range)}`),
-  portfolioDays: (range: string, tz: number) =>
-    request<{ range: string; tz: number; days: PortfolioDay[] }>(
-      `/portfolio/days?range=${encodeURIComponent(range)}&tz=${tz}`,
-    ),
+  portfolioDays: (range: string) =>
+    request<{ range: string; days: PortfolioDay[] }>(`/portfolio/days?range=${encodeURIComponent(range)}`),
   journalSync: () =>
     request<{ started: boolean; last_synced_at: number | null }>("/journal/sync", { method: "POST" }),
   accountFunding: (opts?: { market_index?: number | null; cursor?: string | null; limit?: number }) => {

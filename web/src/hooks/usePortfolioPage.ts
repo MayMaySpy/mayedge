@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type PortfolioDay, type PortfolioHistory, type PortfolioNow } from "@/lib/api";
-import { localMidnightMs } from "@/lib/portfolioDay";
+import { utcMidnightMs } from "@/lib/portfolioDay";
 import { notifyErr } from "@/lib/notify";
 
 export type PortfolioSpan = "today" | "24h";
@@ -9,7 +9,7 @@ export type PortfolioRange = "1d" | "7d" | "30d" | "90d" | "all";
 const REFRESH_MS = 60_000;
 
 function openFor(span: PortfolioSpan): number {
-  return span === "today" ? localMidnightMs() : Date.now() - 86_400_000;
+  return span === "today" ? utcMidnightMs() : Date.now() - 86_400_000;
 }
 
 /** Everything the /portfolio page shows. REST only (docs/portfolio-rules.md W1). */
@@ -48,9 +48,9 @@ export function usePortfolioPage() {
 
   useEffect(() => {
     let live = true;
-    // Days start at local midnight; a 1d range shows today's hours, so it takes 7 days of bars.
+    // Days are UTC days; a 1d range shows today's hours, so it takes 7 days of bars.
     const dayRange = range === "1d" ? "7d" : range;
-    Promise.all([api.portfolioHistory(range), api.portfolioDays(dayRange, new Date().getTimezoneOffset())])
+    Promise.all([api.portfolioHistory(range), api.portfolioDays(dayRange)])
       .then(([h, d]) => {
         if (!live) return;
         setHistory(h);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import json
 import logging
 import tempfile
@@ -131,10 +132,10 @@ def _algo(*rows: dict[str, object]) -> dict[str, object]:
     return {"type": "algo", "working": list(rows), "history": []}
 
 
-def _local_stamp(hour: int, minute: int, *, second: int = 30, day_offset: int = 0) -> float:
-    base = time.localtime(1_700_000_000)
-    return time.mktime(
-        (base.tm_year, base.tm_mon, base.tm_mday + day_offset, hour, minute, second, 0, 0, -1)
+def _utc_stamp(hour: int, minute: int, *, second: int = 30, day_offset: int = 0) -> float:
+    base = time.gmtime(1_700_000_000)
+    return float(
+        calendar.timegm((base.tm_year, base.tm_mon, base.tm_mday + day_offset, hour, minute, second, 0, 0, 0))
     )
 
 
@@ -235,7 +236,7 @@ class RouterTests(unittest.TestCase):
             return (1, 1.0, 0.0, 0.0)
 
         sink = Sink()
-        clock = ManualClock(_local_stamp(8, 0))
+        clock = ManualClock(_utc_stamp(8, 0))
         router = PushRouter(sink, PushSettings(), clock, journal=journal)
         router.poll()
         self.assertFalse(called)
@@ -249,7 +250,7 @@ class RouterTests(unittest.TestCase):
             return (9, 412.0, 38.0, -6.0)
 
         sink = Sink()
-        clock = ManualClock(_local_stamp(7, 59))
+        clock = ManualClock(_utc_stamp(7, 59))
         router = PushRouter(sink, PushSettings(daily_at="08:00"), clock, journal=journal)
         router.poll()
         self.assertEqual(sink.rows, [])
@@ -259,9 +260,9 @@ class RouterTests(unittest.TestCase):
         self.assertGreater(wait, 0)
         self.assertLess(wait, 120)
 
-        clock.t = _local_stamp(8, 0)
+        clock.t = _utc_stamp(8, 0)
         router.poll()
-        today = time.strftime("%Y-%m-%d", time.localtime(clock.t))
+        today = time.strftime("%Y-%m-%d", time.gmtime(clock.t))
         yesterday = time.strftime("%Y-%m-%d", time.gmtime(clock.t - 86_400))
         self.assertEqual(days, [yesterday])
         self.assertEqual(
@@ -281,7 +282,7 @@ class RouterTests(unittest.TestCase):
         router.poll()
         self.assertEqual(len(sink.rows), 1)
 
-        clock.t = _local_stamp(8, 0, day_offset=1)
+        clock.t = _utc_stamp(8, 0, day_offset=1)
         router.poll()
         self.assertEqual(len(sink.rows), 2)
         self.assertEqual(len(days), 2)
@@ -312,13 +313,13 @@ class RouterTests(unittest.TestCase):
 
         sink = Sink()
         router = PushRouter(
-            sink, PushSettings(daily_at="08:00"), ManualClock(_local_stamp(8, 0)), journal=journal, portfolio=portfolio
+            sink, PushSettings(daily_at="08:00"), ManualClock(_utc_stamp(8, 0)), journal=journal, portfolio=portfolio
         )
         router.poll()
         self.assertTrue(sink.rows[0][1].startswith("Yesterday: Portfolio +$412 (Perps +$380"))
         sink = Sink()
         router = PushRouter(
-            sink, PushSettings(daily_at="08:00"), ManualClock(_local_stamp(8, 0)), journal=journal, portfolio=broken
+            sink, PushSettings(daily_at="08:00"), ManualClock(_utc_stamp(8, 0)), journal=journal, portfolio=broken
         )
         with self.assertLogs("mayedge.push", level="WARNING"):
             router.poll()
@@ -329,7 +330,7 @@ class RouterTests(unittest.TestCase):
             raise RuntimeError("locked")
 
         sink = Sink()
-        clock = ManualClock(_local_stamp(8, 0))
+        clock = ManualClock(_utc_stamp(8, 0))
         router = PushRouter(sink, PushSettings(daily_at="08:00"), clock, journal=journal)
         with self.assertLogs("mayedge.push", level="WARNING") as logs:
             router.poll()
@@ -616,8 +617,8 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(sink.rows, [])
         clock.t += 60
         router.poll()
-        when = time.strftime("%H:%M", time.localtime(since))
-        self.assertEqual(sink.rows[-1][1], f"Lighter down since {when} (503)")
+        when = time.strftime("%H:%M", time.gmtime(since))
+        self.assertEqual(sink.rows[-1][1], f"Lighter down since {when} UTC (503)")
         clock.t = since + 360
         router.on_message(
             {

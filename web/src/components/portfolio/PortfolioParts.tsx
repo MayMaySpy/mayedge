@@ -118,12 +118,15 @@ export function AllocationBar({ now }: { now: PortfolioNow }) {
   );
 }
 
+/** Every time on the page is UTC, and says so (W2). */
 function when(ts: number, hourly: boolean): string {
-  return new Date(ts).toLocaleString(undefined, {
+  const text = new Date(ts).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
-    ...(hourly ? { hour: "2-digit", minute: "2-digit" } : {}),
+    timeZone: "UTC",
+    ...(hourly ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : {}),
   });
+  return hourly ? `${text} UTC` : text;
 }
 
 /** W4: each kind's value over time, the total, and where money moved in or out. */
@@ -250,7 +253,7 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Day</TableHead>
+            <TableHead>Day (UTC)</TableHead>
             {kinds.map((k) => (
               <TableHead key={k} className="text-right">
                 {PORTFOLIO_KIND_LABELS[k]}
@@ -261,11 +264,8 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
         </TableHeader>
         <TableBody>
           {rows.map((day) => (
-            <TableRow key={`${day.day}-${day.utc}`}>
-              <TableCell className="font-mono" title={day.utc ? "A UTC day: older than the venue's hourly history" : undefined}>
-                {day.day}
-                {day.utc ? <span className="text-muted-foreground"> UTC</span> : null}
-              </TableCell>
+            <TableRow key={day.day}>
+              <TableCell className="font-mono">{day.day}</TableCell>
               {kinds.map((k) => (
                 <TableCell key={k} className={cn("text-right font-mono tabular-nums", pnlClass(day.kinds[k]))}>
                   {money(day.kinds[k])}

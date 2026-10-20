@@ -200,7 +200,7 @@ export function JournalTrips({ journal }: { journal: JournalState }) {
         <TableRow>
           <TableHead>Market</TableHead>
           <TableHead>Side</TableHead>
-          <TableHead>Opened</TableHead>
+          <TableHead>Opened (UTC)</TableHead>
           <TableHead>Held</TableHead>
           <TableHead className="text-right">Size</TableHead>
           <TableHead className="text-right">Avg</TableHead>

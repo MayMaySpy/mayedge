@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from unittest import IsolatedAsyncioTestCase, TestCase
@@ -160,27 +161,28 @@ class HistoryTests(TestCase):
         before, after = out["points"][2], out["points"][3]
         self.assertEqual(int(after["perps"]) - int(before["perps"]), 501, "the deposit and an hour of PnL")
 
-    def test_days_start_at_local_midnight(self) -> None:
-        hourly = _series(HOUR_MS, OPENED, NOW, "pnl")
-        # CEST: UTC minus local is -120 minutes, so a local day starts at 22:00 UTC.
-        rows = days(hourly, [], since_ms=NOW - 3 * DAY_MS, now_ms=NOW, tz_min=-120)
-        self.assertTrue(all((row["start"] + 2 * HOUR_MS) % DAY_MS == 0 for row in rows))
-        self.assertFalse(any(row["utc"] for row in rows))
+    def test_days_are_utc_days(self) -> None:
+        daily = _series(DAY_MS, OPENED, NOW, "pnl")
+        hourly = _series(HOUR_MS, NOW - 2 * DAY_MS, NOW, "pnl")
+        rows = days(hourly, daily, since_ms=NOW - 3 * DAY_MS, now_ms=NOW)
+        self.assertTrue(all(row["start"] % DAY_MS == 0 for row in rows))
+        self.assertEqual([row["day"] for row in rows][-1], time.strftime("%Y-%m-%d", time.gmtime(NOW / 1000)))
         full = rows[-2]
         self.assertEqual(full["kinds"]["perps"], "24", "$1 an hour over a whole day; the deposit is not in it")
-        # Today runs from local midnight to the last bucket: 22:00 to 13:00 is 15 hours.
-        self.assertEqual(rows[-1]["kinds"]["perps"], "15")
+        # The deposit day's change leaves the $500 out.
+        deposit_day = next(row for row in days(hourly, daily, since_ms=OPENED, now_ms=NOW) if row["start"] == DEPOSIT_AT)
+        self.assertEqual(deposit_day["kinds"]["perps"], "24")
 
-    def test_days_before_the_hourly_horizon_are_utc_days(self) -> None:
-        now = OPENED + 120 * DAY_MS
-        hourly = _series(HOUR_MS, now - 90 * DAY_MS, now, "pnl")
-        daily = _series(DAY_MS, OPENED, now, "pnl")
-        rows = days(hourly, daily, since_ms=now - 100 * DAY_MS, now_ms=now, tz_min=0)
-        utc = [row for row in rows if row["utc"]]
-        self.assertTrue(utc)
-        self.assertTrue(all(row["start"] < now - 90 * DAY_MS for row in utc))
-        self.assertTrue(all(row["start"] % DAY_MS == 0 for row in utc))
-        self.assertEqual(utc[0]["kinds"]["perps"], "24")
+    def test_today_runs_from_utc_midnight_to_the_last_hourly_bucket(self) -> None:
+        daily = _series(DAY_MS, OPENED, NOW, "pnl")
+        hourly = _series(HOUR_MS, NOW - DAY_MS, NOW, "pnl")
+        today = days(hourly, daily, since_ms=NOW - DAY_MS, now_ms=NOW)[-1]
+        self.assertEqual(today["start"], NOW - NOW % DAY_MS)
+        # 00:00 to the 13:00 bucket is 13 hours.
+        self.assertEqual(today["kinds"]["perps"], "13")
+        # Before the daily bucket for today is stored, today opens on the hourly one at 00:00.
+        no_daily_today = [row for row in daily if row["timestamp"] * 1000 < NOW - NOW % DAY_MS]
+        self.assertEqual(days(hourly, no_daily_today, since_ms=NOW - DAY_MS, now_ms=NOW)[-1]["kinds"]["perps"], "13")
 
 
 class RouteTests(StoreCase):
@@ -201,8 +203,8 @@ class RouteTests(StoreCase):
                 self.assertEqual(
                     [(f["ts"], f["amount"]) for f in every["flows"]], [(OPENED, "1000"), (DEPOSIT_AT, "500")]
                 )
-                daily = (await client.get("/api/portfolio/days", params={"range": "7d", "tz": -120})).json()
-                self.assertEqual(daily["tz"], -120)
+                daily = (await client.get("/api/portfolio/days", params={"range": "7d"})).json()
+                self.assertNotIn("tz", daily)
                 self.assertTrue(daily["days"])
                 bad = await client.get("/api/portfolio/days", params={"range": "1d"})
                 self.assertEqual(bad.status_code, 400)

@@ -27,11 +27,11 @@ The first algo snapshot after boot only seeds the diff. A restart does not repla
 | Planner done | status moves to `done` | `Planner ETH long: done` | `algo:{id}:done` | no |
 | Trail entry, stop, target | `algos: lifecycle`, and `filled` rose. The kind is `entry`, `stop`, or `tp`. | `Trail ETH short: entry filled 1.5 @ 2,412.5` | `algo:{id}:entry` (or `:stop`, `:target`) | no |
 | Trail done | status moves to `done` | `Trail ETH short: done` | `algo:{id}:done` | no |
-| Venue down | `venue_down_since` has been set for `venue_down_after_s` | `Lighter down since 14:02 (503)` — local time, and the reason when there is one | `venue` | no |
+| Venue down | `venue_down_since` has been set for `venue_down_after_s` | `Lighter down since 14:02 UTC (503)` — UTC, and the reason when there is one | `venue` | no |
 | Venue back | the venue is up again after a down push. This one is not dropped by the down message's quiet window. | `Lighter back after 6m` | `venue` | no |
 | Account feed stale | `account_ws` is not `live` for `account_stale_after_s`, and a Position is open or an algo is `running` or `paused`. Once per outage; going live clears it. | `⚠️ Account feed stale 2m with 2 algos live — desk is blind` | `account_stale` | yes |
 | Desk started | after `desk.restore()` | `Desk up (mainnet) — 3 algos restored, 2 Positions open` | `boot` | no |
-| Yesterday's journal | local time is at or past `daily_at`, once that local date, including a start that missed the minute. The numbers are the UTC journal day 24 hours earlier, the same day key the journal uses. Closed Round trips only; partial and open stay out. Empty `daily_at` sends nothing. A failed read is logged and that local date is not tried again. **Portfolio part** (docs/portfolio-rules.md D1): when the desk has the venue's daily buckets stamped at both UTC midnights of that day, the line leads with the Portfolio's change that day and each kind that moved. Without both buckets, or if that read fails, the line goes out without it. | `Yesterday: Portfolio +$412 (Perps +$380, Spot +$40, Staking −$8) · Net +$380 over 9 Round trips, fees $38, funding −$6`. Without the Portfolio part: `Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6`. None closed: `Yesterday: no Round trips.` (or `… · no Round trips.` after the Portfolio part) | `journal:{local date}` | no |
+| Yesterday's journal | UTC time is at or past `daily_at`, once that UTC date, including a start that missed the minute. The numbers are the UTC journal day 24 hours earlier, the same day key the journal uses. Closed Round trips only; partial and open stay out. Empty `daily_at` sends nothing. A failed read is logged and that local date is not tried again. **Portfolio part** (docs/portfolio-rules.md D1): when the desk has the venue's daily buckets stamped at both UTC midnights of that day, the line leads with the Portfolio's change that day and each kind that moved. Without both buckets, or if that read fails, the line goes out without it. | `Yesterday: Portfolio +$412 (Perps +$380, Spot +$40, Staking −$8) · Net +$380 over 9 Round trips, fees $38, funding −$6`. Without the Portfolio part: `Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6`. None closed: `Yesterday: no Round trips.` (or `… · no Round trips.` after the Portfolio part) | `journal:{local date}` | no |
 | Send test | the Alerts panel, or `POST /api/push/test` | `Desk test push ✓` | `test:{time}` | yes |
 
 `algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, and TWAP send an error and nothing else.
@@ -50,7 +50,7 @@ Sizes use a unicode minus (`−2.0`). A loss in dollars does too (`−$812`). Pr
 | `account_stale_after_s` | 120 | how long the account feed stays quiet before the stale push |
 | `repeat_s` | 600 | the same key stays quiet this long. Urgent skips it. The venue-back push skips it too. |
 | `max_per_min` | 12 | past this many sends in a minute, non-urgent items wait and leave as one `N more: a; b` when the minute ends. Urgent still goes. |
-| `daily_at` | empty | local `HH:MM` for yesterday's journal. Empty is off. |
+| `daily_at` | empty | `HH:MM` UTC for yesterday's journal. Empty is off. |
 
 The worker also sends at most one message a second. An HTTP 429 waits `parameters.retry_after` and tries again; it is not one of the three failures. After eight 429s in a row it counts as a failure. Any other error waits 2s, then 4s, then 8s, then the message is dropped and one warning is logged. The warning does not include the exception or the request.
 

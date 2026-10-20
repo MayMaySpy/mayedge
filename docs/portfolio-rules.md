@@ -46,14 +46,14 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 
 - Value per kind, its history, and the Day change all come from the `pnl` endpoint (V1–V4). The desk does not rebuild any of them from prices, so double counting (A1, A2) cannot come in through the desk's own maths.
 - The account and pool reads add only what `pnl` lacks: quantities (ETH, staked LIT), share counts, APY, unlocks.
-- A **Day open** at local midnight uses `1h` buckets; at UTC midnight, `1d` works as well.
+- The **Day open** is UTC midnight, so every day is a venue `1d` bucket; today so far adds the `1h` buckets since 00:00 UTC.
 - The mismatch check in the scope becomes V3: if value less PnL drifts from net Flows by more than a dollar, a field changed meaning.
 
 ## Now (`GET /api/portfolio`)
 
 | | Rule | Pinned by |
 |---|---|---|
-| N1 | The **Day open** is a time the caller sends as `open` (ms). The page sends the viewer's local midnight. The desk rounds it down to the hour, because buckets are hourly (V5). Without `open`, it is today's UTC midnight. An `open` in the future, or more than 30 days back, is refused. | test_open_rounds_down_to_the_hour, test_open_out_of_range_is_refused |
+| N1 | The **Day open** is 00:00 UTC today. The desk never uses local time. A caller may send another start as `open` (ms): the page's **24h** sends 24 hours back. The desk rounds it down to the hour, because buckets are hourly (V5). An `open` in the future, or more than 30 days back, is refused. | test_open_rounds_down_to_the_hour, test_open_out_of_range_is_refused |
 | N2 | A kind's **value now** is the last bucket of the `ignore_transfers` series (V2, V5). Its **value at the open** is the bucket stamped at the open hour, or the latest one before it. With none before it, the account did not exist yet and the value at open is 0. | test_values_now_and_at_open |
 | N3 | A kind's **Day change** is its cumulative PnL now less at the open (V1, V4). Its **Flows** today are its net inflow now less at the open. | test_day_change_is_cumulative_pnl_now_less_at_open |
 | N4 | The Portfolio total is the sum of Perps, Spot, LLP and Staking. **Day change %** is the Day change ÷ (value at open + Flows today). With that base at 0 or below, there is no %. | test_day_change_pct_counts_todays_flows_in_the_base |
@@ -61,7 +61,7 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 | N6 | **Holding detail** adds quantities to the totals; it never changes them. Spot rows are the desk's live asset rows, USDC left out (A1). Staking and LLP rows are the account's shares: units behind a share = `shares_amount × pool units ÷ total_shares` (P4, P5). Staked LIT is valued at the live LIT index price. LLP is valued at the pool's `total_asset_value ÷ total_shares`. Pending unlocks are listed with their date (A4). | test_staking_row_from_the_share_and_the_pool, test_usdc_is_never_a_spot_row |
 | N7 | One answer reads at most two `pnl` series, the account, and one pool account per share held. Each read takes the shared budget's read lane. An answer is reused for 30s per Day open. | test_the_answer_is_reused_for_30s |
 | N8 | `detail=0` reads only the two `pnl` series: totals and kinds, no holding rows. A detailed answer from the last 30s serves a plain request too. | test_a_plain_answer_reads_only_the_pnl_series |
-| N9 | The desk header shows **Today**: the total Day change and its %, since the viewer's local midnight, from the plain answer (N8). It asks once a minute while the tab is visible, and again when the tab comes back. It shows nothing when trading is off, before the first answer, or when the last answer is more than 5 minutes old, so a stale figure is never shown as today's. Hovering lists each kind held with its Day change and value, the total, today's Flows when there are any, and each mismatch (N5). A mismatch also marks the figure with `!`. | `PortfolioToday` tests |
+| N9 | The desk header shows **Today**: the total Day change and its %, since 00:00 UTC, from the plain answer (N8). It asks once a minute while the tab is visible, and again when the tab comes back. It shows nothing when trading is off, before the first answer, or when the last answer is more than 5 minutes old, so a stale figure is never shown as today's. Hovering lists each kind held with its Day change and value, the total, today's Flows when there are any, and each mismatch (N5). A mismatch also marks the figure with `!`. | `PortfolioToday` tests |
 
 ## History
 
@@ -72,17 +72,17 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 | H3 | Once backfilled, a sync reads the last 3 hourly and the last 2 daily buckets in both modes. Syncs run 30s after boot, then every 5 minutes. Every read takes the background lane and waits for room. Nothing syncs when trading is off. | test_a_sync_after_the_backfill_reads_only_the_latest_buckets |
 | H4 | **Value history** (`GET /api/portfolio/history?range=1d|7d|30d|90d|all`) is each kind's value at every stored bucket, plus the total. `1d` and `7d` are hourly; `30d`, `90d` and `all` are daily, because the venue keeps hourly buckets for only about a week (H2). | test_history_is_hourly_for_a_week_and_daily_beyond |
 | H5 | A **Flow marker** is a bucket where a kind's cumulative net Flow moved by more than $1 since the bucket before. It carries the kind and the amount: positive in, negative out. The page draws it, so a deposit is never read as a gain. | test_a_flow_marker_is_a_move_in_net_flows |
-| H6 | **Daily change** (`GET /api/portfolio/days?range=7d|30d|90d|all&tz=<minutes>`) is each kind's Day change per day. `tz` is UTC minus local in minutes, as the browser's `getTimezoneOffset()` gives it, and days start at local midnight. Days inside the hourly horizon use hourly buckets. Days before it use the venue's daily buckets, which start at UTC midnight, and are marked `utc`. Today runs to the last stored bucket; the page adds the live Day change (N3) on top. | test_days_start_at_local_midnight, test_days_before_the_hourly_horizon_are_utc_days |
+| H6 | **Daily change** (`GET /api/portfolio/days?range=7d|30d|90d|all`) is each kind's Day change per **UTC day**, from one daily bucket to the next. Today runs from the bucket at 00:00 UTC (daily, or hourly while the daily one is not stored yet) to the last stored hourly bucket; the page shows the live Day change (N3) above it. A day missing either bucket is left out. | test_days_are_utc_days, test_today_runs_from_utc_midnight_to_the_last_hourly_bucket |
 
 ## Page (`/portfolio`)
 
 | | Rule | Pinned by |
 |---|---|---|
 | W1 | The page reads over REST only: the detailed answer (N7) once a minute while visible, the history (H4) and the days (H6) when the range changes. It opens no desk socket. The header's **Today** opens it in a new tab. | `PortfolioPage` tests |
-| W2 | It leads with the Portfolio total and its change since the Day open. **Today** means since local midnight (N1); **24h** sends an open 24 hours back, rounded down to the hour. Flows since the open are shown beside the change, never inside it. | `leads with the total…`, `switches to the last 24 hours` |
+| W2 | It leads with the Portfolio total and its change since the Day open. **Today** means since 00:00 UTC (N1); **24h** sends an open 24 hours back, rounded down to the hour. Flows since the open are shown beside the change, never inside it. Every time on the page is UTC and says so. | `leads with the total…`, `switches to the last 24 hours` |
 | W3 | **Allocation** is one bar of the kinds held now, in the fixed order Perps, Spot, LLP, Staking, each in its own hue, labelled with $ and %. The hues are fixed per kind (`PORTFOLIO_KIND_COLORS`), never re-sorted by size, and validated for color-blind separation on the desk's dark panel. Green and red are not among them: on this desk they mean gain and loss. | `portfolio kinds` |
 | W4 | **Value** draws one line per kind that held money at any point in the range, plus the total, on one axis that never goes below 0. Each Flow (H5) is an arrow on its kind's line: up in, down out. The readout above the chart lists every line's value at the hovered point, and the Flows there. | `charts a kind held earlier…` |
-| W5 | **Daily change** is a bar per day in gain and loss colors, with the running total, from H6. The table under it splits each day by kind and marks UTC days. Bars sit on the day's own date. | `charts a kind held earlier…` |
+| W5 | **Daily change** is a bar per day in gain and loss colors, with the running total, from H6. The table under it splits each day by kind. Days are UTC days (H6). | `charts a kind held earlier…` |
 | W6 | **Holdings**: Perps (value and change; trades are in the Journal), Spot rows (N6), Staking (LIT staked, LIT put in, value, APY) with pending unlocks, and LLP (shares, put in, value, APY). A kind not held says so. A mismatch (N5) is a warning above everything. | `lists what each Holding is made of`, `says so when value and PnL disagree` |
 
 ## Daily push

@@ -101,7 +101,7 @@ export function PortfolioPage() {
               </div>
             ) : null}
             <section className="panel flex flex-col gap-4 p-4">
-              <PortfolioHero now={now} spanLabel={page.span === "today" ? "Today, since local midnight" : "Last 24h"} />
+              <PortfolioHero now={now} spanLabel={page.span === "today" ? "Today, since 00:00 UTC" : "Last 24h"} />
               <AllocationBar now={now} />
             </section>
           </>

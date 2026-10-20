@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type PortfolioNow } from "@/lib/api";
-import { localMidnightMs } from "@/lib/portfolioDay";
+import { utcMidnightMs } from "@/lib/portfolioDay";
 
 const POLL_MS = 60_000;
 /** Older than this, the header shows nothing rather than a stale figure. */
@@ -17,7 +17,7 @@ export function usePortfolioToday(enabled: boolean): PortfolioNow | null {
     const load = () => {
       if (document.visibilityState === "hidden") return;
       api
-        .portfolio(localMidnightMs(), false)
+        .portfolio(utcMidnightMs(), false)
         .then((data) => {
           if (live) setLast({ at: Date.now(), data });
         })

@@ -6,7 +6,7 @@ import { PORTFOLIO_PATH } from "@/lib/deskRoute";
 import { heldKinds, PORTFOLIO_KIND_LABELS } from "@/lib/portfolioDay";
 import { cn } from "@/lib/utils";
 
-/** Header: the Portfolio's Day change since local midnight (docs/portfolio-rules.md N9). */
+/** Header: the Portfolio's Day change since 00:00 UTC (docs/portfolio-rules.md N9). */
 export function PortfolioToday({ enabled }: { enabled: boolean }) {
   const today = usePortfolioToday(enabled);
   if (!today) return null;
@@ -38,7 +38,7 @@ export function PortfolioToday({ enabled }: { enabled: boolean }) {
       </TooltipTrigger>
       <TooltipContent className="font-mono tabular-nums">
         <div className="grid grid-cols-[auto_auto_auto] gap-x-3 gap-y-0.5">
-          <span className="text-muted-foreground">Since local midnight</span>
+          <span className="text-muted-foreground">Since 00:00 UTC</span>
           <span className="text-right text-muted-foreground">Today</span>
           <span className="text-right text-muted-foreground">Value</span>
           {shown.map((k) => (

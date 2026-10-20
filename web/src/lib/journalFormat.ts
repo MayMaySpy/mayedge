@@ -30,12 +30,15 @@ export function seconds(ts: number): number {
   return ts > 1e12 ? ts / 1000 : ts;
 }
 
+/** A trip or fill time, in UTC: the desk never uses local time. Column headers say UTC. */
 export function when(ts: number): string {
   return new Date(seconds(ts) * 1000).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
   });
 }
 

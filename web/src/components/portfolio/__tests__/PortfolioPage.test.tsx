@@ -78,16 +78,14 @@ beforeEach(() => {
   vi.spyOn(api, "portfolioHistory").mockResolvedValue(HISTORY);
   vi.spyOn(api, "portfolioDays").mockResolvedValue({
     range: "30d",
-    tz: -120,
     days: [
       {
         day: "2026-10-19",
         start: 1,
-        utc: false,
         kinds: { perps: "6.54", spot: "15.91", llp: "0", staking: "139.35" },
         total: "161.80",
       },
-      { day: "2026-10-10", start: 0, utc: true, kinds: { perps: "1", spot: "2", llp: "0", staking: "3" }, total: "6" },
+      { day: "2026-10-10", start: 0, kinds: { perps: "1", spot: "2", llp: "0", staking: "3" }, total: "6" },
     ],
   });
 });
@@ -98,17 +96,15 @@ afterEach(() => {
 });
 
 describe("PortfolioPage", () => {
-  it("leads with the total and today's change since local midnight", async () => {
+  it("leads with the total and today's change since 00:00 UTC", async () => {
     render(<PortfolioPage />);
     expect(await screen.findByText("$5,681.19")).toBeTruthy();
     expect(screen.getByText("+187.88")).toBeTruthy();
-    expect(screen.getByText("Today, since local midnight")).toBeTruthy();
+    expect(screen.getByText("Today, since 00:00 UTC")).toBeTruthy();
     const [open, detail] = vi.mocked(api.portfolio).mock.calls[0];
-    const midnight = new Date();
-    midnight.setHours(0, 0, 0, 0);
-    expect(open).toBe(midnight.getTime());
+    expect(open).toBe(Date.now() - (Date.now() % 86_400_000));
     expect(detail).toBeUndefined();
-    expect(vi.mocked(api.portfolioDays).mock.calls[0][1]).toBe(new Date().getTimezoneOffset());
+    expect(vi.mocked(api.portfolioDays).mock.calls[0]).toEqual(["30d"]);
   });
 
   it("switches to the last 24 hours", async () => {
@@ -127,7 +123,7 @@ describe("PortfolioPage", () => {
     const days = screen.getByText("2026-10-19").closest("table") as HTMLElement;
     expect(within(days).getByText("LLP")).toBeTruthy();
     expect(markers).toHaveBeenCalledTimes(2);
-    expect(within(days).getByText("UTC")).toBeTruthy();
+    expect(within(days).getByText("Day (UTC)")).toBeTruthy();
   });
 
   it("lists what each Holding is made of", async () => {
