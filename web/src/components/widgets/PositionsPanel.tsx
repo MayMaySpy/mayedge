@@ -39,7 +39,8 @@ import {
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatPctAbs, formatSigned, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 
 const TradeHistoryTab = lazy(() =>
   import("@/components/widgets/account/TradeHistoryTab").then((m) => ({
@@ -609,9 +610,9 @@ export function PositionsPanel({
                         <TableCell className="text-right tabular-nums">
                           {formatUsdNotional(notional) || "—"}
                         </TableCell>
-                        <TableCell className="text-right">{formatPrice(p.entry_price)}</TableCell>
+                        <TableCell className="text-right">{marketPrice(p.entry_price, p.symbol)}</TableCell>
                         <TableCell className="text-right">
-                          {liq > 0 ? formatPrice(p.liquidation_price) : "—"}
+                          {liq > 0 ? marketPrice(p.liquidation_price, p.symbol) : "—"}
                           {cushion != null && (
                             <span
                               className={cn(
@@ -833,10 +834,11 @@ export function PositionsPanel({
                         {o.side}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatPrice(
+                        {marketPrice(
                           sltp && parseFloat(o.trigger_price ?? "") > 0
                             ? o.trigger_price
-                            : o.price
+                            : o.price,
+                          o.symbol
                         )}
                       </TableCell>
                       <TableCell className="relative text-right">

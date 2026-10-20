@@ -14,7 +14,8 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api, type AccountTrade, type Market } from "@/lib/api";
 import { useLiveAccountTrades } from "@/lib/liveData";
-import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatSigned, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
 
 function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[] {
@@ -205,7 +206,7 @@ export function TradeHistoryTab({
                       {t.side}
                     </TableCell>
                     <TableCell className="text-right">{formatSize(t.size)}</TableCell>
-                    <TableCell className="text-right">{formatPrice(t.price)}</TableCell>
+                    <TableCell className="text-right">{marketPrice(t.price, t.symbol)}</TableCell>
                     <TableCell className={cn("text-right", pnlClass(-fee))}>
                       {formatSigned(-fee)}
                     </TableCell>

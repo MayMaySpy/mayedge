@@ -306,9 +306,9 @@ export function Header({
 
   const markTitle =
     mark != null && spot != null
-      ? `Mark ${formatPrice(mark)} vs book mid ${formatPrice(spot)}`
+      ? `Mark ${formatPrice(mark, current?.price_decimals)} vs book mid ${formatPrice(spot, current?.price_decimals)}`
       : mark != null
-        ? `Mark ${formatPrice(mark)}`
+        ? `Mark ${formatPrice(mark, current?.price_decimals)}`
         : undefined;
   const fundingTitle = fundingTooltip(fundingRate, fundingApr, fundingAverage);
 
@@ -381,7 +381,7 @@ export function Header({
         <div className="flex min-w-0 items-center justify-center gap-3 overflow-x-auto">
           <HeaderStat
             label="Mark"
-            value={mark != null ? formatPrice(mark) : "—"}
+            value={mark != null ? formatPrice(mark, current?.price_decimals) : "—"}
             hint={distPct != null ? formatPct(distPct) : undefined}
             hintClass={distClass}
             title={markTitle}

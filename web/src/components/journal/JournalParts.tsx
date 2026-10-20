@@ -19,13 +19,13 @@ import {
   money,
   pct,
   pnlClass,
-  price,
   ratio,
   rValue,
   size,
   when,
   type JournalRange,
 } from "@/lib/journalFormat";
+import { marketPrice } from "@/lib/marketFormat";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -252,8 +252,8 @@ function TripRows({
         <TableCell className="font-mono">{heldFor(trip.open_ts, trip.close_ts)}</TableCell>
         <TableCell className="text-right font-mono tabular-nums">{size(trip.size)}</TableCell>
         <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
-          {price(trip.avg_in)}
-          {trip.avg_out ? ` → ${price(trip.avg_out)}` : ""}
+          {marketPrice(trip.avg_in, trip.symbol)}
+          {trip.avg_out ? ` → ${marketPrice(trip.avg_out, trip.symbol)}` : ""}
         </TableCell>
         <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(net))}>{money(net)}</TableCell>
         <TableCell className={cn("text-right font-mono tabular-nums", trip.r ? pnlClass(trip.r) : undefined)}>
@@ -281,7 +281,7 @@ function TripRows({
               <TableCell className="whitespace-nowrap font-mono">{when(fill.ts)}</TableCell>
               <TableCell>{fill.is_maker ? "maker" : "taker"}</TableCell>
               <TableCell className="text-right font-mono tabular-nums">{size(fill.size)}</TableCell>
-              <TableCell className="text-right font-mono tabular-nums">{price(fill.price)}</TableCell>
+              <TableCell className="text-right font-mono tabular-nums">{marketPrice(fill.price, trip.symbol)}</TableCell>
               <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(fill.pnl))}>
                 {money(fill.pnl)}
               </TableCell>

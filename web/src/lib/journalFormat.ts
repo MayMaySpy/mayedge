@@ -1,5 +1,5 @@
 import type { JournalTrip } from "@/lib/api";
-import { formatSigned } from "@/lib/utils";
+import { formatPrice, formatSigned } from "@/lib/utils";
 
 /** Journal numbers come as full-precision decimal strings. These cut them to what a person reads. */
 
@@ -92,17 +92,7 @@ export function rValue(value: string | null | undefined): string {
 
 /** A price to about six significant digits: 3.17684, 2,412.18, 0.0000123456. */
 export function price(value: string | null | undefined): string {
-  const n = num(value);
-  if (n == null) return "—";
-  const abs = Math.abs(n);
-  // Above 1, digits before the point eat into the six. Below 1, leading zeros do not.
-  const decimals =
-    abs >= 1
-      ? Math.max(2, 6 - (Math.floor(Math.log10(abs)) + 1))
-      : abs > 0
-        ? Math.min(10, 5 - Math.floor(Math.log10(abs)))
-        : 2;
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: decimals });
+  return num(value) == null ? "—" : formatPrice(value);
 }
 
 /** A size, trailing zeros dropped, at most six decimals. */

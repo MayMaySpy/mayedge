@@ -45,9 +45,9 @@ import { cn, formatPrice, formatSize } from "@/lib/utils";
 
 const PREVIEW_DEBOUNCE_MS = 250;
 
-function trailedBy(t: PlannerTargetPlan): string {
+function trailedBy(t: PlannerTargetPlan, priceDecimals: number): string {
   const d = t.trail_distance ?? "";
-  return t.trail_kind === "pct" ? `${d}%` : formatPrice(d);
+  return t.trail_kind === "pct" ? `${d}%` : formatPrice(d, priceDecimals);
 }
 
 function entryTrailLine(form: PlannerForm, symbol: string): string {
@@ -737,17 +737,17 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
                         : "Entry"
               }
             >
-              {formatPrice(plan.entry)}
+              {formatPrice(plan.entry, market.price_decimals)}
             </Row>
             {mode === "enter" && plan.rungs && plan.rungs.length > 0 && (
               <Row label={`Rungs · ${plan.rungs.length}`}>
-                {formatPrice(plan.rungs[0].price)} → {formatPrice(plan.rungs[plan.rungs.length - 1].price)}
+                {formatPrice(plan.rungs[0].price, market.price_decimals)} → {formatPrice(plan.rungs[plan.rungs.length - 1].price, market.price_decimals)}
               </Row>
             )}
             <Row label="Stop" tone="ask">
-              {formatPrice(plan.stop)} ({signedPct(plan.stop_pct)}) · {signedUsd(-parseFloat(plan.risk_usd))}
+              {formatPrice(plan.stop, market.price_decimals)} ({signedPct(plan.stop_pct)}) · {signedUsd(-parseFloat(plan.risk_usd))}
             </Row>
-            <Row label="R">{formatPrice(plan.r)}</Row>
+            <Row label="R">{formatPrice(plan.r, market.price_decimals)}</Row>
             <Row label="Size">
               {formatSize(plan.size)} {market.symbol}
             </Row>
@@ -758,10 +758,10 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
             {plan.targets.map((t) => (
               <Row
                 key={t.index}
-                label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}% · ${t.order === "trail" ? `trail ${trailedBy(t)}` : t.order === "trigger" ? "trigger" : "limit"}`}
+                label={`TP${t.index} · ${Number(parseFloat(t.pct).toFixed(2))}% · ${t.order === "trail" ? `trail ${trailedBy(t, market.price_decimals)}` : t.order === "trigger" ? "trigger" : "limit"}`}
                 tone="bid"
               >
-                {formatPrice(t.price)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}
+                {formatPrice(t.price, market.price_decimals)} ({signedPct(t.move_pct)}, {rLabel(t.r)}) · {formatSize(t.qty)}
                 {t.usd != null ? ` · ${signedUsd(parseFloat(t.usd))}` : ""}
               </Row>
             ))}
@@ -775,7 +775,7 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
               const gap = step.to === "breakeven" ? null : stepGapPct(plan, step.after, step.price);
               return (
                 <Row key={step.after} label={`At TP${step.after}, stop to`}>
-                  {formatPrice(step.price)} ({stepTargetLabel(step.to)}
+                  {formatPrice(step.price, market.price_decimals)} ({stepTargetLabel(step.to)}
                   {gap ? `, ${gap} from TP${step.after}` : ""})
                 </Row>
               );

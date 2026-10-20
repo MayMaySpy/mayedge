@@ -14,7 +14,8 @@ import {
   rLabel,
   signedPct,
 } from "@/lib/plannerPlan";
-import { cn, formatPrice, formatSize } from "@/lib/utils";
+import { cn, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 
 /** One Planner: its plan, what is on the venue, and why it waits. */
 export function PlannerRow({
@@ -84,8 +85,8 @@ export function PlannerRow({
           {plan ? (
             <>
               <span className="text-text">{formatSize(rt?.expected_size || plan.size)}</span>
-              <span> @ {formatPrice(plan.entry)}</span>
-              <span className="ml-2">R {formatPrice(plan.r)}</span>
+              <span> @ {marketPrice(plan.entry, algo.symbol)}</span>
+              <span className="ml-2">R {marketPrice(plan.r, algo.symbol)}</span>
               <span className="ml-2">risk ${Number(parseFloat(plan.risk_usd).toFixed(2))}</span>
               <span className="ml-2">
                 TP {done}/{targets.length}
@@ -143,11 +144,11 @@ export function PlannerRow({
 
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-xs text-muted-foreground">
         <span>
-          {stopLabel(algo)} <span className="text-ask">{formatPrice(stop)}</span>
+          {stopLabel(algo)} <span className="text-ask">{marketPrice(stop, algo.symbol)}</span>
         </span>
         {targets.map((t) => (
           <span key={t.index}>
-            TP{t.index} <span className="text-bid">{formatPrice(t.price)}</span>{" "}
+            TP{t.index} <span className="text-bid">{marketPrice(t.price, algo.symbol)}</span>{" "}
             <span>
               ({signedPct(t.move_pct, 1)}, {rLabel(t.r)})
             </span>
@@ -177,7 +178,7 @@ export function PlannerRow({
                 {plannerClipLabel(algo, c.client_order_index) ?? "clip"}
               </span>
               <span className="text-muted-foreground">
-                {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {formatPrice(c.price)}
+                {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {marketPrice(c.price, algo.symbol)}
               </span>
             </div>
           ))}
@@ -185,7 +186,7 @@ export function PlannerRow({
             <div key={`f-${f.seq}`} className="flex items-baseline gap-2 font-mono text-xs">
               <span className="text-text">fill</span>
               <span className="text-text">
-                {formatSize(f.qty)} @ {formatPrice(f.price)}
+                {formatSize(f.qty)} @ {marketPrice(f.price, algo.symbol)}
               </span>
             </div>
           ))}

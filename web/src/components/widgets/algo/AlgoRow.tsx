@@ -15,7 +15,8 @@ import {
   algoReasonLabel,
 } from "@/lib/algos";
 import type { AlgoClip, AlgoFill, AlgoState } from "@/lib/api";
-import { cn, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatSigned, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
 
 function pnlClass(value: number) {
@@ -49,7 +50,7 @@ function statusLine(algo: AlgoState): string | null {
   if (algo.status === "stopped") return "Stopped";
   if (algo.status === "paused") return "Paused — clips pulled";
   if (phase.key === "active") {
-    return `${formatSize(algo.rest_qty)} @ ${formatPrice(algo.rest_price)}`;
+    return `${formatSize(algo.rest_qty)} @ ${marketPrice(algo.rest_price, algo.symbol)}`;
   }
   if (phase.key === "wait") {
     return algoReasonLabel(algo.reason) || "Waiting";
@@ -162,7 +163,7 @@ export function AlgoRow({
           <span className="ml-2 text-xs text-muted-foreground">filled {formatSize(filled)}</span>
           {avgFill != null && (
             <span className="ml-2 text-xs text-muted-foreground" title="Volume-weighted average fill">
-              avg <span className="text-text">{formatPrice(avgFill)}</span>
+              avg <span className="text-text">{marketPrice(avgFill, algo.symbol)}</span>
             </span>
           )}
           {capturedPnl != null && (
@@ -246,10 +247,10 @@ export function AlgoRow({
           </span>
         )}
         <span>
-          Floor <span className="text-text">{formatPrice(algo.price_floor)}</span>
+          Floor <span className="text-text">{marketPrice(algo.price_floor, algo.symbol)}</span>
         </span>
         <span>
-          Cap <span className="text-text">{formatPrice(algo.price_ceiling)}</span>
+          Cap <span className="text-text">{marketPrice(algo.price_ceiling, algo.symbol)}</span>
         </span>
         {algo.algo_id && (
           <button
@@ -282,7 +283,7 @@ export function AlgoRow({
                 <div key={lot.lot_id} className="flex gap-2">
                   <span className="text-text">tp</span>
                   <span>
-                    {formatSize(lot.qty)} @ {formatPrice(lot.tp_price)}
+                    {formatSize(lot.qty)} @ {marketPrice(lot.tp_price, algo.symbol)}
                     {lot.merged ? " · merged" : ""}
                   </span>
                 </div>
@@ -293,7 +294,7 @@ export function AlgoRow({
             <div className="flex items-baseline gap-2 font-mono text-xs">
               <span className="text-bid">bid</span>
               <span className="text-muted-foreground">
-                {formatSize(liveBid.remaining)} @ {formatPrice(liveBid.price)}
+                {formatSize(liveBid.remaining)} @ {marketPrice(liveBid.price, algo.symbol)}
               </span>
             </div>
           )}
@@ -301,7 +302,7 @@ export function AlgoRow({
             <div className="flex items-baseline gap-2 font-mono text-xs">
               <span className="text-ask">ask</span>
               <span className="text-muted-foreground">
-                {formatSize(liveAsk.remaining)} @ {formatPrice(liveAsk.price)}
+                {formatSize(liveAsk.remaining)} @ {marketPrice(liveAsk.price, algo.symbol)}
               </span>
             </div>
           )}
@@ -309,7 +310,7 @@ export function AlgoRow({
             <div key={clip.seq} className="flex items-baseline gap-2 font-mono text-xs">
               <span className={clip.side === "buy" ? "text-bid" : "text-ask"}>profit</span>
               <span className="text-muted-foreground">
-                {formatSize(clip.remaining)} @ {formatPrice(clip.price)}
+                {formatSize(clip.remaining)} @ {marketPrice(clip.price, algo.symbol)}
               </span>
             </div>
           ))}
@@ -318,7 +319,7 @@ export function AlgoRow({
               <span className={buy ? "text-bid" : "text-ask"}>live</span>
               <span className="text-text">{venueRef(live)}</span>
               <span className="text-muted-foreground">
-                {formatSize(live.remaining)} @ {formatPrice(live.price)}
+                {formatSize(live.remaining)} @ {marketPrice(live.price, algo.symbol)}
               </span>
               <span className="ml-auto text-muted-foreground" title="Placed, UTC">{utcClock(live.placed_at)}</span>
             </div>
@@ -331,7 +332,7 @@ export function AlgoRow({
               <span className="text-text">fill</span>
               <span className="text-muted-foreground">{venueRef(f)}</span>
               <span className="text-text">
-                {formatSize(f.qty)} @ {formatPrice(f.price)}
+                {formatSize(f.qty)} @ {marketPrice(f.price, algo.symbol)}
               </span>
               <span className="ml-auto text-muted-foreground" title="Filled, UTC">{utcClock(f.ts)}</span>
             </div>

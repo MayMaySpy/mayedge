@@ -17,7 +17,8 @@ import {
 import { isSignificantLiq, liqUsd } from "@/lib/liqs";
 import { useLiveLiquidations, type LiquidationEvent } from "@/lib/liveData";
 import { liqIdentity, pairLabel } from "@/lib/venuePair";
-import { cn, formatPrice, formatSize } from "@/lib/utils";
+import { cn, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
 
 const MIN_USD_KEY = "mayedge-liqs-min-usd";
@@ -193,7 +194,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                         <span className="ml-1 text-xs">×{l.fill_count}</span>
                       ) : null}
                     </TableCell>
-                    <TableCell className="text-right">{formatPrice(l.price)}</TableCell>
+                    <TableCell className="text-right">{marketPrice(l.price, l.symbol)}</TableCell>
                     <TableCell
                       className={cn(
                         "text-right",

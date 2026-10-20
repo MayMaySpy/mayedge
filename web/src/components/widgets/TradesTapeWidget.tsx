@@ -9,7 +9,14 @@ import { useLiveTrades } from "@/lib/liveData";
 
 const TAPE_ROWS = 48;
 
-export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { onClose?: () => void }) {
+export const TradesTapeWidget = memo(function TradesTapeWidget({
+  priceDecimals,
+  onClose,
+}: {
+  /** The market's tick; the tape holds only the selected market's prints. */
+  priceDecimals?: number;
+  onClose?: () => void;
+}) {
   const trades = useLiveTrades();
   const rows = trades.length > TAPE_ROWS ? trades.slice(0, TAPE_ROWS) : trades;
 
@@ -39,7 +46,7 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({ onClose }: { on
                 className="grid grid-cols-[1fr_1fr_auto_3.25rem] items-baseline px-2 py-0.5 font-mono text-base"
               >
                 <span className={t.side === "buy" ? "text-bid" : "text-ask"}>
-                  {formatPrice(t.price)}
+                  {formatPrice(t.price, priceDecimals)}
                 </span>
                 <span className="text-muted-foreground">{formatSize(t.size)}</span>
                 <span className="text-right text-muted-foreground">{utcClock(t.timestamp)}</span>

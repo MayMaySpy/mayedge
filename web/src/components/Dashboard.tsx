@@ -59,6 +59,7 @@ import {
   type PanelId,
 } from "@/lib/panels";
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
+import { setMarketDecimals } from "@/lib/marketFormat";
 import { formatSize } from "@/lib/utils";
 
 const PlannerDialog = lazy(() =>
@@ -480,10 +481,12 @@ export function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  const markets = useMemo(
-    () => mergeMarkets(ws.markets, restMarkets),
-    [ws.markets, restMarkets]
-  );
+  const markets = useMemo(() => {
+    const merged = mergeMarkets(ws.markets, restMarkets);
+    // Before any child formats a price this render, so it reads this list's ticks.
+    setMarketDecimals(merged);
+    return merged;
+  }, [ws.markets, restMarkets]);
 
   useDeskWatchBridge({ markets, symbol, onSymbol: setSymbol });
 
@@ -750,7 +753,7 @@ export function Dashboard() {
             {visible.tape !== false && (
               <div key="tape" className="h-full">
                 <WidgetShell>
-                  <TradesTapeWidget onClose={panelClose("tape")} />
+                  <TradesTapeWidget priceDecimals={market?.price_decimals} onClose={panelClose("tape")} />
                 </WidgetShell>
               </div>
             )}

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { JournalChart } from "@/components/widgets/account/JournalChart";
 import {
@@ -10,13 +10,24 @@ import {
 import { PageNav } from "@/components/PageNav";
 import { Button } from "@/components/ui/button";
 import { useJournal } from "@/hooks/useJournal";
+import { api } from "@/lib/api";
+import { setMarketDecimals } from "@/lib/marketFormat";
 
 /** The Journal on its own page, at /journal. REST only: it holds no desk socket. */
 export function JournalPage() {
   const journal = useJournal({ active: true, breakdowns: true });
 
+  // Prices show at each market's tick. The desk serves the list from memory.
+  const [, setTicks] = useState(0);
   useEffect(() => {
     document.title = "Journal";
+    api
+      .markets()
+      .then((markets) => {
+        setMarketDecimals(markets);
+        setTicks((n) => n + 1);
+      })
+      .catch(() => {});
   }, []);
 
   return (

@@ -5,23 +5,35 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatPrice(value: string | number | null | undefined, decimals = 4): string {
+/**
+ * A price. With `decimals` (a market's tick) it shows exactly that many: 0.004813, 82,759.4.
+ * Without, about six significant digits: 3.17684, 2,412.18, 0.0000123456.
+ */
+export function formatPrice(value: string | number | null | undefined, decimals?: number): string {
   if (value == null || value === "") return "—";
   const n = typeof value === "string" ? parseFloat(value) : value;
   if (Number.isNaN(n)) return String(value);
-  const max = Math.max(0, Math.min(20, Math.floor(Number.isFinite(decimals) ? decimals : 4)));
-  const min = Math.min(2, max);
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: min,
-    maximumFractionDigits: max,
-  });
+  if (decimals != null && Number.isFinite(decimals)) {
+    const fixed = Math.max(0, Math.min(20, Math.floor(decimals)));
+    return n.toLocaleString(undefined, { minimumFractionDigits: fixed, maximumFractionDigits: fixed });
+  }
+  const abs = Math.abs(n);
+  // Above 1, digits before the point eat into the six. Below 1, leading zeros do not.
+  const max =
+    abs >= 1
+      ? Math.max(2, 6 - (Math.floor(Math.log10(abs)) + 1))
+      : abs > 0
+        ? Math.min(10, 5 - Math.floor(Math.log10(abs)))
+        : 2;
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: max });
 }
 
-export function formatSize(value: string | number | null | undefined): string {
+/** A size to at most `decimals` (a market's lot decimals), trailing zeros dropped. */
+export function formatSize(value: string | number | null | undefined, decimals = 6): string {
   if (value == null || value === "") return "—";
   const n = typeof value === "string" ? parseFloat(value) : value;
   if (Number.isNaN(n)) return String(value);
-  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return n.toLocaleString(undefined, { maximumFractionDigits: Math.max(0, Math.min(20, Math.floor(decimals))) });
 }
 
 export function formatUsdCompact(value: number | null | undefined): string {

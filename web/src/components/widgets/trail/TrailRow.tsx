@@ -16,7 +16,8 @@ import {
   trailPhase,
   trailReferenceLabel,
 } from "@/lib/trail";
-import { cn, formatPrice, formatSize } from "@/lib/utils";
+import { cn, formatSize } from "@/lib/utils";
+import { marketPrice } from "@/lib/marketFormat";
 
 function agoLabel(ms: number | null | undefined): string | null {
   if (!ms) return null;
@@ -121,15 +122,15 @@ export function TrailRow({
           <span className="text-text">
             {trailDistanceLabel(rt?.distance, rt?.distance_kind)} {trailReferenceLabel(rt?.reference)}
           </span>
-          {!rt?.active && rt?.activation ? <span>starts at {formatPrice(rt.activation)}</span> : null}
+          {!rt?.active && rt?.activation ? <span>starts at {marketPrice(rt.activation, algo.symbol)}</span> : null}
           {trigger ? (
             <span>
               {kind === "entry" ? "fires" : "stop"}{" "}
-              <span className={kind === "entry" ? "text-text" : "text-ask"}>{formatPrice(trigger)}</span>
+              <span className={kind === "entry" ? "text-text" : "text-ask"}>{marketPrice(trigger, algo.symbol)}</span>
             </span>
           ) : null}
-          {rt?.best ? <span>best {formatPrice(rt.best)}</span> : null}
-          {rt?.venue_trigger && rt.backstop ? <span>backstop {formatPrice(rt.venue_trigger)}</span> : null}
+          {rt?.best ? <span>best {marketPrice(rt.best, algo.symbol)}</span> : null}
+          {rt?.venue_trigger && rt.backstop ? <span>backstop {marketPrice(rt.venue_trigger, algo.symbol)}</span> : null}
           {moved && kind !== "entry" ? <span>moved {moved}</span> : null}
         </div>
         {tradingEnabled && working && (
@@ -158,7 +159,7 @@ export function TrailRow({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onSelect={() => onStop(true)}>
-                      Keep stop: leave a Stop Ticket at {formatPrice(trigger)}
+                      Keep stop: leave a Stop Ticket at {marketPrice(trigger, algo.symbol)}
                     </DropdownMenuItem>
                     <DropdownMenuItem variant="destructive" onSelect={() => onStop(false)}>
                       Cancel stop: the Position is left with no stop
@@ -205,13 +206,13 @@ export function TrailRow({
                     : "Stop"}
               </span>
               <span className="text-muted-foreground">
-                {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {formatPrice(c.price)}
+                {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {marketPrice(c.price, algo.symbol)}
               </span>
             </div>
           ))}
           {(algo.fills ?? []).map((f) => (
             <div key={`f-${f.seq}`} className="flex items-baseline gap-2 text-text">
-              fill {formatSize(f.qty)} @ {formatPrice(f.price)}
+              fill {formatSize(f.qty)} @ {marketPrice(f.price, algo.symbol)}
             </div>
           ))}
           <div className="text-muted-foreground">
