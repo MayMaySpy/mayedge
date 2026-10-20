@@ -48,6 +48,8 @@ rows:
   # A state that has not fired for this long starts afresh.
   quiet_s: 180
   max_new_per_min: 6
+  # How long alert rows are kept. Outcomes stay on outcomes.retention_days.
+  log_retention_days: 90
 
 activity:
   # A quieter day is sized as if it ranged this many percent.

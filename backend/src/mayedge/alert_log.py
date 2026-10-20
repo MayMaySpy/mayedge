@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
@@ -18,6 +19,27 @@ from mayedge.lighter.models import Candle
 
 _BAR_S = 60
 _DAY_MS = 86_400_000
+GROUP_BY = ("rule", "rule_severity", "rule_direction", "held", "hour", "symbol")
+
+# knob → fact kind, stored field, which way is tighter.
+# A looser knob would have raised rows that were never written, so it is not replayed.
+KNOBS: dict[str, tuple[str, str, str]] = {
+    "spike.price_x": ("move", "multiple", "higher"),
+    "spike.min_move_pct": ("move", "abs_value", "higher"),
+    "spike.volume_x": ("volume", "multiple", "higher"),
+    "spike.min_volume_usd": ("volume", "value", "higher"),
+    "spike.oi_x": ("oi", "multiple", "higher"),
+    "spike.min_oi_usd": ("oi", "abs_usd", "higher"),
+    "spike.min_oi_pct": ("oi", "abs_value", "higher"),
+    "liquidations.min_usd": ("liqs", "value", "higher"),
+    "liquidations.oi_bps": ("liqs", "bps", "higher"),
+    "held.liq_distance_pct": ("near_liq", "value", "lower"),
+    "board.median_pct": ("board", "abs_value", "higher"),
+}
+
+
+class UnknownKnob(ValueError):
+    """The what-if was asked for a knob the record does not know how to replay."""
 
 
 @dataclass(frozen=True)
@@ -209,10 +231,13 @@ class AlertLog:
         *,
         horizon_min: int = 15,
         retention_days: int = 30,
+        log_retention_days: int | None = None,
         store: LogStore | None = None,
     ) -> None:
         self._horizon_s = max(1, horizon_min) * _BAR_S
-        self._retention_ms = max(1, retention_days) * _DAY_MS
+        # alert_rows only. outcomes.retention_days is not this window.
+        kept = retention_days if log_retention_days is None else log_retention_days
+        self._retention_ms = max(1, kept) * _DAY_MS
         self._store = store
         self._pending: dict[str, _Pending] = {}
         self._written: set[str] = set()
@@ -274,30 +299,139 @@ class AlertLog:
     def opened(self, row_id: str, *, now_ms: int) -> bool:
         return self._db().opened(row_id, now_ms)
 
-    def stats(self, *, since_ms: int) -> list[dict[str, Any]]:
-        by_rule: dict[str, list[LoggedRow]] = {}
+    def stats(self, *, since_ms: int, by: str = "rule") -> list[dict[str, Any]]:
+        if by not in GROUP_BY:
+            raise ValueError(by)
+        groups: dict[str, list[LoggedRow]] = {}
         for row in self._db().since(since_ms):
-            by_rule.setdefault(row.rule, []).append(row)
-        out: list[dict[str, Any]] = []
-        for rule, rows in sorted(by_rule.items(), key=lambda item: (-len(item[1]), item[0])):
-            measured = [row for row in rows if row.left_pct is not None]
-            out.append(
-                {
-                    "rule": rule,
-                    "n": len(rows),
-                    "measured": len(measured),
-                    "left": statistics.median(row.left_pct or 0.0 for row in measured)
-                    if measured
-                    else None,
-                    "against": statistics.median(row.against_pct or 0.0 for row in measured)
-                    if measured
-                    else None,
-                    "opened": sum(1 for row in rows if row.opened_at is not None),
-                }
-            )
-        return out
+            groups.setdefault(_group_key(row, by), []).append(row)
+        ranked = sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))
+        return [_summarize(key, rows) for key, rows in ranked]
+
+    def whatif(
+        self,
+        *,
+        rule: str,
+        knob: str,
+        value: float,
+        since_ms: int,
+        current: float,
+    ) -> dict[str, Any]:
+        spec = KNOBS.get(knob)
+        if spec is None:
+            raise UnknownKnob(knob)
+        kind, field, tighter = spec
+        rows = [row for row in self._db().since(since_ms) if row.rule == rule]
+        baseline = _summarize(rule, rows)
+        looser = _is_looser(tighter, value, current)
+        kept = rows if looser else [row for row in rows if _clears(row, kind, field, value, tighter)]
+        return {
+            "rule": rule,
+            "knob": knob,
+            "value": value,
+            "current": current,
+            "looser": looser,
+            "baseline": baseline,
+            "whatif": baseline if looser else _summarize(rule, kept),
+        }
 
     def _db(self) -> LogStore:
         if self._store is None:
             self._store = SqliteLogStore()
         return self._store
+
+
+def _group_key(row: LoggedRow, by: str) -> str:
+    if by == "rule":
+        return row.rule
+    if by == "rule_severity":
+        return f"{row.rule}:{row.severity}"
+    if by == "rule_direction":
+        return f"{row.rule}:{row.direction or 'flat'}"
+    if by == "held":
+        return row.held or "no"
+    if by == "hour":
+        return f"{time.gmtime(row.fired_at / 1000).tm_hour:02d}"
+    return row.symbol
+
+
+def _percentile(values: list[float], p: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    index = (len(ordered) - 1) * p
+    lo = int(index)
+    hi = min(lo + 1, len(ordered) - 1)
+    return ordered[lo] + (ordered[hi] - ordered[lo]) * (index - lo)
+
+
+def _summarize(key: str, rows: list[LoggedRow]) -> dict[str, Any]:
+    measured = [row for row in rows if row.left_pct is not None]
+    lefts = [float(row.left_pct or 0.0) for row in measured]
+    againsts = [float(row.against_pct or 0.0) for row in measured]
+    beats = sum(
+        1
+        for row in measured
+        if (row.left_pct or 0.0) > (row.against_pct or 0.0)
+    )
+    opened = sum(1 for row in rows if row.opened_at is not None)
+    return {
+        "rule": key,
+        "key": key,
+        "n": len(rows),
+        "measured": len(measured),
+        "left": statistics.median(lefts) if lefts else None,
+        "against": statistics.median(againsts) if againsts else None,
+        "left_p25": _percentile(lefts, 0.25),
+        "left_p75": _percentile(lefts, 0.75),
+        "against_p25": _percentile(againsts, 0.25),
+        "against_p75": _percentile(againsts, 0.75),
+        "left_beats": (beats / len(measured)) if measured else None,
+        "opened": opened,
+        "opened_rate": (opened / len(rows)) if rows else None,
+    }
+
+
+def _is_looser(tighter: str, value: float, current: float) -> bool:
+    if tighter == "higher":
+        return value < current
+    return value > current
+
+
+def _fact_number(row: LoggedRow, kind: str, field: str) -> float | None:
+    try:
+        facts = json.loads(row.facts or "[]")
+    except json.JSONDecodeError:
+        return None
+    fact = next((item for item in facts if isinstance(item, dict) and item.get("kind") == kind), None)
+    if fact is None:
+        return None
+    if field == "multiple":
+        raw = fact.get("multiple")
+    elif field == "bps":
+        raw = fact.get("bps")
+    elif field == "abs_usd":
+        raw = fact.get("usd")
+        return None if raw is None else abs(float(raw))
+    elif field == "abs_value":
+        raw = fact.get("value")
+        return None if raw is None else abs(float(raw))
+    else:
+        raw = fact.get("value")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clears(row: LoggedRow, kind: str, field: str, value: float, tighter: str) -> bool:
+    number = _fact_number(row, kind, field)
+    if number is None:
+        return False
+    if tighter == "higher":
+        return number >= value
+    return number <= value

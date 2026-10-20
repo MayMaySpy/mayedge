@@ -70,6 +70,7 @@ class AlertSettings:
     merge_s: float = 120.0
     quiet_s: float = 180.0
     max_new_per_min: int = 6
+    log_retention_days: int = 90
     range_floor_pct: float = 3.0
     bars_1m: int = 240
     min_bars: int = 30
@@ -124,6 +125,7 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
         merge_s=_f(rows.get("merge_s"), base.merge_s),
         quiet_s=_f(rows.get("quiet_s"), base.quiet_s),
         max_new_per_min=int(_f(rows.get("max_new_per_min"), base.max_new_per_min)),
+        log_retention_days=int(_f(rows.get("log_retention_days"), base.log_retention_days)),
         range_floor_pct=_f(activity.get("range_floor_pct"), base.range_floor_pct),
         bars_1m=int(_f(baseline.get("bars_1m"), base.bars_1m)),
         min_bars=int(_f(baseline.get("min_bars"), base.min_bars)),
@@ -491,6 +493,21 @@ class Broad:
     liquid: int
 
 
+_KNOB_ATTR = {
+    "spike.price_x": "spike_price_x",
+    "spike.min_move_pct": "spike_min_move_pct",
+    "spike.volume_x": "spike_volume_x",
+    "spike.min_volume_usd": "spike_min_volume_usd",
+    "spike.oi_x": "spike_oi_x",
+    "spike.min_oi_usd": "spike_min_oi_usd",
+    "spike.min_oi_pct": "spike_min_oi_pct",
+    "liquidations.min_usd": "liq_min_usd",
+    "liquidations.oi_bps": "liq_oi_bps",
+    "held.liq_distance_pct": "held_liq_distance_pct",
+    "board.median_pct": "board_median_pct",
+}
+
+
 class AlertDetector:
     """Spikes and states that raise rows, the funding strip, and the Activity board."""
 
@@ -518,6 +535,7 @@ class AlertDetector:
         self._log = log or AlertLog(
             horizon_min=self._thr.horizon_min,
             retention_days=self._thr.retention_days,
+            log_retention_days=self._thr.log_retention_days,
         )
         self._symbols: dict[int, str] = {}
         self._broad_cache: tuple[float, Broad | None] | None = None
@@ -529,10 +547,30 @@ class AlertDetector:
     def recent(self) -> list[dict[str, Any]]:
         return list(self._ring)
 
-    def stats(self, *, hours: int) -> dict[str, Any]:
-        """S5."""
+    def stats(self, *, hours: int, by: str = "rule") -> dict[str, Any]:
+        """S5. `by=rule` keeps the 24h panel's rows."""
         since = int((time.time() - hours * 3600) * 1000)
-        return {"hours": hours, "rules": self._log.stats(since_ms=since)}
+        return {"hours": hours, "by": by, "rules": self._log.stats(since_ms=since, by=by)}
+
+    def whatif(self, *, rule: str, knob: str, value: float, days: int) -> dict[str, Any]:
+        """S7. A looser knob is reported and not replayed."""
+        since = int((time.time() - days * 86_400) * 1000)
+        current = float(getattr(self._thr, _KNOB_ATTR[knob])) if knob in _KNOB_ATTR else 0.0
+        out = self._log.whatif(rule=rule, knob=knob, value=value, since_ms=since, current=current)
+        section, key = knob.split(".", 1)
+        out["days"] = days
+        out["yaml"] = f"{section}:\n  {key}: {value:g}"
+        return out
+
+    def knob_settings(self) -> dict[str, Any]:
+        from mayedge.alert_log import KNOBS
+
+        knobs: dict[str, float] = {}
+        by_rule: dict[str, list[str]] = {}
+        for name, (kind, _field, _tighter) in KNOBS.items():
+            knobs[name] = float(getattr(self._thr, _KNOB_ATTR[name]))
+            by_rule.setdefault(kind, []).append(name)
+        return {"knobs": knobs, "by_rule": by_rule}
 
     def opened(self, row_id: str) -> bool:
         """S3."""

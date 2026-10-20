@@ -726,8 +726,14 @@ class LighterGateway:
     def recent_alerts(self) -> list[dict[str, Any]]:
         return self._alerts.recent()
 
-    def alert_stats(self, hours: int = 24) -> dict[str, Any]:
-        return self._alerts.stats(hours=hours)
+    def alert_stats(self, hours: int = 24, by: str = "rule") -> dict[str, Any]:
+        return self._alerts.stats(hours=hours, by=by)
+
+    def alert_whatif(self, *, rule: str, knob: str, value: float, days: int) -> dict[str, Any]:
+        return self._alerts.whatif(rule=rule, knob=knob, value=value, days=days)
+
+    def alert_settings(self) -> dict[str, Any]:
+        return self._alerts.knob_settings()
 
     def alert_opened(self, row_id: str) -> bool:
         return self._alerts.opened(row_id)

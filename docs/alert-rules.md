@@ -97,11 +97,13 @@ Sigma is the larger of 1.4826 × MAD and the 90th-percentile deviation over 1.64
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| S1 | Every row is written to the desk database when it opens, with its rules and what the tape showed, and again when it changes. | `outcomes.retention_days` | `test_a_row_is_written_with_its_facts` |
+| S1 | Every row is written to the desk database when it opens, with its rules and what the tape showed, and again when it changes. Rows are kept for `rows.log_retention_days` (90). `outcomes.retention_days` (30) is unchanged and does not purge these rows. | `rows.log_retention_days` | `test_a_row_is_written_with_its_facts`, `test_row_retention_is_separate_from_outcomes` |
 | S2 | **Left** and **Against** are read from the highs and lows of the 15 one-minute bars after the bar the row fired in, from the price it fired at ([ADR 0012](adr/0012-an-alert-is-scored-from-the-price-it-fired-at.md)). | `outcomes.horizon_min` | `test_left_and_against_start_at_the_alert`, `test_the_alert_bar_is_not_counted` |
 | S3 | A row is **Opened** when the operator opens its Market from the panel. | | `test_opening_a_row_is_recorded_once` |
 | S4 | A row with no direction, and the Market row, are written and can be Opened. They have no Left or Against. | code | `test_the_market_row_is_written_and_not_measured` |
-| S5 | `GET /api/alerts/stats?hours=N` gives, per rule: rows, median Left, median Against, and how many were Opened. The panel shows 24h. | | `test_stats_are_per_rule` |
+| S5 | `GET /api/alerts/stats?hours=N&by=` gives, per group: rows, how many were measured, median Left and Against, the 25th and 75th of each, the share where Left beat Against, and how many were Opened (count and rate). `by` is `rule` (the default, which the 24h panel reads), `rule_severity`, `rule_direction`, `held`, `hour`, or `symbol`. Hours run out to 90 days. | | `test_stats_are_per_rule`, `test_stats_group_and_percentiles` |
+| S6 | The Record dialog shows 7, 30 and 90 days. A group with fewer than 20 rows says so and is not colored. | | `AlertRecordDialog` |
+| S7 | A what-if only **tightens** a mapped knob. It keeps rows whose stored fact would still clear the new value, and shows that next to the baseline. A looser value would have raised rows that were never written, so the desk returns the baseline unchanged with `looser=true` and says so. An unknown knob is rejected. The dialog does not write `alerts.yaml`; it shows the line to change. | | `test_whatif_tightens_each_mapped_knob`, `test_a_looser_knob_returns_the_baseline`, `test_an_unknown_knob_is_rejected` |
 
 ## Panel
 

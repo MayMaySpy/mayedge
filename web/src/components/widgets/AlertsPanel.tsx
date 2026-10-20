@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BellOff, X } from "lucide-react";
 import { notifyDesk, notifyErr, notifyOk } from "@/lib/notify";
+import { AlertRecordDialog } from "@/components/widgets/AlertRecordDialog";
 import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -204,6 +205,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
   const [stats, setStats] = useState<AlertStats | null>(null);
   const [pushesOn, setPushesOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
   const seenToastRef = useRef<Set<string>>(new Set());
   const mountedAtRef = useRef(0);
 
@@ -381,7 +383,18 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
               )}
               {stats && (
                 <Field>
-                  <FieldLabel>Last 24h</FieldLabel>
+                  <div className="flex items-center justify-between gap-2">
+                    <FieldLabel>Last 24h</FieldLabel>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setRecordOpen(true)}
+                    >
+                      Record
+                    </Button>
+                  </div>
                   {stats.rules.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No alerts yet.</p>
                   ) : (
@@ -419,6 +432,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
           </FilterPopover>
         }
       />
+      <AlertRecordDialog open={recordOpen} onOpenChange={setRecordOpen} />
       <FundingStrip rows={funding} onOpen={onOpenPair} />
       <ScrollArea className="min-h-0 flex-1">
         {rows.length === 0 ? (

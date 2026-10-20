@@ -520,12 +520,38 @@ export interface AlertRuleStats {
   /** Median Left, percent. Null until a row has its bars. */
   left: number | null;
   against: number | null;
+  left_p25?: number | null;
+  left_p75?: number | null;
+  against_p25?: number | null;
+  against_p75?: number | null;
+  /** Share of measured rows where Left beat Against. */
+  left_beats?: number | null;
   opened: number;
+  opened_rate?: number | null;
+  key?: string;
 }
 
 export interface AlertStats {
   hours: number;
+  by?: string;
   rules: AlertRuleStats[];
+}
+
+export interface AlertWhatIf {
+  rule: string;
+  knob: string;
+  value: number;
+  days: number;
+  current: number;
+  looser: boolean;
+  baseline: AlertRuleStats;
+  whatif: AlertRuleStats;
+  yaml: string;
+}
+
+export interface AlertKnobSettings {
+  knobs: Record<string, number>;
+  by_rule: Record<string, string[]>;
 }
 
 /** One liquid perp on the Activity board. A null cell has no baseline yet. */
@@ -637,7 +663,18 @@ export const api = {
     const qs = q.toString();
     return request<AlertEvent[]>(`/alerts${qs ? `?${qs}` : ""}`);
   },
-  alertStats: (hours = 24) => request<AlertStats>(`/alerts/stats?hours=${hours}`),
+  alertStats: (hours = 24, by = "rule") =>
+    request<AlertStats>(`/alerts/stats?hours=${hours}&by=${encodeURIComponent(by)}`),
+  alertSettings: () => request<AlertKnobSettings>("/alerts/settings"),
+  alertWhatIf: (opts: { rule: string; knob: string; value: number; days: number }) => {
+    const q = new URLSearchParams({
+      rule: opts.rule,
+      knob: opts.knob,
+      value: String(opts.value),
+      days: String(opts.days),
+    });
+    return request<AlertWhatIf>(`/alerts/whatif?${q.toString()}`);
+  },
   fundingExtremes: () => request<FundingExtremeRow[]>("/alerts/funding"),
   alertOpened: (id: string) =>
     request<{ status: string }>(`/alerts/${encodeURIComponent(id)}/opened`, { method: "POST" }),
