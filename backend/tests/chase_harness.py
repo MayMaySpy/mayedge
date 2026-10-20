@@ -10,6 +10,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from venue_harness import FakeClock
+from venue_harness import eth_market as _eth_market
+
 from mayedge.algos.chase import ChaseBook, ChaseIcebergParams
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.job import (
@@ -18,28 +21,6 @@ from mayedge.algos.chase.job import (
     ChaseStatus,
 )
 from mayedge.lighter.models import MarketMeta
-
-
-@dataclass
-class FakeClock:
-    now_ms: int = 1_000_000
-
-    def advance(self, ms: int) -> None:
-        self.now_ms += ms
-
-    def __call__(self) -> int:
-        return self.now_ms
-
-
-def _eth_market() -> MarketMeta:
-    return MarketMeta(
-        market_index=1,
-        symbol="ETH",
-        price_decimals=2,
-        size_decimals=1,
-        min_base_amount=0.1,
-        min_quote_amount=0.0,
-    )
 
 
 @dataclass

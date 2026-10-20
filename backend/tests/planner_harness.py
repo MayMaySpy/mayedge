@@ -7,10 +7,14 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
 
+from venue_harness import FakeClock
+
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.planner.config import PLANNER_COI_BASE
 from mayedge.algos.planner.job import PlannerRunner
 from mayedge.lighter.models import MarketMeta
+
+__all__ = ["MI", "FakeBook", "FakeClock", "FakeVenue", "eth"]
 
 MI = 1
 
@@ -26,17 +30,6 @@ def eth() -> MarketMeta:
         last_trade_price=100.0,
         mark_price=100.0,
     )
-
-
-@dataclass
-class FakeClock:
-    now_ms: int = 1_000_000
-
-    def advance(self, ms: int) -> None:
-        self.now_ms += ms
-
-    def __call__(self) -> int:
-        return self.now_ms
 
 
 @dataclass
@@ -74,8 +67,9 @@ class FakeVenue:
         self.meta.last_trade_price = float(px)
 
     # ── what the job sends ──
-    def _rest(self, coi: int, *, side: str, size: str, price: str, order_type: str,
-              trigger: str = "") -> None:
+    def _rest(
+        self, coi: int, *, side: str, size: str, price: str, order_type: str, trigger: str = ""
+    ) -> None:
         self.next_oid += 1
         self.orders[coi] = {
             "order_index": str(self.next_oid),
@@ -117,7 +111,9 @@ class FakeVenue:
         self.calls.append(("market", kw))
         return {"tx_hash": "0x", "client_order_index": kw["client_order_index"]}
 
-    async def create_trigger_leg(self, market_index: int, side: str, size: str, **kw: Any) -> dict[str, Any]:
+    async def create_trigger_leg(
+        self, market_index: int, side: str, size: str, **kw: Any
+    ) -> dict[str, Any]:
         self._check_side(side, kw["role"], Decimal(kw["trigger"]))
         self.calls.append((f"trigger_{kw['role']}", {"side": side, "size": size, **kw}))
         order_type = "stop-loss" if kw["role"] == "sl" else "take-profit-limit"
@@ -131,7 +127,9 @@ class FakeVenue:
         )
         return {"tx_hash": "0x", "client_order_index": kw["client_order_index"]}
 
-    async def amend_trigger_leg(self, market_index: int, order_index: int, side: str, **kw: Any) -> dict[str, Any]:
+    async def amend_trigger_leg(
+        self, market_index: int, order_index: int, side: str, **kw: Any
+    ) -> dict[str, Any]:
         self._check_side(side, kw["role"], Decimal(kw["trigger"]))
         self.calls.append(("amend", {"order_index": order_index, **kw}))
         for row in self.orders.values():
@@ -149,8 +147,10 @@ class FakeVenue:
     def _check_side(self, side: str, role: str, trigger: Decimal) -> None:
         mark = Decimal(str(self.meta.mark_price))
         is_ask = side == "sell"
-        ok = (trigger < mark if is_ask else trigger > mark) if role == "sl" else (
-            trigger > mark if is_ask else trigger < mark
+        ok = (
+            (trigger < mark if is_ask else trigger > mark)
+            if role == "sl"
+            else (trigger > mark if is_ask else trigger < mark)
         )
         if not ok:
             raise ValueError("Stop trigger is on the wrong side of mark")
