@@ -65,6 +65,14 @@ export function pct(fraction: string | null | undefined): string {
   return n == null ? "—" : `${(n * 100).toFixed(0)}%`;
 }
 
+/** A value already in percent points, with a sign: +3.42%. Empty when absent. */
+export function pctPoints(value: string | null | undefined): string {
+  const n = num(value);
+  if (n == null) return "";
+  const core = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n > 0 ? "+" : n < 0 ? "-" : ""}${core}%`;
+}
+
 /** A plain ratio, two decimals: profit factor. */
 export function ratio(value: string | null | undefined): string {
   const n = num(value);

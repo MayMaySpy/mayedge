@@ -245,6 +245,37 @@ export interface JournalSummaryGroup {
   curve: { ts: number; net: string | null }[];
 }
 
+export type PortfolioKind = "perps" | "spot" | "llp" | "staking";
+
+/** One Holding kind, or the total (docs/portfolio-rules.md N2–N4). Decimal strings. */
+export interface PortfolioKindNow {
+  value: string | null;
+  value_at_open: string | null;
+  change: string | null;
+  change_pct: string | null;
+  flows: string | null;
+}
+
+export interface PortfolioNow {
+  ts: number;
+  open: number;
+  total: PortfolioKindNow;
+  kinds: Record<PortfolioKind, PortfolioKindNow>;
+  mismatch: { kind: PortfolioKind; drift: string | null }[];
+  spot: { symbol: string; qty: string | null; price: string | null; value: string | null; upnl: string | null }[];
+  pools: {
+    pool: number;
+    kind: "llp" | "staking";
+    shares: string | null;
+    units: string | null;
+    unit: string;
+    value: string | null;
+    apy: string | null;
+    principal: string | null;
+  }[];
+  unlocks: { asset_index: number; amount: string | null; unlock_ms: number }[];
+}
+
 export interface AccountTradesPage {
   trades: AccountTrade[];
   next_cursor: string | null;
@@ -772,6 +803,8 @@ export const api = {
       `/journal/trips/${encodeURIComponent(tripKey)}/note`,
       { method: "PUT", body: JSON.stringify(body) },
     ),
+  portfolio: (open: number, detail = true) =>
+    request<PortfolioNow>(`/portfolio?open=${open}${detail ? "" : "&detail=false"}`),
   journalSync: () =>
     request<{ started: boolean; last_synced_at: number | null }>("/journal/sync", { method: "POST" }),
   accountFunding: (opts?: { market_index?: number | null; cursor?: string | null; limit?: number }) => {

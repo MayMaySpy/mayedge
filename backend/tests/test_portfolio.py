@@ -160,6 +160,31 @@ class ReadTests(IsolatedAsyncioTestCase):
             await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS)
             self.assertEqual(read.await_count, 3)
 
+    async def test_a_plain_answer_reads_only_the_pnl_series(self) -> None:
+        reads: list[str] = []
+
+        async def get(_client: object, _auth: str, path: str, params: dict[str, object]) -> dict[str, object]:
+            reads.append(f"{path}{'+values' if params.get('ignore_transfers') else ''}")
+            if path == "/api/v1/pnl":
+                return {"pnl": VALUES if params.get("ignore_transfers") else PNL}
+            return {"accounts": [FIXTURE["account"]]}
+
+        with (
+            patch.object(settings, "lighter_account_index", 1001),
+            patch.object(portfolio_venue, "_get", get),
+            patch("mayedge.lighter.orders.order_service.auth_token", AsyncMock(return_value="t")),
+        ):
+            plain = await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS, detail=False)
+            self.assertEqual(reads, ["/api/v1/pnl", "/api/v1/pnl+values"])
+            self.assertEqual(plain.pools, [])
+            detailed = await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS)
+            # Both pnl series again, then the account and the one pool held.
+            self.assertEqual(reads[2:], ["/api/v1/pnl", "/api/v1/pnl+values", "/api/v1/account", "/api/v1/account"])
+            self.assertEqual(len(detailed.pools), 1)
+            again = await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS, detail=False)
+            self.assertIs(again, detailed, "a detailed answer serves a plain one")
+            self.assertEqual(len(reads), 6)
+
     async def test_the_route_answers_the_totals_and_refuses_a_future_open(self) -> None:
         with (
             patch.object(settings, "lighter_api_private_key", "k"),

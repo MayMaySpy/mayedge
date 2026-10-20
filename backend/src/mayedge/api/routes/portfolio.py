@@ -15,8 +15,8 @@ router = APIRouter()
 
 
 @router.get("/api/portfolio")
-async def get_portfolio(open: int | None = None) -> dict[str, Any]:
-    """The Portfolio now and since the Day open (docs/portfolio-rules.md N1–N7)."""
+async def get_portfolio(open: int | None = None, detail: bool = True) -> dict[str, Any]:
+    """The Portfolio now and since the Day open (docs/portfolio-rules.md N1–N8)."""
     if not settings.trading_enabled:
         raise HTTPException(400, "Account not configured")
     try:
@@ -24,7 +24,7 @@ async def get_portfolio(open: int | None = None) -> dict[str, Any]:
     except OpenRefused as e:
         raise HTTPException(400, str(e)) from e
     try:
-        result = await read_portfolio(open_ms)
+        result = await read_portfolio(open_ms, detail=detail)
     except httpx.HTTPStatusError as e:
         raise HTTPException(502, f"Lighter answered {e.response.status_code}") from e
     except httpx.HTTPError as e:

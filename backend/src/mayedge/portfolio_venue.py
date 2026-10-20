@@ -18,7 +18,7 @@ from mayedge.portfolio import HOUR_MS, PortfolioNow, portfolio_now
 
 REUSE_S = 30.0
 
-_cache: dict[int, tuple[float, PortfolioNow]] = {}
+_cache: dict[tuple[int, bool], tuple[float, PortfolioNow]] = {}
 
 
 async def _get(client: httpx.AsyncClient, auth: str, path: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -29,8 +29,8 @@ async def _get(client: httpx.AsyncClient, auth: str, path: str, params: dict[str
     return body if isinstance(body, dict) else {}
 
 
-async def read_venue(open_ms: int, now_ms: int) -> dict[str, Any]:
-    """The two pnl series from the open to now, the account, and each pool it holds shares in."""
+async def read_venue(open_ms: int, now_ms: int, *, detail: bool = True) -> dict[str, Any]:
+    """The two pnl series from the open to now; with detail, the account and each pool it holds shares in."""
     from mayedge.lighter.orders import order_service
 
     account_index = settings.lighter_account_index
@@ -49,9 +49,11 @@ async def read_venue(open_ms: int, now_ms: int) -> dict[str, Any]:
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=20.0) as client:
         pnl = await _get(client, auth, "/api/v1/pnl", series)
         values = await _get(client, auth, "/api/v1/pnl", {**series, "ignore_transfers": "true"})
-        found = await _get(client, auth, "/api/v1/account", {"by": "index", "value": str(account_index)})
-        account = (found.get("accounts") or [{}])[0]
+        account: dict[str, Any] = {}
         pools: dict[int, dict[str, Any]] = {}
+        if detail:
+            found = await _get(client, auth, "/api/v1/account", {"by": "index", "value": str(account_index)})
+            account = (found.get("accounts") or [{}])[0]
         for share in account.get("shares") or []:
             index = int(share.get("public_pool_index") or 0)
             if index and index not in pools:
@@ -65,16 +67,17 @@ async def read_venue(open_ms: int, now_ms: int) -> dict[str, Any]:
     }
 
 
-async def read_portfolio(open_ms: int, *, now_ms: int | None = None) -> PortfolioNow:
-    """N7: one venue read per Day open every 30s."""
+async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: bool = True) -> PortfolioNow:
+    """N7: one venue read per Day open every 30s. N8: without detail, only the two pnl series."""
     from mayedge.lighter.account import account_service
 
     now = time.monotonic()
-    hit = _cache.get(open_ms)
+    # A detailed answer also serves a plain one.
+    hit = _cache.get((open_ms, True)) or (None if detail else _cache.get((open_ms, False)))
     if hit is not None and now - hit[0] < REUSE_S:
         return hit[1]
     stamp = now_ms if now_ms is not None else int(time.time() * 1000)
-    raw = await read_venue(open_ms, stamp)
+    raw = await read_venue(open_ms, stamp, detail=detail)
     lit = account_service._live_asset_meta().get("LIT", {}).get("index_price") or 0.0  # pyright: ignore[reportPrivateUsage]
     result = portfolio_now(
         now_ms=stamp,
@@ -86,7 +89,7 @@ async def read_portfolio(open_ms: int, *, now_ms: int | None = None) -> Portfoli
         live_assets=list(account_service._summary.assets),  # pyright: ignore[reportPrivateUsage]
         lit_price=Decimal(str(lit)),
     )
-    _cache[open_ms] = (now, result)
+    _cache[(open_ms, detail)] = (now, result)
     for key in [k for k, (at, _r) in _cache.items() if now - at >= REUSE_S]:
         _cache.pop(key, None)
     return result

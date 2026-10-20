@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { PortfolioToday } from "@/components/widgets/PortfolioToday";
 import { FavoritesBar } from "@/components/widgets/FavoritesBar";
 import { MarketPicker } from "@/components/widgets/MarketPicker";
 import type { FundingAverage, Market } from "@/lib/api";
@@ -399,6 +400,7 @@ export function Header({
         </div>
 
         <div className="flex min-w-0 items-center justify-end gap-2 justify-self-end">
+          <PortfolioToday enabled={tradingEnabled} />
           {account ? (
             <HeaderStat
               label="Margin"
