@@ -40,7 +40,7 @@ import { emitHotkey, type HotkeyId } from "@/lib/hotkeys";
 import { useHotkeyTrading } from "@/lib/hotkeyTrading";
 import { getAxisTicketArmed, setAxisTicketArmed } from "@/lib/axisTicket";
 import { toggleFavorite } from "@/lib/favorites";
-import { buildQuickLimit, submitQuickMarket } from "@/lib/quickTrade";
+import { buildQuickLimit, cancelMarketTickets, submitQuickMarket } from "@/lib/quickTrade";
 import { getQuickSize } from "@/lib/quickSizes";
 import {
   clickChartDraft,
@@ -520,9 +520,8 @@ export function Dashboard() {
       }
       if (id === "cancel") {
         if (!market) return;
-        void api
-          .cancelAll(market.market_index)
-          .then(() => notifyOk(`Cancelled ${market.symbol} orders`))
+        void cancelMarketTickets(market)
+          .then((n) => notifyOk(`Cancelled ${n} ${market.symbol} Tickets`))
           .catch((err: unknown) => notifyErr(err instanceof Error ? err.message : "Cancel failed"));
         return;
       }

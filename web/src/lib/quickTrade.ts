@@ -104,3 +104,17 @@ export async function submitQuickMarket(opts: {
     quickBusy = false;
   }
 }
+
+/**
+ * Shift+X: cancel this Market's Tickets, bids then asks, like the Orders tab's Bids and Asks.
+ * Algo Clips stay with their algo, so a Planner keeps its stop. Never Cancel all.
+ */
+export async function cancelMarketTickets(market: Market): Promise<number> {
+  let cancelled = 0;
+  for (const side of ["buy", "sell"] as const) {
+    const res = await api.cancelTickets(side, market.market_index);
+    cancelled += res.cancelled;
+    if (res.error) throw new Error(res.error);
+  }
+  return cancelled;
+}
