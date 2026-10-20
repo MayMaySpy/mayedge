@@ -104,6 +104,7 @@ export function PortfolioPage() {
               <PortfolioHero now={now} spanLabel={page.span === "today" ? "Today, since 00:00 UTC" : "Last 24h"} />
               <AllocationBar now={now} />
             </section>
+            <Holdings now={now} />
           </>
         ) : (
           <section className="panel p-4 text-muted-foreground">
@@ -121,8 +122,6 @@ export function PortfolioPage() {
           {bars.length > 0 ? <JournalChart days={bars} height={180} label="Change" /> : null}
           <DaysTable days={days} kinds={charted.length ? charted : ["perps"]} />
         </section>
-
-        {now ? <Holdings now={now} /> : null}
       </div>
     </div>
   );

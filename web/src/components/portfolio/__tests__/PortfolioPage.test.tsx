@@ -133,6 +133,9 @@ describe("PortfolioPage", () => {
     expect(screen.getByText("1,018.21 LIT")).toBeTruthy();
     expect(screen.getByText("27.59%")).toBeTruthy();
     expect(screen.getByText("Not in LLP")).toBeTruthy();
+    // Holdings come straight after the total, above the charts.
+    const value = screen.getByRole("heading", { name: "Value" });
+    expect(screen.getByText("ETH").compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("says so when value and PnL disagree", async () => {

@@ -78,12 +78,12 @@ Checked against mainnet on 2026-10-20 through a temporary read-only desk route, 
 
 | | Rule | Pinned by |
 |---|---|---|
-| W1 | The page reads over REST only: the detailed answer (N7) once a minute while visible, the history (H4) and the days (H6) when the range changes. It opens no desk socket. The header's **Today** opens it in a new tab. | `PortfolioPage` tests |
+| W1 | The page reads over REST only: the detailed answer (N7) once a minute while visible, the history (H4) and the days (H6) when the range changes. It opens no desk socket. The header's **Portfolio** button and its **Today** open it in a new tab. | `PortfolioPage` tests |
 | W2 | It leads with the Portfolio total and its change since the Day open. **Today** means since 00:00 UTC (N1); **24h** sends an open 24 hours back, rounded down to the hour. Flows since the open are shown beside the change, never inside it. Every time on the page is UTC and says so. | `leads with the total…`, `switches to the last 24 hours` |
 | W3 | **Allocation** is one bar of the kinds held now, in the fixed order Perps, Spot, LLP, Staking, each in its own hue, labelled with $ and %. The hues are fixed per kind (`PORTFOLIO_KIND_COLORS`), never re-sorted by size, and validated for color-blind separation on the desk's dark panel. Green and red are not among them: on this desk they mean gain and loss. | `portfolio kinds` |
 | W4 | **Value** draws one line per kind that held money at any point in the range, plus the total, on one axis that never goes below 0. Each Flow (H5) is an arrow on its kind's line: up in, down out. The readout above the chart lists every line's value at the hovered point, and the Flows there. | `charts a kind held earlier…` |
 | W5 | **Daily change** is a bar per day in gain and loss colors, with the running total, from H6. The table under it splits each day by kind. Days are UTC days (H6). | `charts a kind held earlier…` |
-| W6 | **Holdings**: Perps (value and change; trades are in the Journal), Spot rows (N6), Staking (LIT staked, LIT put in, value, APY) with pending unlocks, and LLP (shares, put in, value, APY). A kind not held says so. A mismatch (N5) is a warning above everything. | `lists what each Holding is made of`, `says so when value and PnL disagree` |
+| W6 | **Holdings** sit right under the total and Allocation, above the charts: Perps (value and change; trades are in the Journal), Spot rows (N6), Staking (LIT staked, LIT put in, value, APY) with pending unlocks, and LLP (shares, put in, value, APY). A kind not held says so. A mismatch (N5) is a warning above everything. | `lists what each Holding is made of`, `says so when value and PnL disagree` |
 
 ## Daily push
 
