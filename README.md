@@ -12,7 +12,7 @@ Desk language is [CONTEXT.md](CONTEXT.md). Every word in bold below means what i
 
 ### Desk
 
-Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout edit is opt-in.
+Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout edit is opt-in. Positions has a Journal tab: each Market from flat to flat, net of fees and funding.
 
 **Header.** Market picker, **Favorites**, mark, funding in APR, **Open interest**, margin, and feed status. Hover funding for its 7-day, 30-day and 1-year **Funding average**. When Lighter itself is down (HTTP 503, or a 1012 service-restart close), the status says so and since when, instead of a plain reconnect.
 
@@ -100,6 +100,7 @@ The desk keeps its own history in SQLite: **OI samples** for 30 days then **OI h
 | [CONTEXT.md](CONTEXT.md) | The desk's language. Words in bold anywhere mean what it says. |
 | [docs/alert-rules.md](docs/alert-rules.md) | Every alert, the funding strip and the Scan boards: rule, knob and the test that pins it. |
 | [docs/push-rules.md](docs/push-rules.md) | Every Telegram push: event, text, debounce and knob. |
+| [docs/journal-rules.md](docs/journal-rules.md) | How fills become Round trips, and how Net and R are counted. |
 | [docs/planner-rules.md](docs/planner-rules.md) | What Planner does, start to finish. |
 | [docs/trail-rules.md](docs/trail-rules.md) | What a Trail does, start to finish. |
 | [docs/trail-scope.md](docs/trail-scope.md) | The reasoning behind Trail. Where it and the rules differ, the rules win. |

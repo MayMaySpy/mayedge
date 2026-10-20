@@ -186,6 +186,58 @@ export interface AccountFunding {
   timestamp: number;
 }
 
+export interface JournalFill {
+  trade_id: string;
+  ts: number;
+  side: string;
+  price: string;
+  size: string;
+  fee: string;
+  pnl: string;
+  is_maker: boolean;
+  closing: boolean;
+}
+
+export interface JournalTrip {
+  trip_key: string;
+  market_index: number;
+  symbol: string;
+  side: string;
+  open_ts: number;
+  close_ts: number | null;
+  size: string | null;
+  avg_in: string | null;
+  avg_out: string | null;
+  net: string | null;
+  fees: string | null;
+  funding: string | null;
+  algo: string;
+  r: string | null;
+  partial: boolean;
+  partial_reason: string | null;
+  open: boolean;
+  upnl: string | null;
+  note: string;
+  tags: string[];
+  fills: JournalFill[];
+}
+
+export interface JournalSummaryGroup {
+  key: string;
+  count: number;
+  wins: number;
+  losses: number;
+  win_rate: string | null;
+  net: string | null;
+  fees: string | null;
+  funding: string | null;
+  profit_factor: string | null;
+  expectancy: string | null;
+  avg_r: string | null;
+  max_drawdown: string | null;
+  curve: { ts: number; net: string | null }[];
+}
+
 export interface AccountTradesPage {
   trades: AccountTrade[];
   next_cursor: string | null;
@@ -651,6 +703,31 @@ export const api = {
     const qs = q.toString();
     return request<AccountTradesPage>(`/account/trades${qs ? `?${qs}` : ""}`);
   },
+  journalTrips: (opts?: { since?: number; until?: number; market?: string; algo?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.since != null) q.set("since", String(opts.since));
+    if (opts?.until != null) q.set("until", String(opts.until));
+    if (opts?.market) q.set("market", opts.market);
+    if (opts?.algo) q.set("algo", opts.algo);
+    if (opts?.limit != null) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return request<{ trips: JournalTrip[] }>(`/journal/trips${qs ? `?${qs}` : ""}`);
+  },
+  journalSummary: (opts: { range: string; group: string; market?: string; algo?: string }) => {
+    const q = new URLSearchParams({ range: opts.range, group: opts.group });
+    if (opts.market) q.set("market", opts.market);
+    if (opts.algo) q.set("algo", opts.algo);
+    return request<{ range: string; group: string; groups: JournalSummaryGroup[] }>(
+      `/journal/summary?${q.toString()}`,
+    );
+  },
+  journalNote: (tripKey: string, body: { note: string; tags: string[] }) =>
+    request<{ trip_key: string; note: string; tags: string[] }>(
+      `/journal/trips/${encodeURIComponent(tripKey)}/note`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  journalSync: () =>
+    request<{ started: boolean; last_synced_at: number | null }>("/journal/sync", { method: "POST" }),
   accountFunding: (opts?: { market_index?: number | null; cursor?: string | null; limit?: number }) => {
     const q = new URLSearchParams();
     if (opts?.market_index != null) q.set("market_index", String(opts.market_index));

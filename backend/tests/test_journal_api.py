@@ -75,6 +75,11 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             self.assertEqual(group["count"], 1)
             self.assertEqual(group["net"], "20")
             self.assertIsNone(group["profit_factor"])
+            other = await client.get(
+                "/api/journal/summary",
+                params={"range": "all", "group": "none", "market": "BTC"},
+            )
+            self.assertEqual(other.json()["groups"][0]["count"], 0)
 
     @patch("mayedge.api.routes.journal.run_sync", new_callable=AsyncMock)
     async def test_sync_starts_without_reading_the_venue_here(self, run_sync: AsyncMock) -> None:

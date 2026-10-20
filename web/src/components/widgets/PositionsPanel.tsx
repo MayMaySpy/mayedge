@@ -51,6 +51,11 @@ const FundingHistoryTab = lazy(() =>
     default: m.FundingHistoryTab,
   })),
 );
+const JournalTab = lazy(() =>
+  import("@/components/widgets/account/JournalTab").then((m) => ({
+    default: m.JournalTab,
+  })),
+);
 
 function HistoryTabFallback() {
   return (
@@ -468,6 +473,7 @@ export function PositionsPanel({
               <span className="ml-1 font-mono text-xs text-muted-foreground">({workingAlgos.length})</span>
             </TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="journal">Journal</TabsTrigger>
           </TabsList>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="flex items-center gap-1">
@@ -919,6 +925,12 @@ export function PositionsPanel({
                 onSymbolChange={onSymbolChange}
               />
             )}
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="journal" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <Suspense fallback={<HistoryTabFallback />}>
+            <JournalTab active={tab === "journal"} />
           </Suspense>
         </TabsContent>
       </Tabs>

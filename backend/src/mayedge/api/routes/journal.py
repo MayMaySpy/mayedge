@@ -55,14 +55,23 @@ async def get_trips(
 
 
 @router.get("/api/journal/summary")
-async def get_summary(range: str = "30d", group: str = "none") -> dict[str, Any]:
+async def get_summary(
+    range: str = "30d",
+    group: str = "none",
+    market: str | None = None,
+    algo: str | None = None,
+) -> dict[str, Any]:
     if range not in _RANGES:
         raise HTTPException(400, "range must be 7d, 30d, 90d, or all")
     if group not in _GROUPS:
         raise HTTPException(400, "group must be day, market, algo, or none")
     days = _RANGES[range]
     since = None if days is None else int(time.time()) - days * 86_400
-    chosen = [trip for trip in _trips() if _closed_since(trip, since)]
+    chosen = [
+        trip
+        for trip in _trips()
+        if _closed_since(trip, since) and _market_ok(trip, market) and _algo_ok(trip, algo)
+    ]
     rows = summary(chosen, cast(GroupBy, group))
     return {
         "range": range,
