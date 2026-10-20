@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -22,14 +22,13 @@ function parseUsdInput(raw: string): number | null {
 
 export function AutoKillSection({ tradingEnabled }: AutoKillSectionProps) {
   const live = useAutoKill();
-  const [lossInput, setLossInput] = useState("");
-  const [profitInput, setProfitInput] = useState("");
+  const serverLoss = live.loss_usd != null ? String(live.loss_usd) : "";
+  const serverProfit = live.profit_usd != null ? String(live.profit_usd) : "";
+  const [lossDraft, setLossDraft] = useState<string | null>(null);
+  const [profitDraft, setProfitDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setLossInput(live.loss_usd != null ? String(live.loss_usd) : "");
-    setProfitInput(live.profit_usd != null ? String(live.profit_usd) : "");
-  }, [live.loss_usd, live.profit_usd]);
+  const lossInput = lossDraft ?? serverLoss;
+  const profitInput = profitDraft ?? serverProfit;
 
   const save = async (armed: boolean) => {
     const loss_usd = parseUsdInput(lossInput);
@@ -46,6 +45,8 @@ export function AutoKillSection({ tradingEnabled }: AutoKillSectionProps) {
         profit_usd,
       });
       applyAutoKill(res);
+      setLossDraft(null);
+      setProfitDraft(null);
       notifyOk(armed ? "Auto kill armed" : "Auto kill disarmed");
     } catch (e) {
       notifyErr(e instanceof Error ? e.message : "Auto kill update failed");
@@ -77,7 +78,7 @@ export function AutoKillSection({ tradingEnabled }: AutoKillSectionProps) {
                 placeholder="500"
                 disabled={!tradingEnabled || busy || live.armed}
                 value={lossInput}
-                onChange={(e) => setLossInput(e.target.value)}
+                onChange={(e) => setLossDraft(e.target.value)}
               />
             </FieldContent>
           </Field>
@@ -90,7 +91,7 @@ export function AutoKillSection({ tradingEnabled }: AutoKillSectionProps) {
                 placeholder="1000"
                 disabled={!tradingEnabled || busy || live.armed}
                 value={profitInput}
-                onChange={(e) => setProfitInput(e.target.value)}
+                onChange={(e) => setProfitDraft(e.target.value)}
               />
             </FieldContent>
           </Field>

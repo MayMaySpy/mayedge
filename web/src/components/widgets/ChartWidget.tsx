@@ -11,14 +11,14 @@ import {
   type HistogramData,
   type MouseEventParams,
 } from "lightweight-charts";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { loadLiqHours } from "@/lib/liqHours";
-import { ScanBoard, type ScanTab } from "@/components/widgets/ScanBoard";
+import type { ScanTab } from "@/components/widgets/ScanBoard";
 import { TimeframePins } from "@/components/widgets/TimeframePins";
-import { WatchBoard } from "@/components/widgets/WatchBoard";
 import {
   api,
   type Candle,
@@ -293,6 +293,24 @@ function loadScanTab(): ScanTab {
     /* ignore */
   }
   return "rel";
+}
+
+const ScanBoard = lazy(() =>
+  import("@/components/widgets/ScanBoard").then((m) => ({ default: m.ScanBoard })),
+);
+const WatchBoard = lazy(() =>
+  import("@/components/widgets/WatchBoard").then((m) => ({ default: m.WatchBoard })),
+);
+
+function BoardFallback({ title, detail }: { title: string; detail: string }) {
+  return (
+    <Empty className="h-full rounded-none border-0">
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{detail}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
 }
 
 const EMPTY_CANDLES: Candle[] = [];
@@ -843,10 +861,10 @@ export const ChartWidget = memo(function ChartWidget({
     }
     return spots;
   }, [fillMarkList, display]);
-  const fillSpotRef = useRef(fillSpots);
-  fillSpotRef.current = fillSpots;
+  const fillSpotRef = useRef<FillSpot[]>(EMPTY_SPOTS);
 
   useEffect(() => {
+    fillSpotRef.current = fillSpots;
     fillMarksRef.current?.setMarks(fillSpots);
   }, [fillSpots]);
 
@@ -1801,21 +1819,36 @@ export const ChartWidget = memo(function ChartWidget({
             ) : null}
           </>
         ) : isWatch ? (
-          <WatchBoard
-            windowSec={WATCH_WINDOW_SEC[watchWindow]}
-            markets={markets}
-            symbol={symbol}
-            onSymbolChange={onSymbolChange}
-          />
+          <Suspense
+            fallback={
+              <BoardFallback
+                title="Add Markets to Watch"
+                detail="Plot live Paths for up to 8 Markets."
+              />
+            }
+          >
+            <WatchBoard
+              windowSec={WATCH_WINDOW_SEC[watchWindow]}
+              markets={markets}
+              symbol={symbol}
+              onSymbolChange={onSymbolChange}
+            />
+          </Suspense>
         ) : (
-          <ScanBoard
-            tab={scanTab}
-            hours={liqHours}
-            onHoursChange={setLiqHours}
-            markets={markets}
-            symbol={symbol}
-            onSymbolChange={onSymbolChange}
-          />
+          <Suspense
+            fallback={
+              <BoardFallback title="Scan" detail="Relative strength, liquidations, activity, tones." />
+            }
+          >
+            <ScanBoard
+              tab={scanTab}
+              hours={liqHours}
+              onHoursChange={setLiqHours}
+              markets={markets}
+              symbol={symbol}
+              onSymbolChange={onSymbolChange}
+            />
+          </Suspense>
         )}
       </div>
     </div>

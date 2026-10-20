@@ -45,17 +45,9 @@ function memoryStorage(): Storage {
 }
 
 for (const name of ["localStorage", "sessionStorage"] as const) {
-  let ok = false;
-  try {
-    ok = typeof (globalThis as Record<string, unknown>)[name] === "object" && g[name] != null;
-  } catch {
-    ok = false;
-  }
-  if (!ok) {
-    const store = memoryStorage();
-    Object.defineProperty(globalThis, name, { value: store, configurable: true, writable: true });
-    if (typeof window !== "undefined") {
-      Object.defineProperty(window, name, { value: store, configurable: true, writable: true });
-    }
+  const store = memoryStorage();
+  Object.defineProperty(globalThis, name, { value: store, configurable: true, writable: true });
+  if (typeof window !== "undefined") {
+    Object.defineProperty(window, name, { value: store, configurable: true, writable: true });
   }
 }

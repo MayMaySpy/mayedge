@@ -16,6 +16,31 @@ export default defineConfig({
       "@": path.resolve(root, "./src"),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "react",
+              test: /node_modules[/\\](react|react-dom|scheduler)[/\\]/,
+              priority: 30,
+            },
+            {
+              name: "lightweight-charts",
+              test: /node_modules[/\\]lightweight-charts[/\\]/,
+              priority: 25,
+            },
+            {
+              name: "ui",
+              test: /node_modules[/\\](@base-ui[/\\]react|radix-ui|@radix-ui|lucide-react|sonner|class-variance-authority|clsx|tailwind-merge)[/\\]/,
+              priority: 20,
+            },
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

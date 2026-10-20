@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
@@ -7,8 +7,6 @@ import { PositionPlanButton } from "@/components/widgets/planner/PositionPlanBut
 import { livePlannerFor } from "@/lib/plannerPlan";
 import { liveTrailsFor } from "@/lib/trail";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
-import { FundingHistoryTab } from "@/components/widgets/account/FundingHistoryTab";
-import { TradeHistoryTab } from "@/components/widgets/account/TradeHistoryTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
 import { Button } from "@/components/ui/button";
@@ -42,6 +40,27 @@ import {
   type PosSortKey,
 } from "@/lib/positionsTable";
 import { cn, formatPctAbs, formatPrice, formatSigned, formatSize } from "@/lib/utils";
+
+const TradeHistoryTab = lazy(() =>
+  import("@/components/widgets/account/TradeHistoryTab").then((m) => ({
+    default: m.TradeHistoryTab,
+  })),
+);
+const FundingHistoryTab = lazy(() =>
+  import("@/components/widgets/account/FundingHistoryTab").then((m) => ({
+    default: m.FundingHistoryTab,
+  })),
+);
+
+function HistoryTabFallback() {
+  return (
+    <div className="flex flex-col gap-1 p-2">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="h-5 animate-pulse bg-elevated" />
+      ))}
+    </div>
+  );
+}
 
 interface PositionsPanelProps {
   market: Market | null;
@@ -884,21 +903,23 @@ export function PositionsPanel({
             <ToggleGroupItem value="trades">Trades</ToggleGroupItem>
             <ToggleGroupItem value="funding">Funding</ToggleGroupItem>
           </ToggleGroup>
-          {historyKind === "trades" ? (
-            <TradeHistoryTab
-              market={market}
-              tradingEnabled={tradingEnabled}
-              active={tab === "history"}
-              onSymbolChange={onSymbolChange}
-            />
-          ) : (
-            <FundingHistoryTab
-              market={market}
-              tradingEnabled={tradingEnabled}
-              active={tab === "history"}
-              onSymbolChange={onSymbolChange}
-            />
-          )}
+          <Suspense fallback={<HistoryTabFallback />}>
+            {historyKind === "trades" ? (
+              <TradeHistoryTab
+                market={market}
+                tradingEnabled={tradingEnabled}
+                active={tab === "history"}
+                onSymbolChange={onSymbolChange}
+              />
+            ) : (
+              <FundingHistoryTab
+                market={market}
+                tradingEnabled={tradingEnabled}
+                active={tab === "history"}
+                onSymbolChange={onSymbolChange}
+              />
+            )}
+          </Suspense>
         </TabsContent>
       </Tabs>
     </div>

@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { WatchBoard } from "@/components/widgets/WatchBoard";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+
+const WatchBoard = lazy(() =>
+  import("@/components/widgets/WatchBoard").then((m) => ({ default: m.WatchBoard })),
+);
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Market } from "@/lib/api";
 import { applyMarketQuotes } from "@/lib/liveData";
@@ -103,12 +107,23 @@ export function WatchPopout() {
         </ToggleGroup>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        <WatchBoard
-          windowSec={WATCH_WINDOW_SEC[watchWindow]}
-          markets={markets}
-          symbol={symbol}
-          onSymbolChange={onSymbolChange}
-        />
+        <Suspense
+          fallback={
+            <Empty className="h-full rounded-none border-0">
+              <EmptyHeader>
+                <EmptyTitle>Add Markets to Watch</EmptyTitle>
+                <EmptyDescription>Plot live Paths for up to 8 Markets.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          }
+        >
+          <WatchBoard
+            windowSec={WATCH_WINDOW_SEC[watchWindow]}
+            markets={markets}
+            symbol={symbol}
+            onSymbolChange={onSymbolChange}
+          />
+        </Suspense>
       </div>
     </div>
   );

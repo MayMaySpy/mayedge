@@ -5,10 +5,12 @@ from __future__ import annotations
 import sys
 from decimal import Decimal as D
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
+from mayedge import db as store
 from mayedge.algos.chase import util
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.planner import venue as planner_venue
@@ -23,6 +25,7 @@ from mayedge.algos.trail.config import (
 )
 from mayedge.algos.trail.job import TrailRunner
 from mayedge.algos.trail.plan import TrailParams, TrailRefused, check_start
+from mayedge.config import settings
 from mayedge.lighter.coi import is_algo_client_order
 
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -67,6 +70,13 @@ def _params(**kw: Any) -> TrailParams:
 
 class TrailJobTests(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self._td = TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        db_path = patch.object(settings, "db_path", str(Path(self._td.name) / "mayedge.db"))
+        db_path.start()
+        self.addCleanup(db_path.stop)
+        self.addCleanup(store.close_db)
+        store.close_db()
         self.clock = FakeClock()
         p = patch.object(util, "now_ms", self.clock)
         p.start()

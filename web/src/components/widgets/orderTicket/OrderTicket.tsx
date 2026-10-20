@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,30 @@ import {
   useLiveBbo,
 } from "@/lib/liveData";
 import { livePlannerFor, type PlannerLadderStrength } from "@/lib/plannerPlan";
-import { PlannerDialog } from "@/components/widgets/planner/PlannerDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+const PlannerDialog = lazy(() =>
+  import("@/components/widgets/planner/PlannerDialog").then((m) => ({ default: m.PlannerDialog })),
+);
+
+function PlannerDialogFallback({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Planner</DialogTitle>
+          <DialogDescription>One trade from its stop.</DialogDescription>
+        </DialogHeader>
+      </DialogContent>
+    </Dialog>
+  );
+}
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
@@ -649,15 +672,19 @@ export function OrderTicket({
         onClose={() => setLevOpen(false)}
         onApply={applyLeverage}
       />
-      <PlannerDialog
-        open={plannerOpen}
-        onOpenChange={setPlannerOpen}
-        market={market}
-        mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
-        side={signedPos < 0 ? "sell" : "buy"}
-        running={runningPlanner}
-        initial={plannerFromTicket}
-      />
+      {plannerOpen ? (
+        <Suspense fallback={<PlannerDialogFallback onOpenChange={setPlannerOpen} />}>
+          <PlannerDialog
+            open={plannerOpen}
+            onOpenChange={setPlannerOpen}
+            market={market}
+            mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
+            side={signedPos < 0 ? "sell" : "buy"}
+            running={runningPlanner}
+            initial={plannerFromTicket}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

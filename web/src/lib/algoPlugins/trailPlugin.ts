@@ -1,12 +1,16 @@
-import {
-  TrailParamsSheet,
-  type TrailParamsState,
-} from "@/components/widgets/orderTicket/kinds/TrailParamsSheet";
+import { lazy } from "react";
+import type { TrailParamsState } from "@/components/widgets/orderTicket/kinds/TrailParamsSheet";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
 import { defaultTrailDraft, trailActivationReached, trailBody, trailDistanceProblem } from "@/lib/trail";
 import type { AlgoPlugin } from "./types";
+
+const TrailParamsSheet = lazy(() =>
+  import("@/components/widgets/orderTicket/kinds/TrailParamsSheet").then((m) => ({
+    default: m.TrailParamsSheet,
+  })),
+);
 
 /** Lockstep with backend `algos/trail/config.py` (ADR 0004). */
 export const TRAIL_COI_BASE = 12_000_000_000;
