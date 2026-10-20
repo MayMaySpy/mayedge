@@ -57,10 +57,10 @@ export function JournalPage() {
 
         <div className="grid gap-3 md:grid-cols-2">
           <div className="panel p-1">
-            <JournalBreakdown title="By market" column="Market" groups={journal.byMarket} />
+            <JournalBreakdown title="By market" column="Market" groups={journal.byMarket} total={journal.strip} />
           </div>
           <div className="panel p-1">
-            <JournalBreakdown title="By algo" column="Algo" groups={journal.byAlgo} />
+            <JournalBreakdown title="By algo" column="Algo" groups={journal.byAlgo} total={journal.strip} />
           </div>
         </div>
 

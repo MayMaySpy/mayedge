@@ -141,6 +141,9 @@ describe("JournalPage", () => {
     expect(screen.getByText("By algo")).toBeTruthy();
     const byAlgo = screen.getByText("By algo").closest("section") as HTMLElement;
     expect(await within(byAlgo).findByText("manual")).toBeTruthy();
+    expect(within(byAlgo).getByText("All")).toBeTruthy();
+    const options = [...(screen.getByLabelText("Algo") as HTMLSelectElement).options].map((o) => o.text);
+    expect(options.slice(0, 3)).toEqual(["All", "All algos", "Manual"]);
     expect(screen.getByText("Largest win")).toBeTruthy();
     expect(screen.queryByText(/1\.0416669/)).toBeNull();
     expect(summary.mock.calls.map(([opts]) => opts.group).sort()).toEqual(["algo", "day", "market", "none"]);

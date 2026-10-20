@@ -5,7 +5,13 @@ import { formatSigned } from "@/lib/utils";
 
 export const JOURNAL_RANGES = ["7d", "30d", "90d", "all"] as const;
 export type JournalRange = (typeof JOURNAL_RANGES)[number];
-export const JOURNAL_ALGOS = ["", "planner", "chase", "grid", "ladder", "twap", "trail", "manual"] as const;
+/** "" is everything; "algos" is every algo family without manual. */
+export const JOURNAL_ALGOS = ["", "algos", "manual", "planner", "chase", "grid", "ladder", "twap", "trail"] as const;
+const ALGO_LABELS: Record<string, string> = { "": "All", algos: "All algos", manual: "Manual" };
+
+export function algoLabel(value: string): string {
+  return ALGO_LABELS[value] ?? value;
+}
 
 const RANGE_DAYS: Record<JournalRange, number | null> = {
   "7d": 7,

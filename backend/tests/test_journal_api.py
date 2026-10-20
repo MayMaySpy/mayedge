@@ -81,6 +81,11 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             )
             self.assertEqual(other.json()["groups"][0]["count"], 0)
 
+            # The trip has no algo, so it is manual: in All and Manual, not in All algos.
+            for algo, count in (("", 1), ("manual", 1), ("algos", 0)):
+                got = await client.get("/api/journal/trips", params={"algo": algo})
+                self.assertEqual(len(got.json()["trips"]), count, algo)
+
     @patch("mayedge.api.routes.journal.run_sync", new_callable=AsyncMock)
     async def test_sync_starts_without_reading_the_venue_here(self, run_sync: AsyncMock) -> None:
         run_sync.return_value = {"started": False, "last_synced_at": None}

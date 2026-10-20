@@ -13,6 +13,7 @@ import type { JournalSummaryGroup, JournalTrip } from "@/lib/api";
 import {
   JOURNAL_ALGOS,
   JOURNAL_RANGES,
+  algoLabel,
   heldFor,
   magnitude,
   money,
@@ -60,7 +61,7 @@ export function JournalControls({ journal, className }: { journal: JournalState;
       >
         {JOURNAL_ALGOS.map((item) => (
           <option key={item || "all"} value={item}>
-            {item || "All algos"}
+            {algoLabel(item)}
           </option>
         ))}
       </select>
@@ -122,15 +123,29 @@ export function JournalStats({
   );
 }
 
-/** Per market or per algo, from the summary endpoint. */
+function BreakdownRow({ label, row, total = false }: { label: string; row: JournalSummaryGroup; total?: boolean }) {
+  return (
+    <TableRow className={total ? "border-t border-border font-medium" : undefined}>
+      <TableCell className="font-mono">{label}</TableCell>
+      <TableCell className="text-right font-mono tabular-nums">{row.count}</TableCell>
+      <TableCell className="text-right font-mono tabular-nums">{pct(row.win_rate)}</TableCell>
+      <TableCell className="text-right font-mono tabular-nums">{ratio(row.profit_factor)}</TableCell>
+      <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.net))}>{money(row.net)}</TableCell>
+    </TableRow>
+  );
+}
+
+/** Per market or per algo, from the summary endpoint. `total` is the whole range, as the All row. */
 export function JournalBreakdown({
   title,
   column,
   groups,
+  total,
 }: {
   title: string;
   column: string;
   groups: JournalSummaryGroup[];
+  total?: JournalSummaryGroup | null;
 }) {
   const rows = [...groups].sort((a, b) => Number(b.net ?? 0) - Number(a.net ?? 0));
   return (
@@ -154,17 +169,12 @@ export function JournalBreakdown({
               </TableCell>
             </TableRow>
           ) : (
-            rows.map((row) => (
-              <TableRow key={row.key}>
-                <TableCell className="font-mono">{row.key}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{row.count}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{pct(row.win_rate)}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{ratio(row.profit_factor)}</TableCell>
-                <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.net))}>
-                  {money(row.net)}
-                </TableCell>
-              </TableRow>
-            ))
+            <>
+              {rows.map((row) => (
+                <BreakdownRow key={row.key} label={row.key} row={row} />
+              ))}
+              {total ? <BreakdownRow label="All" row={total} total /> : null}
+            </>
           )}
         </TableBody>
       </Table>

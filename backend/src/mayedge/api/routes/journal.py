@@ -150,7 +150,12 @@ def _market_ok(trip: RoundTrip, market: str | None) -> bool:
 
 
 def _algo_ok(trip: RoundTrip, algo: str | None) -> bool:
-    return not algo or trip.algo == algo
+    """Empty is every Round trip. `algos` is every algo family, manual left out."""
+    if not algo:
+        return True
+    if algo == "algos":
+        return trip.algo != "manual"
+    return trip.algo == algo
 
 
 def _span_ok(trip: RoundTrip, since: int | None, until: int | None) -> bool:

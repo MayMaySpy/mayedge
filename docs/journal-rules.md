@@ -31,7 +31,7 @@ Two Round trips are not in the headline stats. They are still listed.
 
 ## Algo and R
 
-Each fill may name an `algo_id` (`PL-`, `CH-`, `CG-`, `LD-`, `TW-`, `TR-`). The Round trip's algo is the family with the most opening size. No linked opening size means `manual`.
+Each fill may name an `algo_id` (`PL-`, `CH-`, `CG-`, `LD-`, `TW-`, `TR-`). The Round trip's algo is the family with the most opening size. No linked opening size means `manual`. The algo filter takes a family, `manual`, `algos` (every family except manual), or nothing for every Round trip.
 
 **R** is Net divided by `|entry − stop| × size`. Entry and stop are the plan that Planner run holds (`plan.entry`, `plan.stop`): the actual average entry once it filled (planner-rules P1), and the stop it was planned with. A Re-plan replaces that stop; Stop steps and a Trail stop do not. Size is the size this Round trip opened. A Planner run with no stored stop, a zero risk, or any other family has no R.
 
