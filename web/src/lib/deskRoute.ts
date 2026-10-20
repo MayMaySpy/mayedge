@@ -5,7 +5,8 @@ export const DEFAULT_SYMBOL = "LIT";
 const SYMBOL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const LEGACY_VENUE_RE = /^(lighter|hyperliquid)$/i;
 export const WATCH_PATH = "/watch";
-const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH"]);
+export const JOURNAL_PATH = "/journal";
+const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH", "JOURNAL"]);
 
 export type ParsedPath = {
   symbol: string;
@@ -38,6 +39,11 @@ export function toPath(symbol: string): string {
 export function isWatchPath(pathname: string): boolean {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   return parts.length === 1 && parts[0].toUpperCase() === "WATCH";
+}
+
+export function isJournalPath(pathname: string): boolean {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  return parts.length === 1 && parts[0].toUpperCase() === "JOURNAL";
 }
 
 function readSymbolFromStorage(): string | null {

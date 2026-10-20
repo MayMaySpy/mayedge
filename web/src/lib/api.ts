@@ -228,12 +228,19 @@ export interface JournalSummaryGroup {
   wins: number;
   losses: number;
   win_rate: string | null;
+  gross_pnl?: string | null;
   net: string | null;
   fees: string | null;
   funding: string | null;
+  avg_win?: string | null;
+  avg_loss?: string | null;
   profit_factor: string | null;
   expectancy: string | null;
+  largest_win?: string | null;
+  largest_loss?: string | null;
+  maker_share?: string | null;
   avg_r: string | null;
+  total_r?: string | null;
   max_drawdown: string | null;
   curve: { ts: number; net: string | null }[];
 }

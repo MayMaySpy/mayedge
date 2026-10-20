@@ -9,14 +9,14 @@ import {
 import { theme } from "@/lib/theme";
 
 /** Daily Net bars and the running Net line. `time` is UTC midnight, seconds. */
-export function JournalChart({ days }: { days: { time: number; net: number }[] }) {
+export function JournalChart({ days, height = 120 }: { days: { time: number; net: number }[]; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el || days.length === 0) return;
     const chart = createChart(el, {
-      height: 120,
+      height,
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
@@ -56,7 +56,7 @@ export function JournalChart({ days }: { days: { time: number; net: number }[] }
     );
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [days]);
+  }, [days, height]);
 
-  return <div ref={ref} className="h-[120px] w-full" />;
+  return <div ref={ref} className="w-full" style={{ height }} />;
 }

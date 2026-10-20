@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "@/test/dom";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { JournalPage } from "@/components/JournalPage";
 import { JournalTab } from "@/components/widgets/account/JournalTab";
 import { api, type JournalSummaryGroup, type JournalTrip } from "@/lib/api";
 
@@ -117,5 +118,31 @@ describe("JournalTab", () => {
     expect(screen.getByText("close")).toBeTruthy();
     expect(screen.getByText("buy")).toBeTruthy();
     expect(screen.getByText("sell")).toBeTruthy();
+  });
+});
+
+describe("JournalPage", () => {
+  it("shows the full summary and the breakdowns by market and algo", async () => {
+    vi.spyOn(api, "journalTrips").mockResolvedValue({ trips: [trip] });
+    const summary = vi.spyOn(api, "journalSummary").mockImplementation(async (opts) => ({
+      range: opts.range,
+      group: opts.group,
+      groups:
+        opts.group === "market"
+          ? [{ ...strip, key: "ETH" }]
+          : opts.group === "algo"
+            ? [{ ...strip, key: "manual" }]
+            : [{ ...strip, profit_factor: "1.041666974894288296626184072", largest_win: "18" }],
+    }));
+
+    render(<JournalPage />);
+
+    expect(await screen.findByText("By market")).toBeTruthy();
+    expect(screen.getByText("By algo")).toBeTruthy();
+    const byAlgo = screen.getByText("By algo").closest("section") as HTMLElement;
+    expect(await within(byAlgo).findByText("manual")).toBeTruthy();
+    expect(screen.getByText("Largest win")).toBeTruthy();
+    expect(screen.queryByText(/1\.0416669/)).toBeNull();
+    expect(summary.mock.calls.map(([opts]) => opts.group).sort()).toEqual(["algo", "day", "market", "none"]);
   });
 });
