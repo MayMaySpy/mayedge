@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { ArrowLeftIcon } from "lucide-react";
 import {
   AllocationBar,
   DaysTable,
@@ -7,11 +6,11 @@ import {
   PortfolioHero,
   ValueChart,
 } from "@/components/portfolio/PortfolioParts";
+import { PageNav } from "@/components/PageNav";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { JournalChart } from "@/components/widgets/account/JournalChart";
 import { usePortfolioPage, type PortfolioRange, type PortfolioSpan } from "@/hooks/usePortfolioPage";
 import { money } from "@/lib/journalFormat";
-import { readSymbol, toPath } from "@/lib/deskRoute";
 import { heldKinds, historyKinds, PORTFOLIO_KIND_LABELS } from "@/lib/portfolioDay";
 
 const RANGES: PortfolioRange[] = ["1d", "7d", "30d", "90d", "all"];
@@ -42,17 +41,7 @@ export function PortfolioPage() {
     <div className="h-dvh overflow-y-auto bg-background text-base text-foreground">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-3 p-4">
         <header className="flex flex-wrap items-center gap-3">
-          <a
-            href={toPath(readSymbol("/"))}
-            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" aria-hidden />
-            Desk
-          </a>
-          <h1 className="text-lg font-medium">Portfolio</h1>
-          <a href="/journal" className="text-muted-foreground hover:text-foreground">
-            Journal
-          </a>
+          <PageNav current="Portfolio" />
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <ToggleGroup
               type="single"

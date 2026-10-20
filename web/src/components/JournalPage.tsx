@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowLeftIcon, RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon } from "lucide-react";
 import { JournalChart } from "@/components/widgets/account/JournalChart";
 import {
   JournalBreakdown,
@@ -7,9 +7,9 @@ import {
   JournalStats,
   JournalTrips,
 } from "@/components/journal/JournalParts";
+import { PageNav } from "@/components/PageNav";
 import { Button } from "@/components/ui/button";
 import { useJournal } from "@/hooks/useJournal";
-import { readSymbol, toPath } from "@/lib/deskRoute";
 
 /** The Journal on its own page, at /journal. REST only: it holds no desk socket. */
 export function JournalPage() {
@@ -23,14 +23,7 @@ export function JournalPage() {
     <div className="h-dvh overflow-y-auto bg-background text-base text-foreground">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-3 p-4">
         <header className="flex flex-wrap items-center gap-3">
-          <a
-            href={toPath(readSymbol("/"))}
-            className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" aria-hidden />
-            Desk
-          </a>
-          <h1 className="text-lg font-medium">Journal</h1>
+          <PageNav current="Journal" />
           <JournalControls journal={journal} className="ml-auto" />
           <Button
             type="button"
