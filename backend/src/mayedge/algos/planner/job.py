@@ -14,29 +14,25 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase import util
-from mayedge.algos.chase.config import ACK_WAIT_MS, MIN_REQUOTE_MS
 from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.iceberg import Action, ChaseIcebergParams, MarketView, decide
+from mayedge.algos.chase.iceberg import MarketView
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.chase.util import (
     _is_invalid_nonce,
-    _is_min_size,
     _is_order_not_found,
     _is_rate_limit,
-    _is_would_cross,
 )
-from mayedge.algos.ladder.plan import Rung, is_passive, sort_by_closeness
+from mayedge.algos.ladder.plan import Rung
 from mayedge.algos.ledger import Clip, Ledger
+from mayedge.algos.planner import entry as entry_phase
+from mayedge.algos.planner import manage as manage_phase
 from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import (
     ACK_GRACE_MS,
     CANCEL_WAIT_S,
     CANCEL_WAIT_TRIES,
-    MARKET_ENTRY_GRACE_MS,
-    MISMATCH_GRACE_MS,
     MISSING_GRACE_MS,
     RATE_LIMIT_COOLDOWN_MS,
-    RUNG_TX_RESERVE,
 )
 from mayedge.algos.planner.plan import (
     ALGO_ID,
@@ -50,12 +46,9 @@ from mayedge.algos.planner.plan import (
     check_stop_live,
     check_targets_live,
     entry_follow,
-    plan_size,
     plan_steps,
     price_plan,
-    round_qty,
     stop_price,
-    trail_price_distance,
 )
 from mayedge.algos.planner.state import PlannerBookView, PlannerState
 from mayedge.algos.trail import engine
@@ -680,59 +673,7 @@ class PlannerRunner:
                 self._publish()
 
     async def _evaluate_entry(self, now: int, prices: list[Decimal]) -> None:
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        if p.entry_type == "chase":
-            await self._work_chase(now)
-            return
-        if p.entry_type == "ladder":
-            await self._work_ladder(now)
-            return
-        entry = self._latest("entry")
-        if entry is None:
-            if p.entry_type == "trail":
-                await self._track_entry(now, prices)
-                return
-            raise RuntimeError("planner entering with no entry")
-        pos, avg = self._held()
-        filled = max(min(entry.filled, plan.size), min(max(pos, ZERO), plan.size))
-        st.entry_filled = filled
-        if filled > 0 and self._live("stop") is None and "stop" not in self._gave_up:
-            await self._place_stop()
-        if st.status != ChaseStatus.RUNNING:
-            return
-        half = self._qty_step() / 2
-        if entry.status == "live":
-            mark = self._mark()
-            if filled >= plan.size - half:
-                entry.status = "filled"
-                entry.closed_at = now
-            elif mark > 0 and (mark - plan.stop) * _sign(p.side) <= 0:
-                if await self._cancel_clip(entry):
-                    st.reason = "stop reached before the entry filled"  # E4
-            elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
-                if await self._cancel_clip(entry):
-                    st.reason = "entry expired"  # E5
-            elif st.finish_entry:
-                if await self._cancel_clip(entry):
-                    st.reason = "entry ended early"  # E14
-            else:
-                gone = entry.missing_since is not None and (
-                    now - entry.missing_since >= MISSING_GRACE_MS
-                )
-                # A Market entry may come and go between two account updates.
-                market_over = (
-                    p.entry_type in ("market", "trail")
-                    and not entry.seen_on_book
-                    and now - entry.placed_at >= MARKET_ENTRY_GRACE_MS
-                )
-                if gone or market_over:
-                    entry.status = "filled" if filled > 0 else "cancelled"
-                    entry.closed_at = now
-        if entry.status == "live":
-            return
-        await self._entry_over(now, filled, avg, closed_at=entry.closed_at)
+        return await entry_phase._evaluate_entry(self, now, prices)
 
     async def _entry_over(
         self, now: int, filled: Decimal, avg: Decimal | None, *, closed_at: int | None
@@ -769,265 +710,21 @@ class PlannerRunner:
         )
 
     async def _work_chase(self, now: int) -> None:
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None and p.entry_chase is not None
-        ec = p.entry_chase
-        clips = [c for c in st.ledger.clips if self._role(c) == "entry"]
-        pos, avg = self._held()
-        traded = sum((min(c.filled, c.qty) for c in clips), ZERO)
-        # E7, E13: the trades or the Position, whichever shows more, never past the plan.
-        filled = min(plan.size, max(traded, pos, ZERO))
-        st.entry_filled = filled
-        if filled > 0 and self._live("stop") is None and "stop" not in self._gave_up:
-            await self._place_stop()  # E2
-        if st.status != ChaseStatus.RUNNING:
-            return
-        live = self._live("entry")
-        half = self._qty_step() / 2
-        mark = self._mark()
-        over: str | None = None
-        if filled >= plan.size - half:
-            over = "entry filled"
-        elif mark > 0 and (mark - plan.stop) * _sign(p.side) <= 0:
-            over = "stop reached before the entry filled"  # E4
-        elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
-            over = "entry expired"  # E5
-        elif st.finish_entry:
-            over = "entry ended early"  # E14
-        if over is not None:
-            if live is not None and not await self._cancel_clip(live):
-                return
-            if over != "entry filled":
-                st.reason = over
-            last = self._latest("entry")
-            await self._entry_over(now, filled, avg, closed_at=last.closed_at if last else now)
-            return
-        if live is not None:
-            before = sum((min(c.filled, c.qty) for c in clips if c is not live), ZERO)
-            if live.filled >= live.qty - half or pos >= before + live.qty - half:
-                # The trades or the Position account for all of it (E7: the Position is evidence).
-                live.filled = max(live.filled, live.qty)
-                live.status = "filled"
-                live.closed_at = now
-                live = None
-        if live is not None and not live.seen_on_book and now - live.placed_at >= ACK_GRACE_MS:
-            # Never shown on the book: the venue did not take it (post-only, say).
-            live.missing_since = live.missing_since or now - MISSING_GRACE_MS
-        if live is not None and self._gone(live, now):
-            # Off the book and not accounted for: wait for the evidence (E13).
-            live.status = "cancelled"
-            live.closed_at = now
-            live = None
-            self._entry_vanished_ms = now
-        if live is None and self._entry_vanished_ms and now - self._entry_vanished_ms < MISSING_GRACE_MS:
-            st.reason = "entry waits for the last Clip's fills"  # E13
-            return
-        view = self._chase_view()
-        remaining = plan.size - filled
-        quote = None
-        if view is not None:
-            quote = decide(
-                ChaseIcebergParams(
-                    side=p.side,
-                    qty=plan.size,
-                    display_qty=ec.clip if ec.clip is not None else remaining,
-                    offset_bps=ec.offset_bps,
-                    price_floor=ec.low,
-                    price_ceiling=ec.high,
-                ),
-                view,
-                remaining,
-            )
-        if quote is None or quote.action != Action.REST:
-            reason = "book not synced" if quote is None else (quote.reason or "waiting")
-            if quote is not None and quote.reason == "below_min_qty" and filled > 0:
-                # What is left is under the venue minimum: the entry is as full as it gets.
-                if live is not None and not await self._cancel_clip(live):
-                    return
-                await self._entry_over(now, filled, avg, closed_at=now)
-                return
-            if live is not None:
-                await self._cancel_clip(live)
-            st.reason = f"entry waits: {reason.replace('_', ' ')}"
-            return
-        assert quote.price is not None and quote.qty is not None
-        if live is None:
-            await self._rest_entry(quote.price, quote.qty, now)
-            return
-        if live.price == quote.price:
-            st.reason = f"entry resting at {_fmt(live.price)}"
-            return
-        if not live.seen_on_book and now - live.placed_at < ACK_WAIT_MS:
-            return
-        if now - self._entry_moved_ms < MIN_REQUOTE_MS:
-            return
-        await self._amend_chase(live, quote.price, now)
+        return await entry_phase._work_chase(self, now)
 
     async def _rest_entry(self, price: Decimal, qty: Decimal, now: int) -> str | None:
-        """A post-only entry Clip: a Chase entry's (E10) or a Ladder rung (EL1).
-
-        None once sent, or why the venue refused it: "cross" or "min".
-        """
-        st = self._state
-        p = st.params
-        assert p is not None
-        clip = self._place("entry", price=price, qty=qty)
-        try:
-            await self._exec().create_limit_order(
-                market_index=st.market_index,
-                side=p.side,
-                size=_fmt(qty),
-                price=_fmt(price),
-                time_in_force="post_only",
-                reduce_only=False,
-                client_order_index=clip.client_order_index,
-            )
-        except Exception as e:
-            clip.status = "cancelled"
-            clip.closed_at = now
-            if _is_would_cross(e) or _is_min_size(e):
-                st.reason = f"entry waits: {e}"
-                return "min" if _is_min_size(e) else "cross"
-            raise
-        self._entry_moved_ms = now
-        st.reason = f"entry resting at {_fmt(price)}"
-        return None
+        return await entry_phase._rest_entry(self, price, qty, now)
 
     async def _amend_chase(self, clip: Clip, price: Decimal, now: int) -> None:
-        """E10: move the Clip in place as the book walks."""
-        await self._await_order_index(clip)
-        if not clip.order_index or clip.status != "live":
-            return
-        try:
-            await self._exec().modify_order(
-                market_index=self._state.market_index,
-                order_index=clip.order_index,
-                price=_fmt(price) or "0",
-                size=_fmt(clip.remaining if clip.remaining > 0 else clip.qty) or "0",
-            )
-        except Exception as e:
-            if _is_would_cross(e):
-                self._entry_moved_ms = now  # keep the resting price; try again later
-                return
-            if _is_order_not_found(e):
-                clip.missing_since = clip.missing_since or now
-                return
-            raise
-        self._state.ledger.amend(clip, price=price, now=now)
-        self._entry_moved_ms = now
-        self._state.reason = f"entry resting at {_fmt(price)}"
+        return await entry_phase._amend_chase(self, clip, price, now)
 
     # ── Ladder entry (EL1–EL5) ───────────────────────────────────────────
 
     async def _work_ladder(self, now: int) -> None:
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        clips = [c for c in st.ledger.clips if self._role(c) == "entry"]
-        pos, avg = self._held()
-        half = self._qty_step() / 2
-        traded = sum((min(c.filled, c.qty) for c in clips), ZERO)
-        for c in clips:
-            if c.status != "live":
-                continue
-            if not c.seen_on_book and now - c.placed_at >= ACK_GRACE_MS:
-                # Never shown on the book: the venue did not take it (post-only, say).
-                c.missing_since = c.missing_since or now - MISSING_GRACE_MS
-            if not self._gone(c, now):
-                continue
-            if pos >= traded + c.remaining - half:
-                # The Position shows more than the trades by this rung: a fill (E7).
-                traded += c.remaining
-                c.filled = c.qty
-                c.status = "filled"
-            else:
-                # Off the book and not accounted for: wait for the evidence, then rest it again (E13).
-                c.status = "cancelled"
-                self._entry_vanished_ms = now
-            c.closed_at = now
-        # E7: the trades or the Position, whichever shows more, never past the plan.
-        filled = min(plan.size, max(traded, pos, ZERO))
-        st.entry_filled = filled
-        if filled > 0 and self._live("stop") is None and "stop" not in self._gave_up:
-            await self._place_stop()  # E2
-        if st.status != ChaseStatus.RUNNING:
-            return
-        live = [c for c in clips if c.status == "live"]
-        pending = self._pending_rungs(plan.rungs, clips, half)
-        mark = self._mark()
-        over: str | None = None
-        if (not pending and not live) or filled >= plan.size - half:
-            over = "entry filled"  # EL3
-        elif mark > 0 and (mark - plan.stop) * _sign(p.side) <= 0:
-            over = "stop reached before the entry filled"  # E4
-        elif st.entry_deadline_ms and now >= st.entry_deadline_ms:
-            over = "entry expired"  # E5
-        elif st.finish_entry:
-            over = "entry ended early"  # E14
-        if over is not None:
-            pulled = [await self._cancel_clip(c) for c in live]
-            if not all(pulled):
-                return
-            if over != "entry filled":
-                st.reason = over
-            closed = max((c.closed_at or 0 for c in clips), default=0)
-            await self._entry_over(now, filled, avg, closed_at=closed or st.created_at)
-            return
-        if self._entry_vanished_ms and now - self._entry_vanished_ms < MISSING_GRACE_MS:
-            st.reason = "entry waits for a rung's fills"  # E13
-            return
-        if not pending:
-            st.reason = f"{len(live)} rungs resting"
-            return
-        view = self._chase_view()
-        if view is None:
-            st.reason = "entry waits: book not synced"
-            return
-        # EL1: a rung that would cross waits. Nearest the market goes on first.
-        ready = sort_by_closeness(
-            [r for r in pending if is_passive(side=p.side, price=r.price, bid=view.bid, ask=view.ask)],
-            p.side,
-        )
-        # EL4: from the algo rate budget, leaving room for the stop.
-        room = budget.tx_room("algo") - RUNG_TX_RESERVE
-        placed = 0
-        for r in ready[: max(0, room)]:
-            try:
-                refused = await self._rest_entry(r.price, r.qty, now)
-            except Exception as e:
-                if isinstance(e, BudgetRefused) or _is_rate_limit(e):
-                    self._backoff_until = now + RATE_LIMIT_COOLDOWN_MS
-                    break
-                raise
-            if refused is None:
-                placed += 1
-            elif refused == "min":
-                # Under the venue minimum: the rung is as full as it gets.
-                self._gave_up.add(f"rung {_fmt(r.price)}")
-        resting = len(live) + placed
-        waiting = len(pending) - placed
-        st.reason = f"{resting} rungs resting, {waiting} waiting" if waiting else f"{resting} rungs resting"
+        return await entry_phase._work_ladder(self, now)
 
     def _pending_rungs(self, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal) -> list[Rung]:
-        """EL1: rungs with nothing resting and something left to fill, at what is left."""
-        ctx, _ = venue.market_context(self._exec(), self._state.market_index)
-        out: list[Rung] = []
-        for r in rungs:
-            if f"rung {_fmt(r.price)}" in self._gave_up:
-                continue
-            mine = [c for c in clips if c.price == r.price]
-            if any(c.status == "live" for c in mine):
-                continue
-            # A filled rung is not refilled.
-            if any(c.status == "filled" for c in mine):
-                continue
-            got = sum((min(c.filled, c.qty) for c in mine), ZERO)
-            left = round_qty(r.qty - got, ctx.qty_step)
-            if left <= half or left < ctx.min_qty:
-                continue
-            out.append(dataclasses.replace(r, qty=left))
-        return out
+        return entry_phase._pending_rungs(self, rungs, clips, half)
 
     def _end(self, reason: str) -> None:
         st = self._state
@@ -1036,61 +733,10 @@ class PlannerRunner:
         self._book.finish(self)
 
     async def _track_entry(self, now: int, prices: list[Decimal]) -> None:
-        """E9: follow the best price, and fire the entry when the price comes back."""
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        if st.entry_deadline_ms and now >= st.entry_deadline_ms:
-            await self._cancel_all()
-            self._end("entry expired before it fired")  # E5, E6
-            return
-        if st.finish_entry:
-            await self._cancel_all()
-            self._end("entry ended before it fired")  # E14, E6
-            return
-        f = entry_follow(p, self._tick())
-        sign = _sign(p.side)
-        point = st.trails.get("entry", Point())
-        for px in prices:
-            if (px - plan.stop) * sign <= 0:
-                st.trails["entry"] = point
-                await self._cancel_all()
-                self._end("stop reached before the entry fired")  # E4
-                return
-            point = engine.follow(f, point, px)
-            if point.active and point.trigger is not None and engine.crossed(f, point.trigger, px):
-                st.trails["entry"] = point
-                await self._fire_entry(px)
-                return
-        st.trails["entry"] = point
-        st.reason = "entry following" if point.active else "entry waits for its Activation"
+        return await entry_phase._track_entry(self, now, prices)
 
     async def _fire_entry(self, px: Decimal) -> None:
-        """E9 and P2: size from the price it fires at, check S1 again, send it at market."""
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        ctx, _ = venue.market_context(self._exec(), st.market_index)
-        try:
-            size = plan_size(p, ctx, entry=px, stop=plan.stop)
-            st.plan = price_plan(
-                side=p.side,
-                entry=px,
-                stop=plan.stop,
-                size=size,
-                targets=p.targets,
-                ctx=ctx,
-                risk_pct=p.risk_pct,
-                stop_steps=p.stop_steps,
-                trail_stop=p.trail_stop,
-            )
-            check_notional(size, px, settings.max_order_notional)
-        except (PlanRefused, ValueError) as e:
-            await self._cancel_all()
-            self._end(f"entry did not fire: {e}")
-            return
-        await self._send_entry()
-        st.reason = f"entry fired at {_fmt(px)}"
+        return await entry_phase._fire_entry(self, px)
 
     async def _enter_managing(self, filled: Decimal, avg: Decimal) -> None:
         """P4 and E3: re-draw the targets from the actual entry and put them on."""
@@ -1119,138 +765,16 @@ class PlannerRunner:
         await self._place_targets()
 
     async def _evaluate_manage(self, now: int, prices: list[Decimal]) -> None:
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        pos, _ = self._held()
-        if pos == 0:
-            # N1: flat, by the stop, the last target or the operator.
-            self._flat_since = self._flat_since or now
-            if now - self._flat_since < MISSING_GRACE_MS:
-                return
-            await self._cancel_all()
-            st.status = ChaseStatus.DONE
-            st.reason = "flat"
-            self._book.finish(self)
-            return
-        self._flat_since = None
-        expected = st.entry_filled - self._tp_filled()
-        half = self._qty_step() / 2
-        for clip in self._tp_clips():
-            if clip.status != "live" or clip.missing_since is None:
-                continue
-            if pos <= expected - clip.remaining + half:
-                # Gone from the book and the Position is smaller by it: a fill,
-                # even when the feed never showed it resting.
-                clip.seen_on_book = True
-                st.ledger.close_missing(clip, canceling=False, now=now)
-                expected = st.entry_filled - self._tp_filled()
-            elif self._gone(clip, now):
-                clip.status = "cancelled"
-                clip.closed_at = now
-        st.expected_size = expected
-        if abs(pos - expected) > half:
-            self._mismatch_since = self._mismatch_since or now
-            if now - self._mismatch_since >= MISMATCH_GRACE_MS and st.status == ChaseStatus.RUNNING:
-                st.status = ChaseStatus.PAUSED
-                st.reason = "position changed"  # M6
-        else:
-            self._mismatch_since = None
-        if st.status != ChaseStatus.RUNNING:
-            return
-        stop = self._live("stop")
-        if stop is not None and self._gone(stop, now):
-            # The Position is still open and its stop is gone. Put it back.
-            stop.status = "cancelled"
-            stop.closed_at = now
-            stop = None
-        if stop is None and "stop" not in self._gave_up:
-            await self._place_stop()
-        await self._place_targets()
-        await self._take_step()
-        if st.status == ChaseStatus.RUNNING and st.phase == "managing":
-            await self._trail_stop(now, prices)
-        if st.status == ChaseStatus.RUNNING and st.phase == "managing":
-            await self._trail_targets(now, prices)
+        return await manage_phase._evaluate_manage(self, now, prices)
 
     def _due_step(self) -> PlannedStep | None:
-        """The furthest Stop step whose target has filled in full and is not taken yet."""
-        st = self._state
-        assert st.plan is not None
-        due: PlannedStep | None = None
-        for step in st.plan.steps:
-            if step.after <= st.steps_done:
-                continue
-            tp = self._latest(f"tp{step.after}")
-            if tp is not None and tp.status == "filled" and tp.filled >= tp.qty:
-                due = step
-        return due
+        return manage_phase._due_step(self)
 
     async def _take_step(self) -> None:
-        """M2–M4 and M9: step the stop toward profit, once per step, never back."""
-        st = self._state
-        assert st.plan is not None
-        step = self._due_step()
-        if step is None:
-            return
-        price = self._step_price(step)
-        current = st.stop_trigger if st.stop_trigger is not None else st.plan.stop
-        if (price - current) * _sign(self._side()) <= 0:
-            st.steps_done = step.after
-            return
-        stop = self._live("stop")
-        if stop is None:
-            return
-        await self._await_order_index(stop)
-        if not stop.order_index:
-            return
-        ex = self._exec()
-        if ex.amend_trigger_leg is None:
-            raise RuntimeError("trigger amend is not wired")
-        p = st.params
-        name = "breakeven" if step.to == "breakeven" else step.to.upper()
-        try:
-            await ex.amend_trigger_leg(
-                st.market_index,
-                stop.order_index,
-                self._close_side(),
-                role="sl",
-                kind="market",
-                trigger=_fmt(price) or "0",
-                slippage=p.slippage if p else 0.01,
-            )
-        except ValueError as e:
-            if "wrong side of mark" not in str(e):
-                raise
-            if step.to == "breakeven":
-                st.reason = "breakeven waits for mark to clear it"
-                return
-            # M9: price is already back through the step; take the exit it promised.
-            await self._close_at_market()
-            st.steps_done = step.after
-            st.reason = f"mark passed the step to {name}: closed at market"
-            return
-        stop.price = price
-        st.stop_trigger = price
-        st.steps_done = step.after
-        st.reason = f"stop at {name}"
+        return await manage_phase._take_step(self)
 
     def _step_price(self, step: PlannedStep) -> Decimal:
-        """M2: a step to a Trail target goes to the price it filled at."""
-        st = self._state
-        assert st.plan is not None
-        if not step.to.startswith("tp"):
-            return step.price
-        target = next((t for t in st.plan.targets if f"tp{t.index}" == step.to), None)
-        if target is None or target.order != "trail":
-            return step.price
-        seqs = {c.seq for c in st.ledger.clips if self._role(c) == step.to}
-        fills = [f for f in st.ledger.fills if f.clip_seq in seqs]
-        qty = sum((f.qty for f in fills), ZERO)
-        if qty <= 0:
-            return step.price
-        avg = sum((f.price * f.qty for f in fills), ZERO) / qty
-        return stop_price(self._side(), avg, self._tick())
+        return manage_phase._step_price(self, step)
 
     def _leg_follow(
         self, distance: Decimal, kind: engine.DistanceKind, *, activation: Decimal | None, floor: Decimal | None
@@ -1322,133 +846,16 @@ class PlannerRunner:
         return tp is not None and tp.status == "filled" and tp.filled >= tp.qty
 
     async def _trail_stop(self, now: int, prices: list[Decimal]) -> None:
-        """M10: past its start the stop follows the best price, never below the stepped stop."""
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        ts = p.trail_stop
-        stop = self._live("stop")
-        if ts is None or stop is None or not self._trail_stop_started():
-            return
-        distance, kind = trail_price_distance(ts.unit, ts.distance, plan.r)
-        activation = None
-        if ts.start == "r" and ts.at_r is not None:
-            activation = plan.entry + _sign(p.side) * plan.r * ts.at_r
-        current = st.stop_trigger if st.stop_trigger is not None else plan.stop
-        f = self._leg_follow(distance, kind, activation=activation, floor=current)
-        point = st.trails.get("stop", Point())
-        for px in prices:
-            point = engine.follow(f, point, px)
-            trigger = point.trigger
-            if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
-                st.trails["stop"] = point
-                await self._close_at_market()  # Trail L1
-                st.reason = f"trail stop: closed at market at {_fmt(px)}"
-                return
-        st.trails["stop"] = point
-        if not point.active or point.trigger is None:
-            return
-        wanted = self._venue_wanted(f, point)
-        if not self._move_due("stop", f, venue_at=current, wanted=wanted, best=point.best or wanted, now=now):
-            return
-        moved = await self._amend_trigger(stop, wanted)
-        if moved is None:
-            return
-        if not moved:
-            await self._close_at_market()  # M9, Trail V2
-            st.reason = "mark passed the trail stop: closed at market"
-            return
-        st.stop_trigger = wanted
-        st.trail_moves["stop"] = now
-        st.reason = f"stop trailing at {_fmt(wanted)}"
+        return await manage_phase._trail_stop(self, now, prices)
 
     async def _trail_targets(self, now: int, prices: list[Decimal]) -> None:
-        """P9 Trail: at its price a target puts on a reduce-only Stop for its size, and follows."""
-        st = self._state
-        p, plan = st.params, st.plan
-        assert p is not None and plan is not None
-        for t in plan.targets:
-            if t.order == "trail" and t.trail_distance is not None:
-                await self._trail_target(t, now, prices)
-                if st.status != ChaseStatus.RUNNING:
-                    return
+        return await manage_phase._trail_targets(self, now, prices)
 
     async def _trail_target(self, t: PlannedTarget, now: int, prices: list[Decimal]) -> None:
-        st = self._state
-        p = st.params
-        assert p is not None and t.trail_distance is not None
-        role = f"tp{t.index}"
-        if role in self._gave_up:
-            return
-        clips = [c for c in st.ledger.clips if self._role(c) == role]
-        left = t.qty - sum((c.filled for c in clips), ZERO)
-        live = [c for c in clips if c.status == "live"]
-        if left <= 0:
-            return
-        if role in st.trail_fired:
-            if live:
-                return  # the fire is out; the fill or the grace decides
-            st.trail_fired.discard(role)
-        f = self._leg_follow(t.trail_distance, t.trail_kind, activation=t.price, floor=None)
-        point = st.trails.get(role, Point())
-        for px in prices:
-            point = engine.follow(f, point, px)
-            trigger = point.trigger
-            if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
-                st.trails[role] = point
-                await self._fire_target(role, live, left, px)
-                return
-        st.trails[role] = point
-        if not point.active or point.trigger is None:
-            return
-        wanted = self._venue_wanted(f, point)
-        clip = live[0] if live else None
-        if clip is None:
-            clip = self._place(role, price=wanted, qty=left)
-            try:
-                await self._send_trigger(clip, role="sl", kind="market", size=left, trigger=wanted)
-            except ValueError as e:
-                if "wrong side of mark" not in str(e):
-                    self._gave_up.add(role)
-                    st.reason = f"target {t.index} refused: {e}"
-                    return
-                await self._fire_target(role, [], left, self._mark())  # Trail V2
-                return
-            st.trail_moves[role] = now
-            st.reason = f"TP{t.index} trailing at {_fmt(wanted)}"
-            return
-        if not self._move_due(role, f, venue_at=clip.price, wanted=wanted, best=point.best or wanted, now=now):
-            return
-        moved = await self._amend_trigger(clip, wanted)
-        if moved is None:
-            return
-        if not moved:
-            await self._fire_target(role, [clip], left, self._mark())
-            return
-        st.trail_moves[role] = now
+        return await manage_phase._trail_target(self, t, now, prices)
 
     async def _fire_target(self, role: str, live: list[Clip], left: Decimal, px: Decimal) -> None:
-        """Trail L1, L3: close the target's size at market, then pull its backstop."""
-        st = self._state
-        p = st.params
-        assert p is not None
-        pos, _ = self._held()
-        qty = min(left, pos)
-        if qty <= 0:
-            return
-        clip = self._place(role, price=px, qty=qty)
-        await self._exec().create_market_order(
-            market_index=st.market_index,
-            side=self._close_side(),
-            size=_fmt(qty),
-            slippage=p.slippage,
-            reduce_only=True,
-            client_order_index=clip.client_order_index,
-        )
-        st.trail_fired.add(role)
-        for c in live:
-            await self._cancel_clip(c)
-        st.reason = f"{role.upper()} fired at {_fmt(px)}"
+        return await manage_phase._fire_target(self, role, live, left, px)
 
     # ── operator ─────────────────────────────────────────────────────────
 
