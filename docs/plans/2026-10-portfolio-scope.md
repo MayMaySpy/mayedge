@@ -4,6 +4,12 @@ Show everything the account owns, not just perps: spot holdings, LLP shares, sta
 
 Placement (decided): a `/portfolio` page, like `/journal`, plus a **Today** figure in the desk header next to MARGIN.
 
+> **Step 0 is done** — see [docs/portfolio-rules.md](../portfolio-rules.md) "What the venue says". It changes the build:
+> - The `pnl` endpoint answers **value** (with `ignore_transfers=true`), **cumulative PnL** and **cumulative Flows** for every Holding kind, by hour or day. Value, history and the Day change all come from it. Drop the `portfolio_samples` and `portfolio_hours` tables in §4. Store the venue's buckets (`portfolio_pnl`), one `1h` and one `1d` series in each of the two modes.
+> - The mismatch check is rule V3: value less PnL against net Flows.
+> - The account read is only for quantities, shares, APY and unlocks. LLP is pool `281474976710654`, LIT staking is `281474976624800` (rules P2, P3).
+> - The account behind this scope holds Perps (USDC), Spot (ETH as collateral) and LIT staking. It has no LLP today; it left LLP on 2026-10-19.
+
 Read [the October plan](2026-10-improvement-plan.md) §0 first. Its ground rules hold here: rules doc before code, commit to `main`, `make ci` green, and never place orders or move funds on the live desk. This feature only **reads**.
 
 ---

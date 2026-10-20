@@ -1,0 +1,440 @@
+{
+ "_note": "Portfolio Step 0. Real shapes from mainnet on 2026-10-20; the account's own figures scaled by 0.5, its index replaced, its address dropped. Pool-level data is public and unscaled. See docs/portfolio-rules.md.",
+ "account": {
+  "account_index": 1001,
+  "account_trading_mode": 1,
+  "collateral": "610.500779",
+  "available_balance": "610.500779",
+  "total_asset_value": "610.500779",
+  "cross_asset_value": "1128.1297465",
+  "positions": [],
+  "assets": [
+   {
+    "symbol": "ETH",
+    "asset_id": 1,
+    "balance": "0",
+    "locked_balance": "0",
+    "margin_mode": "enabled",
+    "margin_balance": "0.25000041",
+    "multiplier": "1.000000000000000000"
+   },
+   {
+    "symbol": "LIT",
+    "asset_id": 2,
+    "balance": "0.00000431",
+    "locked_balance": "0",
+    "margin_mode": "disabled",
+    "margin_balance": "0",
+    "multiplier": "1.000000000000000000"
+   },
+   {
+    "symbol": "USDC",
+    "asset_id": 3,
+    "balance": "0",
+    "locked_balance": "0",
+    "margin_mode": "enabled",
+    "margin_balance": "610.50077931",
+    "multiplier": "1.000000000000000000"
+   }
+  ],
+  "shares": [
+   {
+    "public_pool_index": 281474976624800,
+    "shares_amount": 48407056,
+    "entry_usdc": "0",
+    "principal_amount": "499.48116313",
+    "entry_timestamp": 0
+   }
+  ],
+  "pending_unlocks": []
+ },
+ "staking_pool_account": {
+  "account_index": 281474976624800,
+  "account_type": 4,
+  "total_asset_value": "0",
+  "assets": [
+   {
+    "symbol": "LIT",
+    "balance": "114691390.95222632"
+   }
+  ],
+  "pool_info": {
+   "total_shares": 10905160861538,
+   "operator_shares": 10000000000,
+   "annual_percentage_yield": 27.588102990465483,
+   "share_prices": [
+    {
+     "timestamp": 1792267200,
+     "share_price": 3.299017207056361e-05
+    },
+    {
+     "timestamp": 1792353600,
+     "share_price": 2.9838643557125157e-05
+    },
+    {
+     "timestamp": 1792440000,
+     "share_price": 3.1766826340652745e-05
+    }
+   ],
+   "daily_returns": [
+    {
+     "timestamp": 1792353600,
+     "daily_return": -0.09552931420598709
+    },
+    {
+     "timestamp": 1792440000,
+     "daily_return": 0.06462032296595988
+    }
+   ]
+  }
+ },
+ "pools_listing_top": [
+  {
+   "code": 0,
+   "account_index": 281474976710654,
+   "created_at": 1737098583,
+   "master_account_index": 1,
+   "account_type": 3,
+   "name": "Lighter Liquidity Provider (LLP)",
+   "annual_percentage_yield": 14.617576573338786,
+   "sharpe_ratio": 3.8164214210794816,
+   "status": 0,
+   "operator_fee": "0.0000",
+   "total_asset_value": "92422216.67876105",
+   "total_spot_value": "2469461.508922",
+   "total_perps_value": "92422216.678761",
+   "total_shares": 26115154241,
+   "assets": [
+    {
+     "symbol": "USDC",
+     "asset_id": 3,
+     "balance": "10079264.375948921124",
+     "locked_balance": "0.000000",
+     "margin_mode": "disabled",
+     "margin_balance": "92425229.238364744507",
+     "multiplier": "1.000000000000000000"
+    },
+    {
+     "symbol": "XAUT",
+     "asset_id": 11,
+     "balance": "264.5694582736",
+     "locked_balance": "0.000000",
+     "margin_mode": "disabled",
+     "margin_balance": "264.5694582736",
+     "multiplier": "1.000000000000000000"
+    },
+    {
+     "symbol": "rhSPY",
+     "asset_id": 12,
+     "balance": "210.964047548",
+     "locked_balance": "0.000000",
+     "margin_mode": "disabled",
+     "margin_balance": "210.964047548",
+     "multiplier": "1.001717991187472003"
+    },
+    {
+     "symbol": "rhQQQ",
+     "asset_id": 13,
+     "balance": "234.7169396732",
+     "locked_balance": "0.000000",
+     "margin_mode": "disabled",
+     "margin_balance": "234.7169396732",
+     "multiplier": "1.000700791241405425"
+    },
+    {
+     "symbol": "weETH",
+     "asset_id": 14,
+     "balance": "1.84592616",
+     "locked_balance": "0.00000000",
+     "margin_mode": "disabled",
+     "margin_balance": "1.84592616",
+     "multiplier": "1.000000000000000000"
+    },
+    {
+     "symbol": "ETH",
+     "asset_id": 1,
+     "balance": "428.246066146",
+     "locked_balance": "0.00000000",
+     "margin_mode": "disabled",
+     "margin_balance": "428.246066146",
+     "multiplier": "1.000000000000000000"
+    }
+   ],
+   "account_share": null
+  }
+ ],
+ "pools_listing_stake": [
+  {
+   "code": 0,
+   "account_index": 281474976624800,
+   "created_at": 1768411784,
+   "master_account_index": 0,
+   "account_type": 4,
+   "name": "",
+   "annual_percentage_yield": 27.588102990465483,
+   "sharpe_ratio": 0.8915389721146815,
+   "status": 0,
+   "operator_fee": "0.0000",
+   "total_asset_value": "0",
+   "total_spot_value": "364771840.033481",
+   "total_perps_value": "0",
+   "total_shares": 10905160861538,
+   "assets": [
+    {
+     "symbol": "LIT",
+     "asset_id": 2,
+     "balance": "114691390.95222632",
+     "locked_balance": "0.00000000",
+     "margin_mode": "disabled",
+     "margin_balance": "0.00000000",
+     "multiplier": "1.000000000000000000"
+    }
+   ],
+   "account_share": null
+  }
+ ],
+ "pnl_1d": [
+  {
+   "timestamp": 1792281600,
+   "trade_pnl": 4705.287226,
+   "trade_spot_pnl": 187.749104,
+   "inflow": 12308.532649,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.4925265,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3705.4976655,
+   "staking_pnl": 421.258043,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 1464.4178555
+  },
+  {
+   "timestamp": 1792368000,
+   "trade_pnl": 4669.2228405,
+   "trade_spot_pnl": 189.655769,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 400.889702,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 5215.330705
+  },
+  {
+   "timestamp": 1792454400,
+   "trade_pnl": 4672.4947285,
+   "trade_spot_pnl": 189.0516695,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 411.5023165,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 968.12066
+  },
+  {
+   "timestamp": 1792523182,
+   "trade_pnl": 4686.4661265,
+   "trade_spot_pnl": 195.949646,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 452.9375625,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 4495.1220905
+  }
+ ],
+ "pnl_1d_ignore_transfers": [
+  {
+   "timestamp": 1792281600,
+   "trade_pnl": 359.6135195,
+   "trade_spot_pnl": 600.715998,
+   "inflow": 12308.532649,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 269.7012165,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3705.4976655,
+   "staking_pnl": 1587.3906665,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 1464.4178555
+  },
+  {
+   "timestamp": 1792368000,
+   "trade_pnl": 593.257493,
+   "trade_spot_pnl": 602.622663,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 0.0,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 1567.0223255,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 5215.330705
+  },
+  {
+   "timestamp": 1792454400,
+   "trade_pnl": 596.529381,
+   "trade_spot_pnl": 602.0185635,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 0.0,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 1577.63494,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 968.12066
+  },
+  {
+   "timestamp": 1792523182,
+   "trade_pnl": 610.500779,
+   "trade_spot_pnl": 608.91654,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 0.0,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 1619.070186,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 4495.1220905
+  }
+ ],
+ "pnl_1h": [
+  {
+   "timestamp": 1792508400,
+   "trade_pnl": 4672.96883,
+   "trade_spot_pnl": 205.1838615,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 525.1209815,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 664.3541015
+  },
+  {
+   "timestamp": 1792512000,
+   "trade_pnl": 4684.651869,
+   "trade_spot_pnl": 197.34662,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 437.517382,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 652.185
+  },
+  {
+   "timestamp": 1792515600,
+   "trade_pnl": 4679.983415,
+   "trade_spot_pnl": 199.972768,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 448.012894,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 1588.418454
+  },
+  {
+   "timestamp": 1792519200,
+   "trade_pnl": 4686.4661265,
+   "trade_spot_pnl": 199.6995085,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 479.849128,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 1590.164535
+  },
+  {
+   "timestamp": 1792522800,
+   "trade_pnl": 4686.4661265,
+   "trade_spot_pnl": 196.673846,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 458.370223,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 0.0
+  },
+  {
+   "timestamp": 1792523181,
+   "trade_pnl": 4686.4661265,
+   "trade_spot_pnl": 196.0047445,
+   "inflow": 12578.241008,
+   "outflow": 16654.2063555,
+   "spot_outflow": 5950.499812,
+   "spot_inflow": 6363.466706,
+   "pool_pnl": 9.499669,
+   "pool_inflow": 3965.7063555,
+   "pool_outflow": 3975.2060245,
+   "staking_pnl": 453.04142,
+   "staking_inflow": 1997.075251,
+   "staking_outflow": 830.9426275,
+   "pool_total_shares": 0,
+   "volume": 0.0
+  }
+ ]
+}
