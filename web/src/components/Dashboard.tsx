@@ -8,7 +8,6 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { notifyErr, notifyOk, notifyOrder } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
-import { HotkeySheet } from "@/components/HotkeySheet";
 import { ChartWidget, type ChartOverlay, type OverlayAction, type TicketAmend, type TicketPlace } from "@/components/widgets/ChartWidget";
 import { Header } from "@/components/widgets/Header";
 import { LiqsPanel } from "@/components/widgets/LiqsPanel";
@@ -18,7 +17,6 @@ import { OrderTicket } from "@/components/widgets/orderTicket/OrderTicket";
 import { PositionsPanel } from "@/components/widgets/PositionsPanel";
 import { QuickTradePanel } from "@/components/widgets/QuickTradePanel";
 import { TradesTapeWidget } from "@/components/widgets/TradesTapeWidget";
-import { useHotkeys } from "@/hooks/useHotkeys";
 import { useMarketWs } from "@/hooks/useMarketWs";
 import { useDeskRoute } from "@/lib/deskRoute";
 import { useDeskWatchBridge } from "@/lib/deskBridge";
@@ -36,11 +34,7 @@ import { algoIsLive, algoOrderKind, preferPerpMarket } from "@/lib/algos";
 import { TRAIL_KIND_LABEL, trailDistanceLabel } from "@/lib/trail";
 import { theme } from "@/lib/theme";
 import { useTradingReady } from "@/hooks/useTradingReady";
-import { emitHotkey, type HotkeyId } from "@/lib/hotkeys";
-import { useHotkeyTrading } from "@/lib/hotkeyTrading";
-import { getAxisTicketArmed, setAxisTicketArmed } from "@/lib/axisTicket";
-import { toggleFavorite } from "@/lib/favorites";
-import { buildQuickLimit, cancelMarketTickets, submitQuickMarket } from "@/lib/quickTrade";
+import { buildQuickLimit } from "@/lib/quickTrade";
 import { getQuickSize } from "@/lib/quickSizes";
 import {
   clickChartDraft,
@@ -497,51 +491,6 @@ export function Dashboard() {
     () => preferPerpMarket(markets, symbol) ?? null,
     [markets, symbol]
   );
-  const account = useLiveAccount();
-  const bbo = useLiveBbo();
-  const { armed: hotkeysArmed } = useHotkeyTrading();
-  const [helpOpen, setHelpOpen] = useState(false);
-
-  const onHotkey = useCallback(
-    (id: HotkeyId) => {
-      if (id === "buy" || id === "sell") {
-        void submitQuickMarket({
-          market,
-          tradingEnabled: deskTradingEnabled,
-          ready: feed.ready,
-          reason: feed.reason,
-          qty: getQuickSize(),
-          side: id === "buy" ? "buy" : "sell",
-          account,
-          bbo,
-          slippage: slipFrac(),
-        });
-        return;
-      }
-      if (id === "cancel") {
-        if (!market) return;
-        void cancelMarketTickets(market)
-          .then((n) => notifyOk(`Cancelled ${n} ${market.symbol} Tickets`))
-          .catch((err: unknown) => notifyErr(err instanceof Error ? err.message : "Cancel failed"));
-        return;
-      }
-      if (id === "favorite" && symbol) {
-        toggleFavorite(symbol);
-        return;
-      }
-      if (id === "axis") {
-        setAxisTicketArmed(!getAxisTicketArmed());
-        return;
-      }
-      if (id === "help") {
-        setHelpOpen(true);
-        return;
-      }
-      emitHotkey(id);
-    },
-    [account, bbo, deskTradingEnabled, feed.ready, feed.reason, market, slipFrac, symbol]
-  );
-  useHotkeys(hotkeysArmed, onHotkey);
 
   const rowHeight = useMemo(() => {
     if (height <= 0) return 16;
@@ -710,7 +659,6 @@ export function Dashboard() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <HotkeySheet open={helpOpen} onOpenChange={setHelpOpen} />
       <Header
         markets={markets}
         symbol={symbol}

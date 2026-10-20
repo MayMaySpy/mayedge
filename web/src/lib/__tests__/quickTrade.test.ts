@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, type Account, type Market } from "@/lib/api";
-import { buildQuickLimit, cancelMarketTickets } from "@/lib/quickTrade";
+import { describe, expect, it } from "vitest";
+import type { Account, Market } from "@/lib/api";
+import { buildQuickLimit } from "@/lib/quickTrade";
 
 function market(partial?: Partial<Market>): Market {
   return {
@@ -65,23 +65,3 @@ describe("buildQuickLimit", () => {
   });
 });
 
-describe("cancelMarketTickets", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("cancels Tickets on both sides and never Cancel all, so algo Clips keep their stop", async () => {
-    const side = vi.spyOn(api, "cancelTickets").mockResolvedValue({ cancelled: 2 });
-    const all = vi.spyOn(api, "cancelAll").mockResolvedValue({} as never);
-    await expect(cancelMarketTickets(market())).resolves.toBe(4);
-    expect(side.mock.calls).toEqual([
-      ["buy", 1],
-      ["sell", 1],
-    ]);
-    expect(all).not.toHaveBeenCalled();
-  });
-
-  it("stops at the first side the venue refuses", async () => {
-    const side = vi.spyOn(api, "cancelTickets").mockResolvedValue({ cancelled: 0, error: "nonce" });
-    await expect(cancelMarketTickets(market())).rejects.toThrow("nonce");
-    expect(side).toHaveBeenCalledTimes(1);
-  });
-});

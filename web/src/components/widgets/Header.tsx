@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { subscribeHotkeys } from "@/lib/hotkeys";
 import type { ReactNode } from "react";
 import { LayoutGrid, Star } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
@@ -223,9 +222,6 @@ export function Header({
   onResetLayout,
 }: HeaderProps) {
   const [killOpen, setKillOpen] = useState(false);
-  useEffect(() => subscribeHotkeys((id) => {
-    if (id === "kill") setKillOpen(true);
-  }), []);
   const [killBusy, setKillBusy] = useState(false);
 
   useEffect(() => {

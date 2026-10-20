@@ -15,8 +15,6 @@ import { FieldGroup } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { subscribeHotkeys } from "@/lib/hotkeys";
-import { useHotkeyTrading } from "@/lib/hotkeyTrading";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
 import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins";
@@ -131,10 +129,6 @@ export function OrderTicket({
   const account = useLiveAccount();
   const algoBook = useLiveAlgos();
   const [plannerOpen, setPlannerOpen] = useState(false);
-  const { armed: hotkeysArmed, setArmed: setHotkeysArmed } = useHotkeyTrading();
-  useEffect(() => subscribeHotkeys((id) => {
-    if (id === "planner") setPlannerOpen(true);
-  }), []);
   const runningPlanner = livePlannerFor(algoBook, market?.market_index);
   const tradeAvailable =
     parseFloat(account?.trade_available ?? account?.available ?? "0") || 0;
@@ -513,17 +507,6 @@ export function OrderTicket({
                 </ToggleGroupItem>
               </ToggleGroup>
               <div className="min-w-0 flex-1" />
-              <Button
-                type="button"
-                variant={hotkeysArmed ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 shrink-0 px-2 font-mono text-xs"
-                aria-pressed={hotkeysArmed}
-                title="Shift+B, Shift+S and Shift+X send orders only while this is on"
-                onClick={() => setHotkeysArmed(!hotkeysArmed)}
-              >
-                {hotkeysArmed ? "Hotkeys" : "Hotkeys off"}
-              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

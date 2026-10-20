@@ -1,6 +1,5 @@
 import { ChevronDown, Search, Star, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { subscribeHotkeys } from "@/lib/hotkeys";
 import { TokenMark } from "@/components/desk/TokenMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,9 +98,6 @@ export const MarketPicker = memo(function MarketPicker({
     }
   };
 
-  useEffect(() => subscribeHotkeys((id) => {
-    if (id === "picker") show(true);
-  }), []);
 
   const quotes = useLiveQuotes();
   const universe = useMemo(() => uniqueSymbolMarkets(markets), [markets]);

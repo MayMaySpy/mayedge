@@ -15,7 +15,7 @@ import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "r
 import { FillMarksPrimitive, type FillSpot } from "@/lib/fillMarkPrimitive";
 import { isSettled } from "@/lib/funding";
 import { parseOverlayAction, TradingLinesPrimitive, type ChartOverlay } from "@/lib/chartTradingLines";
-import { hotkeyBlocked } from "@/lib/hotkeys";
+import { keyBlocked } from "@/lib/keyTarget";
 import { snapTick, type DraftMove } from "@/lib/ticketAmend";
 import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
 import { getQuickSize } from "@/lib/quickSizes";
@@ -353,10 +353,10 @@ export function useChartTicketInteraction(input: Refs) {
         place.pointerCancel();
         ghostRef.current = null;
         paintLines();
-        if (!hotkeyBlocked(e.target)) onDraftClearRef.current();
+        if (!keyBlocked(e.target)) onDraftClearRef.current();
         return;
       }
-      if (e.key === "Enter" && planArmedRef.current && !e.repeat && !hotkeyBlocked(e.target)) {
+      if (e.key === "Enter" && planArmedRef.current && !e.repeat && !keyBlocked(e.target)) {
         if (onDraftEnterRef.current()) e.preventDefault();
       }
     };
