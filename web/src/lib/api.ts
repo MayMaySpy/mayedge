@@ -589,6 +589,9 @@ export const api = {
   fundingExtremes: () => request<FundingExtremeRow[]>("/alerts/funding"),
   alertOpened: (id: string) =>
     request<{ status: string }>(`/alerts/${encodeURIComponent(id)}/opened`, { method: "POST" }),
+  pushStatus: () =>
+    request<{ enabled: boolean; chat_set: boolean; alerts: string; algos: string }>("/push"),
+  pushTest: () => request<{ ok: boolean; error?: string }>("/push/test", { method: "POST" }),
   scanActivity: () => request<ScanActivityRow[]>("/scan/activity"),
   toneBoard: () => request<ToneBoardRow[]>("/scan/tones"),
   toneTimeframes: () => request<ToneTimeframes>("/scan/tones/timeframes"),

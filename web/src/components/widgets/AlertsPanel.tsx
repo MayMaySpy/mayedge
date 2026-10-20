@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BellOff, X } from "lucide-react";
-import { notifyDesk } from "@/lib/notify";
+import { notifyDesk, notifyErr, notifyOk } from "@/lib/notify";
 import { FilterPopover } from "@/components/desk/FilterPopover";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -202,6 +202,8 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
   const [favOnly, setFavOnly] = useState(loadFavOnly);
   const [muted, setMuted] = useState(loadMuted);
   const [stats, setStats] = useState<AlertStats | null>(null);
+  const [pushesOn, setPushesOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const seenToastRef = useRef<Set<string>>(new Set());
   const mountedAtRef = useRef(0);
 
@@ -228,6 +230,32 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
       window.clearInterval(id);
     };
   }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    api
+      .pushStatus()
+      .then((row) => {
+        if (!cancel) setPushesOn(Boolean(row.enabled));
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  const sendPushTest = async () => {
+    setPushBusy(true);
+    try {
+      const res = await api.pushTest();
+      if (res.ok) notifyOk("Test push sent");
+      else notifyErr(res.error || "Test push failed");
+    } catch (err) {
+      notifyErr(err instanceof Error ? err.message : "Test push failed");
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!mountedAtRef.current) mountedAtRef.current = Date.now();
@@ -334,6 +362,21 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
                       </Button>
                     ))}
                   </div>
+                </Field>
+              )}
+              {pushesOn && (
+                <Field orientation="horizontal" className="items-center justify-between">
+                  <FieldLabel>Pushes: on</FieldLabel>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs"
+                    disabled={pushBusy}
+                    onClick={() => void sendPushTest()}
+                  >
+                    Send test
+                  </Button>
                 </Field>
               )}
               {stats && (

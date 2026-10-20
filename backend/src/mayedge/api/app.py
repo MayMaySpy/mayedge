@@ -40,6 +40,7 @@ from mayedge.lighter.errors import VenueBlocked, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
 from mayedge.persist_liq import liquidation_summary_since_ms
+from mayedge.push import TelegramPusher, boot_text, public_push_status
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,20 @@ def _cached_positions() -> list[Any]:
     return list((cached or {}).get("positions") or [])
 
 
+def _open_position_count() -> int:
+    n = 0
+    for pos in _cached_positions():
+        raw: Any = pos.get("size") if isinstance(pos, dict) else getattr(pos, "size", 0)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+            continue
+        try:
+            if float(raw) != 0:
+                n += 1
+        except ValueError:
+            continue
+    return n
+
+
 async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> KillResult:
     # Kill is sent even when the local budget is full or cooling.
     token = budget.enter_lane(KILL_LANE)
@@ -81,19 +96,25 @@ async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> Kill
 async def lifespan(app: FastAPI):
     fanout = BroadcastFanout(manager.broadcast)
     fanout.start()
+    pusher = TelegramPusher.from_settings()
+    app.state.pusher = pusher
+    await pusher.start()
 
-    def on_desk_msg(msg: dict[str, Any]) -> None:
+    def publish(msg: dict[str, Any]) -> None:
         fanout.push(msg)
+        pusher.on_desk_msg(msg)
 
-    def on_feed_health(msg: dict[str, Any]) -> None:
-        fanout.push(msg)
-
-    desk.set_broadcast(on_desk_msg)
-    feed_health.set_emitter(on_feed_health)
-    auto_kill.start(run_kill=run_kill, emit=fanout.push, positions=_cached_positions)
+    desk.set_broadcast(publish)
+    feed_health.set_emitter(publish)
+    auto_kill.start(run_kill=run_kill, emit=publish, positions=_cached_positions)
     gateway.subscribe(auto_kill.on_gateway)
     await desk.start()
     await desk.restore()
+    n_algos = len(desk.algo_book().get("working") or [])
+    pusher.push(
+        "boot",
+        boot_text(settings.lighter_network.value, n_algos, _open_position_count()),
+    )
     try:
         yield
     finally:
@@ -101,6 +122,7 @@ async def lifespan(app: FastAPI):
         auto_kill.stop()
         feed_health.set_emitter(None)
         desk.set_broadcast(None)
+        await pusher.stop()
         await fanout.stop()
         await desk.stop()
         store.close_db()
@@ -198,6 +220,17 @@ def create_app() -> FastAPI:
         if not gateway.alert_opened(alert_id):
             raise HTTPException(404, "Alert not found")
         return {"status": "ok"}
+
+    @app.get("/api/push")
+    async def get_push() -> dict[str, Any]:
+        return public_push_status()
+
+    @app.post("/api/push/test")
+    async def post_push_test(request: Request) -> dict[str, Any]:
+        pusher: TelegramPusher | None = getattr(request.app.state, "pusher", None)
+        if pusher is None:
+            return {"ok": False, "error": "Pushes are off"}
+        return await pusher.test_push()
 
     @app.get("/api/scan/activity")
     async def get_scan_activity() -> list[dict[str, Any]]:

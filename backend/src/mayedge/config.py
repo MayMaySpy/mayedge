@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     ]
     # Host names the desk answers to. "*.ts.net" is the Tailscale Serve name.
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "[::1]", "*.ts.net"]
+    # Telegram pushes. Both must be set, or the desk sends nothing.
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -59,6 +62,10 @@ class Settings(BaseSettings):
     @property
     def trading_enabled(self) -> bool:
         return bool(self.lighter_api_private_key and self.lighter_account_index is not None)
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
 
 settings = Settings()

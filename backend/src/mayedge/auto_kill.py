@@ -252,7 +252,10 @@ class AutoKill:
 
     async def _fire(self, *, reason: str, upnl: float) -> None:
         self._state.config.armed = False
-        self._state.fired_at = None
+        self._state.fired_at = int(time.time() * 1000)
+        self._state.fired_reason = reason
+        self._state.fired_upnl = upnl
+        self._state.last_kill_status = None
         save_auto_kill(self._state, self._path)
         self._broadcast()
         try:

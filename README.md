@@ -49,6 +49,15 @@ Every row is written to the desk database. **Left** and **Against** score it fro
 
 <img src="docs/screens/alerts.png" alt="Alerts panel with the Funding strip" width="320">
 
+### Pushes
+
+A **Push** repeats a fact to Telegram when no tab is open. It raises nothing and it never places, amends, or cancels an order. The events, the texts, and the knobs are [docs/push-rules.md](docs/push-rules.md). Nothing is sent until both variables below are set.
+
+1. In Telegram, message `@BotFather` → `/newbot` → copy the token.
+2. Send your new bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `message.chat.id`.
+3. Put `TELEGRAM_BOT_TOKEN=` and `TELEGRAM_CHAT_ID=` in `backend/.env`, then `make push-env && make deploy`.
+4. Use **Send test** in the Alerts panel. The line is there only once pushes are on.
+
 ### Execution
 
 Market and limit Tickets from the Order panel, typed in the asset or in USD (**Notional**). Floating Buy/Sell are market at **Quick size** (the same size Axis rest uses). From a Positions row: **Stop** and **Take Profit** Tickets (Market or Limit), a Trail Stop or Trail Take Profit, or a Planner. On the Orders tab, **Bids** and **Asks** cancel Tickets of that side in the current All/Market scope; Clips stay with the algo. Size on a working order can be edited in place (**Amend**).
@@ -90,6 +99,7 @@ The desk keeps its own history in SQLite: **OI samples** for 30 days then **OI h
 |---|---|
 | [CONTEXT.md](CONTEXT.md) | The desk's language. Words in bold anywhere mean what it says. |
 | [docs/alert-rules.md](docs/alert-rules.md) | Every alert, the funding strip and the Scan boards: rule, knob and the test that pins it. |
+| [docs/push-rules.md](docs/push-rules.md) | Every Telegram push: event, text, debounce and knob. |
 | [docs/planner-rules.md](docs/planner-rules.md) | What Planner does, start to finish. |
 | [docs/trail-rules.md](docs/trail-rules.md) | What a Trail does, start to finish. |
 | [docs/trail-scope.md](docs/trail-scope.md) | The reasoning behind Trail. Where it and the rules differ, the rules win. |

@@ -74,6 +74,10 @@ _Avoid_: drawdown, stop, loss
 An alert the operator opened from the panel. The count of these is how the desk learns which alerts were worth raising.
 _Avoid_: clicked, viewed, read
 
+**Push**:
+A Telegram message the desk sends the operator. It repeats a fact; it raises nothing new.
+_Avoid_: notification, alert (for the message itself)
+
 ### Chart views
 
 **Scan**:
