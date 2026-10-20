@@ -241,8 +241,32 @@ export interface JournalSummaryGroup {
   maker_share?: string | null;
   avg_r: string | null;
   total_r?: string | null;
+  /** How many Round trips have an R: only Planner runs with a stored stop do. */
+  r_count?: number;
   max_drawdown: string | null;
   curve: { ts: number; net: string | null }[];
+  payoff_ratio?: string | null;
+  breakeven_win_rate?: string | null;
+  notional?: string | null;
+  net_bps?: string | null;
+  recovery_factor?: string | null;
+  max_win_streak?: number;
+  max_loss_streak?: number;
+  current_streak?: number;
+  avg_hold_win_s?: string | null;
+  avg_hold_loss_s?: string | null;
+  long?: JournalSide | null;
+  short?: JournalSide | null;
+  trading_days?: number;
+  green_days?: number;
+  best_day?: string | null;
+  worst_day?: string | null;
+}
+
+export interface JournalSide {
+  count: number;
+  win_rate: string | null;
+  net: string | null;
 }
 
 export type PortfolioKind = "perps" | "spot" | "llp" | "staking";

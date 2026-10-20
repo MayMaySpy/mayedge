@@ -50,6 +50,31 @@ export function heldFor(open: number, close: number | null): string {
   return `${Math.round(sec / 86_400)}d`;
 }
 
+/** A length of time from seconds, two units at most: 35m, 4h 12m, 2d 3h. */
+export function duration(value: string | null | undefined): string {
+  const n = num(value);
+  if (n == null) return "—";
+  const min = Math.max(0, Math.round(n / 60));
+  if (min < 60) return `${Math.max(1, min)}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 ? `${h}h ${min % 60}m` : `${h}h`;
+  return h % 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${Math.floor(h / 24)}d`;
+}
+
+/** A run of results: +3 is "3W", -2 is "2L". */
+export function streak(value: number | null | undefined): string {
+  if (!value) return "—";
+  return value > 0 ? `${value}W` : `${-value}L`;
+}
+
+/** Basis points with a sign, one decimal: +12.3 bps. */
+export function bps(value: string | null | undefined): string {
+  const n = num(value);
+  if (n == null) return "—";
+  const core = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `${n > 0 ? "+" : n < 0 ? "-" : ""}${core} bps`;
+}
+
 /** Dollars with a sign, to the cent. */
 export function money(value: string | null | undefined): string {
   return formatSigned(value, 2);

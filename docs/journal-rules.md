@@ -39,11 +39,22 @@ Each fill may name an `algo_id` (`PL-`, `CH-`, `CG-`, `LD-`, `TW-`, `TR-`). The 
 
 Headline stats use closed Round trips that are not partial.
 
-Per group (`day`, `market`, `algo`, or `none`): count, wins, losses, win rate, gross PnL (the venue number), fees, funding, Net, average win, average loss, profit factor, expectancy (Net per Round trip), largest win, largest loss, maker share of notional, and average and total R where a trip has one.
+Per group (`day`, `market`, `algo`, or `none`): count, wins, losses, win rate, gross PnL (the venue number), fees, funding, Net, average win, average loss, profit factor, expectancy (Net per Round trip), largest win, largest loss, maker share of notional, and average and total R where a trip has one, with `r_count`, how many do.
 
 A day is the UTC date of the close. Win rate is wins divided by wins plus losses. Profit factor is the winning Net divided by the absolute losing Net. No losing Round trip means profit factor is absent, not infinite. No Round trips means the rates are absent.
 
-`none` also returns the realized Net curve, one point per close, and the largest peak-to-trough drop of that curve in dollars.
+Every group also carries what a trader asks of a record without a plan, all from Net:
+
+- **Payoff** is average win over the absolute average loss. **Breakeven win rate** is `1 / (1 + payoff)`: the win rate that payoff needs to make nothing. Either is absent without both a win and a loss.
+- **Notional** is the traded USD of every fill. **Net per $ traded** is Net over notional, in basis points: an edge that does not grow with size.
+- **Streaks** run in close order: the longest run of wins, of losses, and the run now (`+3` three wins, `-2` two losses). A Round trip with Net exactly 0 is skipped, not a break.
+- **Hold** is the average seconds from open to close, for winners and for losers apart.
+- **Long** and **short**: count, win rate and Net of each side.
+- **Days** group by UTC close date: how many days closed a Round trip, how many of those were green, the best and the worst day's Net.
+
+`none` also returns the realized Net curve, one point per close, and the largest peak-to-trough drop of that curve in dollars. **Recovery factor** is Net over that drop.
+
+The desk tab shows one row: Net, win rate (with its breakeven), profit factor, payoff, expectancy, max drawdown, the streak now, and funding. The page groups the rest by edge, risk, wins and habits. **R stays a Planner number**: it shows only on the page, labelled with how many of the Round trips it covers, and never stands in for the whole record. Fees show only when they are not zero.
 
 ## Sync
 

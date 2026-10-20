@@ -9,11 +9,13 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { JournalState } from "@/hooks/useJournal";
-import type { JournalSummaryGroup, JournalTrip } from "@/lib/api";
+import type { JournalSide, JournalSummaryGroup, JournalTrip } from "@/lib/api";
 import {
   JOURNAL_ALGOS,
   JOURNAL_RANGES,
   algoLabel,
+  bps,
+  duration,
   heldFor,
   magnitude,
   money,
@@ -22,12 +24,13 @@ import {
   ratio,
   rValue,
   size,
+  streak,
   when,
   type JournalRange,
 } from "@/lib/journalFormat";
 import { marketPrice } from "@/lib/marketFormat";
-import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { cn, formatUsdCompact } from "@/lib/utils";
+import { useState, type ReactNode } from "react";
 
 export function JournalControls({ journal, className }: { journal: JournalState; className?: string }) {
   return (
@@ -69,18 +72,48 @@ export function JournalControls({ journal, className }: { journal: JournalState;
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+function Stat({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <span className="truncate text-muted-foreground">{label}</span>
-      <span className={cn("truncate font-mono tabular-nums", tone)} title={value}>
-        {value}
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        <span className={cn("truncate font-mono tabular-nums", tone)} title={value}>
+          {value}
+        </span>
+        {hint ? <span className="truncate text-xs text-muted-foreground">{hint}</span> : null}
       </span>
     </div>
   );
 }
 
-/** The headline numbers. `full` adds the second row the page has room for. */
+function StatGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2">
+      <h3 className="text-xs uppercase tracking-[0.06em] text-muted-foreground">{title}</h3>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">{children}</div>
+    </section>
+  );
+}
+
+function needs(strip: JournalSummaryGroup | null): string | undefined {
+  return strip?.breakeven_win_rate != null ? `needs ${pct(strip.breakeven_win_rate)}` : undefined;
+}
+
+function sideStat(label: string, side: JournalSide | null | undefined) {
+  return (
+    <Stat
+      label={label}
+      value={side ? money(side.net) : "—"}
+      tone={side ? pnlClass(side.net) : undefined}
+      hint={side ? `${side.count} · ${pct(side.win_rate)} win` : undefined}
+    />
+  );
+}
+
+/**
+ * The headline numbers, from every closed Round trip's Net. The desk tab shows one row;
+ * the page (`full`) groups them by what a trader asks: edge, risk, wins, habits.
+ */
 export function JournalStats({
   strip,
   full = false,
@@ -91,34 +124,89 @@ export function JournalStats({
   className?: string;
 }) {
   const drawdown = Number(strip?.max_drawdown ?? "0");
+  const net = <Stat label="Net" value={money(strip?.net)} tone={pnlClass(strip?.net)} />;
+  const winRate = <Stat label="Win %" value={pct(strip?.win_rate)} hint={needs(strip)} />;
+  const profitFactor = <Stat label="Profit factor" value={ratio(strip?.profit_factor)} />;
+  const payoff = <Stat label="Payoff" value={ratio(strip?.payoff_ratio)} hint="avg win ÷ avg loss" />;
+  const expectancy = (
+    <Stat label="Expectancy" value={money(strip?.expectancy)} tone={pnlClass(strip?.expectancy)} hint="per trip" />
+  );
+  const maxDrawdown = (
+    <Stat label="Max drawdown" value={magnitude(strip?.max_drawdown)} tone={drawdown > 0 ? "text-ask" : undefined} />
+  );
+  const funding = <Stat label="Funding" value={money(strip?.funding)} tone={pnlClass(strip?.funding)} />;
+  const current = <Stat label="Streak" value={streak(strip?.current_streak)} hint="now" />;
+
+  if (!full) {
+    return (
+      <div className={cn("grid grid-cols-4 gap-x-4 gap-y-2 sm:grid-cols-8", className)}>
+        {net}
+        {winRate}
+        {profitFactor}
+        {payoff}
+        {expectancy}
+        {maxDrawdown}
+        {current}
+        {funding}
+      </div>
+    );
+  }
+
+  const fees = Number(strip?.fees ?? "0");
+  const rCount = strip?.r_count ?? 0;
   return (
-    <div
-      className={cn(
-        "grid gap-x-4 gap-y-2",
-        full ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-8" : "grid-cols-4 sm:grid-cols-8",
-        className,
-      )}
-    >
-      <Stat label="Net" value={money(strip?.net)} tone={pnlClass(strip?.net)} />
-      <Stat label="Fees" value={magnitude(strip?.fees)} />
-      <Stat label="Funding" value={money(strip?.funding)} tone={pnlClass(strip?.funding)} />
-      <Stat label="Win %" value={pct(strip?.win_rate)} />
-      <Stat label="Profit factor" value={ratio(strip?.profit_factor)} />
-      <Stat label="Expectancy" value={money(strip?.expectancy)} tone={pnlClass(strip?.expectancy)} />
-      <Stat label="Avg R" value={rValue(strip?.avg_r)} tone={pnlClass(strip?.avg_r)} />
-      <Stat label="Max drawdown" value={magnitude(strip?.max_drawdown)} tone={drawdown > 0 ? "text-ask" : undefined} />
-      {full ? (
-        <>
-          <Stat label="Round trips" value={strip ? `${strip.count} · ${strip.wins}W ${strip.losses}L` : "—"} />
-          <Stat label="Gross" value={money(strip?.gross_pnl)} tone={pnlClass(strip?.gross_pnl)} />
-          <Stat label="Avg win" value={money(strip?.avg_win)} tone={pnlClass(strip?.avg_win)} />
-          <Stat label="Avg loss" value={money(strip?.avg_loss)} tone={pnlClass(strip?.avg_loss)} />
-          <Stat label="Largest win" value={money(strip?.largest_win)} tone={pnlClass(strip?.largest_win)} />
-          <Stat label="Largest loss" value={money(strip?.largest_loss)} tone={pnlClass(strip?.largest_loss)} />
-          <Stat label="Maker share" value={pct(strip?.maker_share)} />
-          <Stat label="Total R" value={rValue(strip?.total_r)} tone={pnlClass(strip?.total_r)} />
-        </>
-      ) : null}
+    <div className={cn("grid gap-x-8 gap-y-4 lg:grid-cols-2", className)}>
+      <StatGroup title="Edge">
+        {net}
+        <Stat label="Round trips" value={strip ? `${strip.count}` : "—"} hint={strip ? `${strip.wins}W ${strip.losses}L` : undefined} />
+        {winRate}
+        {profitFactor}
+        {payoff}
+        {expectancy}
+        <Stat
+          label="Net per $ traded"
+          value={bps(strip?.net_bps)}
+          tone={pnlClass(strip?.net_bps)}
+          hint={strip?.notional ? `on ${formatUsdCompact(Number(strip.notional))}` : undefined}
+        />
+        {fees !== 0 ? <Stat label="Fees" value={magnitude(strip?.fees)} /> : funding}
+      </StatGroup>
+      <StatGroup title="Risk">
+        {maxDrawdown}
+        <Stat label="Recovery factor" value={ratio(strip?.recovery_factor)} hint="net ÷ drawdown" />
+        <Stat label="Avg loss" value={money(strip?.avg_loss)} tone={pnlClass(strip?.avg_loss)} />
+        <Stat label="Largest loss" value={money(strip?.largest_loss)} tone={pnlClass(strip?.largest_loss)} />
+        <Stat label="Worst day" value={money(strip?.worst_day)} tone={pnlClass(strip?.worst_day)} />
+        <Stat label="Longest losing run" value={strip?.max_loss_streak ? `${strip.max_loss_streak}L` : "—"} />
+        {fees !== 0 ? funding : null}
+      </StatGroup>
+      <StatGroup title="Wins">
+        <Stat label="Avg win" value={money(strip?.avg_win)} tone={pnlClass(strip?.avg_win)} />
+        <Stat label="Largest win" value={money(strip?.largest_win)} tone={pnlClass(strip?.largest_win)} />
+        <Stat label="Best day" value={money(strip?.best_day)} tone={pnlClass(strip?.best_day)} />
+        <Stat label="Longest winning run" value={strip?.max_win_streak ? `${strip.max_win_streak}W` : "—"} />
+        <Stat
+          label="Green days"
+          value={strip?.trading_days ? `${strip.green_days ?? 0} of ${strip.trading_days}` : "—"}
+          hint={strip?.trading_days ? `${Math.round(((strip.green_days ?? 0) / strip.trading_days) * 100)}%` : undefined}
+        />
+        {current}
+      </StatGroup>
+      <StatGroup title="Habits">
+        <Stat label="Hold, winners" value={duration(strip?.avg_hold_win_s)} hint="avg" />
+        <Stat label="Hold, losers" value={duration(strip?.avg_hold_loss_s)} hint="avg" />
+        {sideStat("Long", strip?.long)}
+        {sideStat("Short", strip?.short)}
+        <Stat label="Maker share" value={pct(strip?.maker_share)} hint="of notional" />
+        {rCount > 0 ? (
+          <Stat
+            label="Planner R"
+            value={rValue(strip?.avg_r)}
+            tone={pnlClass(strip?.avg_r)}
+            hint={`avg of ${rCount} of ${strip?.count ?? 0} trips`}
+          />
+        ) : null}
+      </StatGroup>
     </div>
   );
 }

@@ -325,8 +325,36 @@ class RoundTripTests(TestCase):
         self.assertEqual(stats.maker_share, D("60") / D("80"))
         self.assertEqual([point.net for point in stats.curve], [D("10"), D("-20"), D("-15")])
         self.assertEqual(stats.max_drawdown, D("30"))
+        # Edge without a plan: payoff 7.5/30, so it needs an 80% win rate to break even.
+        self.assertEqual(stats.payoff_ratio, D("0.25"))
+        self.assertEqual(stats.breakeven_win_rate, D("0.8"))
+        self.assertEqual(stats.notional, D("80"))
+        self.assertEqual(stats.net_bps, D("-15") / D("80") * 10_000)
+        self.assertEqual(stats.recovery_factor, D("-0.5"))
+        # W, L, W: no run longer than one; the last trip won.
+        self.assertEqual((stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (1, 1, 1))
+        self.assertEqual(stats.avg_hold_win_s, D("100"))
+        self.assertEqual(stats.avg_hold_loss_s, D("100"))
+        assert stats.long is not None
+        self.assertEqual((stats.long.count, stats.long.net), (3, D("-15")))
+        self.assertIsNone(stats.short)
+        self.assertEqual((stats.trading_days, stats.green_days), (3, 2))
+        self.assertEqual((stats.best_day, stats.worst_day), (D("10"), D("-30")))
+        self.assertEqual(stats.r_count, 0)
 
         only_win = summary(trips[:1], "none")[0]
         self.assertIsNone(only_win.profit_factor)
+        self.assertIsNone(only_win.payoff_ratio)
+        self.assertIsNone(only_win.breakeven_win_rate)
         self.assertEqual(summary(trips, "day")[0].key, "2023-11-14")
         self.assertEqual(len(summary(trips, "day")), 3)
+
+    def test_streaks_run_in_close_order_and_skip_flat_trips(self) -> None:
+        nets = ["5", "-1", "-2", "0", "-3", "4", "6"]
+        rows: list[Fill] = []
+        for i, net in enumerate(nets):
+            t = 1_700_000_000 + i * 1000
+            rows.append(fill(trade_id=f"o{i}", ts=t, usd=D("10")))
+            rows.append(fill(trade_id=f"c{i}", side="sell", ts=t + 10, pnl=D(net), usd=D("10")))
+        stats = summary(round_trips(rows, [], {}, {}), "none")[0]
+        self.assertEqual((stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (2, 3, 2))

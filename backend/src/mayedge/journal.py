@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Literal
 
 ZERO = Decimal("0")
+ONE = Decimal("1")
 _MS = 10**12
 
 GroupBy = Literal["day", "market", "algo", "none"]
@@ -111,8 +112,35 @@ class Summary:
     maker_share: Decimal | None
     avg_r: Decimal | None
     total_r: Decimal | None
+    r_count: int
     curve: tuple[CurvePoint, ...]
     max_drawdown: Decimal | None
+    # Edge, for every Round trip: the venue's Net, not a plan.
+    payoff_ratio: Decimal | None
+    breakeven_win_rate: Decimal | None
+    notional: Decimal
+    net_bps: Decimal | None
+    recovery_factor: Decimal | None
+    # Behaviour.
+    max_win_streak: int
+    max_loss_streak: int
+    current_streak: int
+    avg_hold_win_s: Decimal | None
+    avg_hold_loss_s: Decimal | None
+    long: Side | None
+    short: Side | None
+    # Days, by UTC close date.
+    trading_days: int
+    green_days: int
+    best_day: Decimal | None
+    worst_day: Decimal | None
+
+
+@dataclass(frozen=True)
+class Side:
+    count: int
+    win_rate: Decimal | None
+    net: Decimal
 
 
 def family_of(algo_id: str) -> str:
@@ -441,6 +469,11 @@ def _summarize(key: str, trips: list[RoundTrip], *, with_curve: bool) -> Summary
     drawdown: Decimal | None = None
     if with_curve:
         curve, drawdown = _curve(trips)
+    avg_win = (win_net / len(wins)) if wins else None
+    avg_loss = (loss_net / len(losses)) if losses else None
+    payoff = (avg_win / abs(avg_loss)) if avg_win is not None and avg_loss else None
+    best_streak, worst_streak, streak = _streaks(trips)
+    day_nets = _day_nets(trips)
     return Summary(
         key=key,
         count=count,
@@ -451,8 +484,8 @@ def _summarize(key: str, trips: list[RoundTrip], *, with_curve: bool) -> Summary
         fees=fees,
         funding=funding,
         net=net,
-        avg_win=(win_net / len(wins)) if wins else None,
-        avg_loss=(loss_net / len(losses)) if losses else None,
+        avg_win=avg_win,
+        avg_loss=avg_loss,
         profit_factor=(win_net / abs(loss_net)) if losses and win_net != 0 else (None if not losses else ZERO),
         expectancy=(net / count) if count else None,
         largest_win=max((trip.net for trip in wins), default=None),
@@ -460,13 +493,76 @@ def _summarize(key: str, trips: list[RoundTrip], *, with_curve: bool) -> Summary
         maker_share=(maker / usd) if usd else None,
         avg_r=(sum(rs, ZERO) / len(rs)) if rs else None,
         total_r=sum(rs, ZERO) if rs else None,
+        r_count=len(rs),
         curve=curve,
         max_drawdown=drawdown,
+        payoff_ratio=payoff,
+        breakeven_win_rate=(ONE / (ONE + payoff)) if payoff is not None else None,
+        notional=usd,
+        net_bps=(net / usd * 10_000) if usd else None,
+        recovery_factor=(net / drawdown) if drawdown else None,
+        max_win_streak=best_streak,
+        max_loss_streak=worst_streak,
+        current_streak=streak,
+        avg_hold_win_s=_avg_hold(wins),
+        avg_hold_loss_s=_avg_hold(losses),
+        long=_side([trip for trip in trips if trip.side == "long"]),
+        short=_side([trip for trip in trips if trip.side == "short"]),
+        trading_days=len(day_nets),
+        green_days=sum(1 for v in day_nets.values() if v > 0),
+        best_day=max(day_nets.values(), default=None),
+        worst_day=min(day_nets.values(), default=None),
     )
 
 
+def _by_close(trips: list[RoundTrip]) -> list[RoundTrip]:
+    return sorted(trips, key=lambda trip: (trip.close_ts or 0, trip.trip_key))
+
+
+def _streaks(trips: list[RoundTrip]) -> tuple[int, int, int]:
+    """Longest run of wins, of losses, and the run now: +3 is three wins, -2 two losses. A flat trip is skipped."""
+    best = worst = run = 0
+    for trip in _by_close(trips):
+        if trip.net > 0:
+            run = run + 1 if run > 0 else 1
+        elif trip.net < 0:
+            run = run - 1 if run < 0 else -1
+        else:
+            continue
+        best = max(best, run)
+        worst = max(worst, -run)
+    return best, worst, run
+
+
+def _avg_hold(trips: list[RoundTrip]) -> Decimal | None:
+    held = [seconds_of(trip.close_ts) - seconds_of(trip.open_ts) for trip in trips if trip.close_ts is not None]
+    return Decimal(sum(held)) / len(held) if held else None
+
+
+def _side(trips: list[RoundTrip]) -> Side | None:
+    if not trips:
+        return None
+    wins = sum(1 for trip in trips if trip.net > 0)
+    decided = sum(1 for trip in trips if trip.net != 0)
+    return Side(
+        count=len(trips),
+        win_rate=(Decimal(wins) / decided) if decided else None,
+        net=sum((trip.net for trip in trips), ZERO),
+    )
+
+
+def _day_nets(trips: list[RoundTrip]) -> dict[str, Decimal]:
+    out: dict[str, Decimal] = {}
+    for trip in trips:
+        if trip.close_ts is None:
+            continue
+        key = _group_key(trip, "day")
+        out[key] = out.get(key, ZERO) + trip.net
+    return out
+
+
 def _curve(trips: list[RoundTrip]) -> tuple[tuple[CurvePoint, ...], Decimal | None]:
-    ordered = sorted(trips, key=lambda trip: (trip.close_ts or 0, trip.trip_key))
+    ordered = _by_close(trips)
     if not ordered:
         return (), None
     points: list[CurvePoint] = []

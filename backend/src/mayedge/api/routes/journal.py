@@ -239,6 +239,29 @@ def _summary_json(row: Any) -> dict[str, Any]:
         "maker_share": _num(row.maker_share),
         "avg_r": _num(row.avg_r),
         "total_r": _num(row.total_r),
+        "r_count": row.r_count,
         "max_drawdown": _num(row.max_drawdown),
+        "payoff_ratio": _num(row.payoff_ratio),
+        "breakeven_win_rate": _num(row.breakeven_win_rate),
+        "notional": _num(row.notional),
+        "net_bps": _num(row.net_bps),
+        "recovery_factor": _num(row.recovery_factor),
+        "max_win_streak": row.max_win_streak,
+        "max_loss_streak": row.max_loss_streak,
+        "current_streak": row.current_streak,
+        "avg_hold_win_s": _num(row.avg_hold_win_s),
+        "avg_hold_loss_s": _num(row.avg_hold_loss_s),
+        "long": _side_json(row.long),
+        "short": _side_json(row.short),
+        "trading_days": row.trading_days,
+        "green_days": row.green_days,
+        "best_day": _num(row.best_day),
+        "worst_day": _num(row.worst_day),
         "curve": [{"ts": point.ts, "net": _num(point.net)} for point in row.curve],
     }
+
+
+def _side_json(side: Any) -> dict[str, Any] | None:
+    if side is None:
+        return None
+    return {"count": side.count, "win_rate": _num(side.win_rate), "net": _num(side.net)}
