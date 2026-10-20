@@ -6,8 +6,10 @@ holding detail only adds quantities to them (N6).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from typing import Any, Literal
 
 Kind = Literal["perps", "spot", "llp", "staking"]
@@ -323,3 +325,84 @@ def portfolio_now(
         ],
         pending=unlocks(account),
     )
+
+
+FLOW_MARKER_USD = Decimal("1")
+HOURLY_HORIZON_MS = 90 * DAY_MS
+
+
+def history(value_rows: list[dict[str, Any]], pnl_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """H4, H5: each kind's value at every stored bucket, and where Flows moved."""
+    values = buckets(value_rows)
+    points: list[dict[str, Any]] = []
+    for b in values:
+        row: dict[str, Any] = {"ts": b.ts_ms}
+        total = ZERO
+        for kind in KINDS:
+            v = b.get(FIELDS[kind][0])
+            row[kind] = _s(v)
+            total += v
+        row["total"] = _s(total)
+        points.append(row)
+    flows: list[dict[str, Any]] = []
+    pnl = buckets(pnl_rows)
+    for before, after in pairwise(pnl):
+        for kind in KINDS:
+            moved = _flow(after, kind) - _flow(before, kind)
+            if abs(moved) > FLOW_MARKER_USD:
+                flows.append({"ts": after.ts_ms, "kind": kind, "amount": _s(moved)})
+    return {"points": points, "flows": flows}
+
+
+def _local_midnights(since_ms: int, now_ms: int, tz_min: int) -> list[int]:
+    """H6: local midnights from the one at or before since, to now. tz is UTC minus local, in minutes."""
+    shift = tz_min * 60_000
+    local = since_ms - shift
+    first = local - local % DAY_MS + shift
+    out = [first]
+    while out[-1] + DAY_MS <= now_ms:
+        out.append(out[-1] + DAY_MS)
+    return out
+
+
+def _day_label(start_ms: int, tz_min: int) -> str:
+    day = time.gmtime((start_ms - tz_min * 60_000) / 1000)
+    return f"{day.tm_year:04d}-{day.tm_mon:02d}-{day.tm_mday:02d}"
+
+
+def days(
+    hourly_pnl: list[dict[str, Any]],
+    daily_pnl: list[dict[str, Any]],
+    *,
+    since_ms: int,
+    now_ms: int,
+    tz_min: int,
+) -> list[dict[str, Any]]:
+    """H6: Day change per kind for each day. Local days on hourly buckets; UTC days before them."""
+    hourly, daily = buckets(hourly_pnl), buckets(daily_pnl)
+    hourly_from = max(now_ms - HOURLY_HORIZON_MS, hourly[0].ts_ms if hourly else now_ms)
+    out: list[dict[str, Any]] = []
+
+    def row(label: str, start: int, utc: bool, open_b: Bucket | None, close_b: Bucket | None) -> None:
+        if close_b is None:
+            return
+        kinds = {}
+        total = ZERO
+        for kind in KINDS:
+            name = FIELDS[kind][0]
+            change = close_b.get(name) - (open_b.get(name) if open_b else ZERO)
+            kinds[kind] = _s(change)
+            total += change
+        out.append({"day": label, "start": start, "utc": utc, "kinds": kinds, "total": _s(total)})
+
+    # UTC days before the hourly series begins.
+    for open_b, close_b in pairwise(daily):
+        if open_b.ts_ms < since_ms - DAY_MS or close_b.ts_ms > hourly_from:
+            continue
+        row(_day_label(open_b.ts_ms, 0), open_b.ts_ms, True, open_b, close_b)
+    # Local days on the hourly series; the last one runs to the latest stored bucket.
+    starts = [m for m in _local_midnights(max(since_ms, hourly_from), now_ms, tz_min) if m >= hourly_from]
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else now_ms
+        row(_day_label(start, tz_min), start, False, _at(hourly, start), _at(hourly, end))
+    return out

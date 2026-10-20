@@ -27,6 +27,8 @@ from mayedge.lighter.budget import KILL_LANE, budget
 from mayedge.lighter.errors import VenueBlocked
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
+from mayedge.portfolio_sync import start as start_portfolio_sync
+from mayedge.portfolio_sync import stop as stop_portfolio_sync
 from mayedge.push import TelegramPusher, boot_text
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI):
     gateway.subscribe(auto_kill.on_gateway)
     set_fill_listener(note_fill)
     start_journal()
+    start_portfolio_sync()
     await desk.start()
     await desk.restore()
     n_algos = len(desk.algo_book().get("working") or [])
@@ -109,6 +112,7 @@ async def lifespan(app: FastAPI):
     finally:
         set_fill_listener(None)
         await stop_journal()
+        await stop_portfolio_sync()
         gateway.unsubscribe(auto_kill.on_gateway)
         auto_kill.stop()
         feed_health.set_emitter(None)

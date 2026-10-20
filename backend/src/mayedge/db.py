@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS journal_notes (
 );
 """
 
+# The venue's pnl buckets (docs/portfolio-rules.md H1). raw is the bucket as answered.
+_PORTFOLIO_TABLES = """
+CREATE TABLE IF NOT EXISTS portfolio_pnl (
+    resolution TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    raw TEXT NOT NULL,
+    PRIMARY KEY (resolution, mode, ts)
+);
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -254,7 +265,7 @@ CREATE TABLE IF NOT EXISTS liquidation_days (
 
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 def _meta_int(
@@ -469,6 +480,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
     if version < 13:
         conn.executescript(_JOURNAL_TABLES)
+    if version < 14:
+        conn.executescript(_PORTFOLIO_TABLES)
     _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
 
