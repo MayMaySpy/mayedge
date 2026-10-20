@@ -14,6 +14,8 @@ Desk language is [CONTEXT.md](CONTEXT.md). Every word in bold below means what i
 
 Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout edit is opt-in. Positions has a Journal tab: each Market from flat to flat, net of fees and funding. **Open page** takes it to its own page at `/journal`, with the full summary and a breakdown by Market and by algo.
 
+**Header.** Next to MARGIN, **Today** is the **Portfolio**'s change since local midnight: Perps, Spot, LLP and LIT staking, net of deposits and withdrawals, from the venue's own PnL. It opens `/portfolio`: the total, allocation, value over time with each **Flow** marked, daily change, and what each Holding is made of. Rules: [docs/portfolio-rules.md](docs/portfolio-rules.md).
+
 **Header.** Market picker, **Favorites**, mark, funding in APR, **Open interest**, margin, and feed status. Hover funding for its 7-day, 30-day and 1-year **Funding average**. When Lighter itself is down (HTTP 503, or a 1012 service-restart close), the status says so and since when, instead of a plain reconnect.
 
 ### Chart panel

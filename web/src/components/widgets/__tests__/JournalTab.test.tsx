@@ -20,6 +20,8 @@ vi.mock("lightweight-charts", () => ({
   createChart: () => ({
     addSeries: () => ({ setData() {} }),
     timeScale: () => ({ fitContent() {} }),
+    subscribeCrosshairMove() {},
+    unsubscribeCrosshairMove() {},
     remove() {},
   }),
 }));

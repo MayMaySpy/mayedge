@@ -6,7 +6,8 @@ const SYMBOL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const LEGACY_VENUE_RE = /^(lighter|hyperliquid)$/i;
 export const WATCH_PATH = "/watch";
 export const JOURNAL_PATH = "/journal";
-const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH", "JOURNAL"]);
+export const PORTFOLIO_PATH = "/portfolio";
+const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH", "JOURNAL", "PORTFOLIO"]);
 
 export type ParsedPath = {
   symbol: string;
@@ -44,6 +45,11 @@ export function isWatchPath(pathname: string): boolean {
 export function isJournalPath(pathname: string): boolean {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   return parts.length === 1 && parts[0].toUpperCase() === "JOURNAL";
+}
+
+export function isPortfolioPath(pathname: string): boolean {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  return parts.length === 1 && parts[0].toUpperCase() === "PORTFOLIO";
 }
 
 function readSymbolFromStorage(): string | null {

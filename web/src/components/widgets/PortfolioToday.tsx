@@ -1,29 +1,26 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePortfolioToday } from "@/hooks/usePortfolioToday";
-import type { PortfolioKind, PortfolioKindNow } from "@/lib/api";
+import type { PortfolioKindNow } from "@/lib/api";
 import { money, pctPoints, pnlClass } from "@/lib/journalFormat";
-import { PORTFOLIO_KIND_LABELS } from "@/lib/portfolioDay";
+import { PORTFOLIO_PATH } from "@/lib/deskRoute";
+import { heldKinds, PORTFOLIO_KIND_LABELS } from "@/lib/portfolioDay";
 import { cn } from "@/lib/utils";
-
-const KINDS: PortfolioKind[] = ["perps", "spot", "llp", "staking"];
-
-function held(kind: PortfolioKindNow): boolean {
-  return [kind.value, kind.value_at_open, kind.change, kind.flows].some((v) => Number(v ?? "0") !== 0);
-}
 
 /** Header: the Portfolio's Day change since local midnight (docs/portfolio-rules.md N9). */
 export function PortfolioToday({ enabled }: { enabled: boolean }) {
   const today = usePortfolioToday(enabled);
   if (!today) return null;
   const { total } = today;
-  const shown = KINDS.filter((k) => held(today.kinds[k]));
+  const shown = heldKinds(today);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
+        <a
+          href={PORTFOLIO_PATH}
+          target="_blank"
+          rel="noopener"
           aria-label="Portfolio today"
-          className="inline-flex cursor-default items-baseline gap-1.5 whitespace-nowrap rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex items-baseline gap-1.5 whitespace-nowrap rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <span className="text-xs uppercase tracking-[0.06em] text-muted-foreground">Today</span>
           <span className={cn("font-mono text-lg tabular-nums", pnlClass(total.change))}>{money(total.change)}</span>
@@ -37,7 +34,7 @@ export function PortfolioToday({ enabled }: { enabled: boolean }) {
               !
             </span>
           ) : null}
-        </button>
+        </a>
       </TooltipTrigger>
       <TooltipContent className="font-mono tabular-nums">
         <div className="grid grid-cols-[auto_auto_auto] gap-x-3 gap-y-0.5">

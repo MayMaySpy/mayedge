@@ -276,6 +276,21 @@ export interface PortfolioNow {
   unlocks: { asset_index: number; amount: string | null; unlock_ms: number }[];
 }
 
+export interface PortfolioHistory {
+  range: string;
+  resolution: "1h" | "1d";
+  points: ({ ts: number; total: string | null } & Record<PortfolioKind, string | null>)[];
+  flows: { ts: number; kind: PortfolioKind; amount: string | null }[];
+}
+
+export interface PortfolioDay {
+  day: string;
+  start: number;
+  utc: boolean;
+  kinds: Record<PortfolioKind, string | null>;
+  total: string | null;
+}
+
 export interface AccountTradesPage {
   trades: AccountTrade[];
   next_cursor: string | null;
@@ -805,6 +820,12 @@ export const api = {
     ),
   portfolio: (open: number, detail = true) =>
     request<PortfolioNow>(`/portfolio?open=${open}${detail ? "" : "&detail=false"}`),
+  portfolioHistory: (range: string) =>
+    request<PortfolioHistory>(`/portfolio/history?range=${encodeURIComponent(range)}`),
+  portfolioDays: (range: string, tz: number) =>
+    request<{ range: string; tz: number; days: PortfolioDay[] }>(
+      `/portfolio/days?range=${encodeURIComponent(range)}&tz=${tz}`,
+    ),
   journalSync: () =>
     request<{ started: boolean; last_synced_at: number | null }>("/journal/sync", { method: "POST" }),
   accountFunding: (opts?: { market_index?: number | null; cursor?: string | null; limit?: number }) => {
