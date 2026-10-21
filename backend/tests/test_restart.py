@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import sys
+import time
+from dataclasses import replace
 from decimal import Decimal as D
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -488,6 +491,87 @@ class RestartTests(IsolatedAsyncioTestCase):
                 await _stop_books(fresh)
                 if again is not None:
                     await _stop_books(again)
+
+    async def test_trail_restores_a_row_written_before_the_shared_book(self) -> None:
+        """The persisted trail row keeps its id, its counters and its status."""
+        row = _plant("trail_restore.json")
+        venue = FakeVenue()
+        venue.position = D("2")
+        venue.entry = D("100")
+        book = TrailBook(execution=lambda: venue.execution(), broadcast=lambda _p: None)
+        with patch("mayedge.algos.common.now_ms", FakeClock()):
+            await book.restore()
+        try:
+            job = book._jobs[str(row["algo_id"])]
+            self.assertEqual(job.state.status.value, row["status"])
+            self.assertEqual(job.state.algo_id, "TR-0001")
+            self.assertEqual(store.load_book_counters("trail"), {"id_seq": 1, "coi_seq": 1})
+        finally:
+            await _stop_books(book)
+
+    async def test_trail_restores_without_waiting_for_the_order_book(self) -> None:
+        _plant("trail_restore.json")
+        venue = FakeVenue()
+        venue.position = D("2")
+        venue.entry = D("100")
+        execution, seen = _unsynced(venue)
+        book = TrailBook(execution=execution, broadcast=lambda _p: None)
+        started = time.monotonic()
+        with (
+            patch("mayedge.algos.common.now_ms", FakeClock()),
+            patch("mayedge.algos.clip_book.RESTORE_FEED_TIMEOUT_S", 2),
+        ):
+            await book.restore()
+        try:
+            self.assertLess(time.monotonic() - started, 0.5)
+            self.assertEqual(seen, [])
+            self.assertIn("TR-0001", book._jobs)
+        finally:
+            await _stop_books(book)
+
+
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+_LEDGER_KEYS = {
+    "next_clip",
+    "next_fill",
+    "trade_ids",
+    "trade_qty_by_clip",
+    "clips",
+    "fills",
+    "archived",
+}
+
+
+def _plant(name: str) -> dict[str, object]:
+    """A row written by the book before this refactor, put back into SQLite."""
+    row = json.loads((_FIXTURES / name).read_text())
+    store.init_db()
+    store.upsert_run(
+        {k: v for k, v in row.items() if k not in _LEDGER_KEYS},
+        next_clip=int(row["next_clip"]),
+        next_fill=int(row["next_fill"]),
+        trade_ids=set(row["trade_ids"]),
+        trade_qty_by_clip={int(k): str(v) for k, v in row["trade_qty_by_clip"].items()},
+        clips=list(row["clips"]),
+        fills=list(row["fills"]),
+    )
+    store.save_book_counters(str(row["algo_type"]), 1, 1)
+    return row
+
+
+def _unsynced(venue: FakeVenue):
+    seen: list[int] = []
+
+    def execution():
+        ex = FakeVenue.execution(venue)
+
+        def synced(market_index: int) -> bool:
+            seen.append(market_index)
+            return False
+
+        return replace(ex, is_book_synced=synced)
+
+    return execution, seen
 
 
 async def _quiet(job: object) -> None:

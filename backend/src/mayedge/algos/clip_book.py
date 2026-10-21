@@ -41,7 +41,6 @@ from mayedge.algos.chase.config import HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Ledger
-from mayedge.numbers import fmt_decimal
 from mayedge.rows import is_list, is_obj
 
 logger = logging.getLogger(__name__)
@@ -163,11 +162,53 @@ class AlgoBook[R: ClipRunner]:
     def _restore_needs_books(self) -> bool:
         return self.RESTORE_WAITS_FOR_FEEDS
 
+    def _restore_waits_for_account(self) -> bool:
+        """Trail and planner wait for the account feed. A clip book waits only when it also waits for books."""
+        return self._restore_needs_books()
+
+    def _seeds_counters(self) -> bool:
+        """Clip books seed from their id prefix and client-order band. Trail and planner do not."""
+        return True
+
+    def _log_empty_restore(self) -> bool:
+        return True
+
+    def _wait_with_nothing_restored(self) -> bool:
+        """Planner still waits for the account feed when every row failed to hydrate."""
+        return False
+
+    def _cancel_all_stops(self) -> bool:
+        """Trail and planner stop jobs on cancel-all. Clip books pause the running ones."""
+        return False
+
+    def _remember_broken(self) -> bool:
+        return True
+
     def _on_restored(self, job: R) -> None:
         del job
 
     def _on_finished(self, job: R) -> None:
         del job
+
+    def _resume_failed(self, job: R, row: Mapping[str, object]) -> None:
+        algo_id = str(row.get("algo_id") or "") or self._view(job).algo_id
+        logger.exception("failed to resume %s job %s — archiving as stopped", self.LABEL, algo_id)
+        _ = self._jobs.pop(algo_id, None)
+        self._archive_broken(row)
+
+    def _broken_run(self, row: Mapping[str, object]) -> dict[str, Any]:
+        algo_id = str(row.get("algo_id") or "")
+        run: dict[str, Any] = {k: v for k, v in row.items() if k not in _LEDGER_KEYS}
+        run.update(
+            algo_id=algo_id,
+            algo_type=self.ALGO_ID,
+            status=ChaseStatus.STOPPED.value,
+            market_index=row.get("market_index") or 0,
+            symbol=row.get("symbol") or "",
+            created_at=row.get("created_at") or 0,
+            error="restore failed",
+        )
+        return run
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -227,17 +268,15 @@ class AlgoBook[R: ClipRunner]:
     # ── persistence ──────────────────────────────────────────────────────
 
     def _persist_job(self, job: R, *, archived: bool) -> None:
-        ledger = self._view(job).ledger
+        ledger = self._view(job).ledger.to_persist()
         store.upsert_run(
             job.snapshot(),
-            next_clip=ledger.next_clip,
-            next_fill=ledger.next_fill,
-            trade_ids=set(ledger.trade_ids),
-            trade_qty_by_clip={
-                seq: (fmt_decimal(qty) or "0") for seq, qty in ledger.trade_qty_by_clip.items()
-            },
-            clips=[c.to_persist() for c in ledger.clips],
-            fills=[f.to_persist() for f in ledger.fills],
+            next_clip=ledger["next_clip"],
+            next_fill=ledger["next_fill"],
+            trade_ids=ledger["trade_ids"],
+            trade_qty_by_clip=ledger["trade_qty_by_clip"],
+            clips=ledger["clips"],
+            fills=ledger["fills"],
             archived=archived,
         )
 
@@ -288,37 +327,49 @@ class AlgoBook[R: ClipRunner]:
     # ── restore ──────────────────────────────────────────────────────────
 
     async def _wait_feeds_ready(self, market_indices: set[int]) -> None:
-        if not market_indices:
+        if not self._restore_waits_for_account():
+            return
+        if self._restore_needs_books() and not market_indices:
             return
         deadline = time.monotonic() + RESTORE_FEED_TIMEOUT_S
         while time.monotonic() < deadline:
             ex = self.execution()
-            if (
-                feed_health.snapshot().get("account_ws") == "live"
-                and ex.orders_hydrated()
-                and all(ex.is_book_synced(mi) for mi in market_indices)
-            ):
+            ready = feed_health.snapshot().get("account_ws") == "live" and ex.orders_hydrated()
+            if ready and self._restore_needs_books():
+                ready = all(ex.is_book_synced(mi) for mi in market_indices)
+            if ready:
                 return
             await asyncio.sleep(0.1)
+        if self._restore_needs_books():
+            logger.warning(
+                "restore: feeds not ready within %.0fs for markets %s",
+                RESTORE_FEED_TIMEOUT_S,
+                sorted(market_indices),
+            )
+            return
         logger.warning(
-            "restore: feeds not ready within %.0fs for markets %s",
+            "%s restore: account feed not ready within %.0fs",
+            self.LABEL.lower(),
             RESTORE_FEED_TIMEOUT_S,
-            sorted(market_indices),
         )
 
     async def restore(self) -> None:
         """Load counters and history, then resume every active job from SQLite."""
         store.init_db()
-        counters = store.load_book_counters(
-            self.ALGO_ID, id_prefix=self.ID_PREFIX, coi_band=(self._coi_base, self._coi_end)
-        )
+        if self._seeds_counters():
+            counters = store.load_book_counters(
+                self.ALGO_ID, id_prefix=self.ID_PREFIX, coi_band=(self._coi_base, self._coi_end)
+            )
+        else:
+            counters = store.load_book_counters(self.ALGO_ID)
         self._id_seq = counters["id_seq"]
         self._coi_seq = counters["coi_seq"]
         self._archive = store.load_history(HISTORY_CAP, algo_type=self.ALGO_ID)
 
         rows = store.load_active_runs(algo_type=self.ALGO_ID)
         if not rows:
-            logger.info("no active %s jobs to restore", self.LABEL)
+            if self._log_empty_restore():
+                logger.info("no active %s jobs to restore", self.LABEL)
             self.publish()
             return
 
@@ -344,7 +395,8 @@ class AlgoBook[R: ClipRunner]:
                 _ = self._jobs.pop(algo_id, None)
                 self._archive_broken(row)
 
-        await self._wait_feeds_ready(market_indices)
+        if restored or self._wait_with_nothing_restored():
+            await self._wait_feeds_ready(market_indices)
 
         for algo_id, job, row in restored:
             if algo_id not in self._jobs:
@@ -353,27 +405,14 @@ class AlgoBook[R: ClipRunner]:
             try:
                 await job.resume()
             except Exception:
-                logger.exception(
-                    "failed to resume %s job %s — archiving as stopped", self.LABEL, algo_id
-                )
-                _ = self._jobs.pop(algo_id, None)
-                self._archive_broken(row)
+                self._resume_failed(job, row)
         self.publish()
 
     def _archive_broken(self, row: Mapping[str, object]) -> None:
         """Keep a job that would not come back as stopped history, with its ledger."""
         algo_id = str(row.get("algo_id") or "")
         try:
-            run: dict[str, Any] = {k: v for k, v in row.items() if k not in _LEDGER_KEYS}
-            run.update(
-                algo_id=algo_id,
-                algo_type=self.ALGO_ID,
-                status=ChaseStatus.STOPPED.value,
-                market_index=row.get("market_index") or 0,
-                symbol=row.get("symbol") or "",
-                created_at=row.get("created_at") or 0,
-                error="restore failed",
-            )
+            run = self._broken_run(row)
             store.upsert_run(
                 run,
                 next_clip=as_int(row.get("next_clip"), 1),
@@ -384,9 +423,10 @@ class AlgoBook[R: ClipRunner]:
                 fills=_as_record_list(row.get("fills")),
                 archived=True,
             )
-            snap = store.load_history(1, algo_type=self.ALGO_ID)
-            if snap and snap[0].get("algo_id") == algo_id:
-                self._remember(snap[0])
+            if self._remember_broken():
+                snap = store.load_history(1, algo_type=self.ALGO_ID)
+                if snap and snap[0].get("algo_id") == algo_id:
+                    self._remember(snap[0])
         except Exception:
             logger.exception("failed to archive broken %s job %s", self.LABEL, algo_id)
 
@@ -404,12 +444,15 @@ class AlgoBook[R: ClipRunner]:
         """Pause running jobs on a market (or all) before a venue cancel-all."""
         for job in list(self._jobs.values()):
             view = self._view(job)
-            if view.status != ChaseStatus.RUNNING:
-                continue
             if market_index is not None and view.market_index != market_index:
                 continue
+            if not self._cancel_all_stops() and view.status != ChaseStatus.RUNNING:
+                continue
             try:
-                await job.pause()
+                if self._cancel_all_stops():
+                    await job.stop()
+                else:
+                    await job.pause()
             except Exception:
                 logger.exception("%s pause_for_market failed for %s", self.LABEL, view.algo_id)
 

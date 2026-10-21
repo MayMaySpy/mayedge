@@ -482,7 +482,7 @@ class TrailJobTests(IsolatedAsyncioTestCase):
     async def test_one_trail_stop_per_market(self) -> None:
         self._long()
         book = TrailBook(execution=self.venue.execution, broadcast=lambda _p: None)
-        with patch("mayedge.algos.trail.book.store"):
+        with patch("mayedge.algos.clip_book.store"):
             body = {"market_index": MI, "kind": "stop", "distance": "1", "distance_kind": "price"}
             await book.start_from_body(body)
             with self.assertRaises(TrailRefused):
@@ -492,7 +492,7 @@ class TrailJobTests(IsolatedAsyncioTestCase):
     async def test_cancel_all_stops_the_trails(self) -> None:
         self._long()
         book = TrailBook(execution=self.venue.execution, broadcast=lambda _p: None)
-        with patch("mayedge.algos.trail.book.store"):
+        with patch("mayedge.algos.clip_book.store"):
             await book.start_from_body(
                 {"market_index": MI, "kind": "stop", "distance": "1", "distance_kind": "price"}
             )

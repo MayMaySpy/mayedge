@@ -1,0 +1,78 @@
+{
+  "algo_id": "TR-0001",
+  "algo_type": "trail",
+  "archived": false,
+  "clips": [
+    {
+      "client_order_index": 12000000001,
+      "closed_at": null,
+      "filled": "0",
+      "missing_since": null,
+      "order_index": null,
+      "placed_at": 1000000,
+      "price": "99",
+      "qty": "0",
+      "seen_on_book": false,
+      "seq": 1,
+      "side": "sell",
+      "status": "live"
+    }
+  ],
+  "created_at": 1000000,
+  "display_qty": null,
+  "error": null,
+  "filled": "0",
+  "fills": [],
+  "market_index": 1,
+  "next_clip": 2,
+  "next_fill": 1,
+  "offset_bps": null,
+  "params_json": {
+    "activation": null,
+    "distance": "1",
+    "distance_kind": "price",
+    "expiry_min": null,
+    "kind": "stop",
+    "reference": "mark",
+    "runtime": {
+      "trail": {
+        "active": true,
+        "best": "100",
+        "deadline_ms": null,
+        "fired_at": null,
+        "fired_price": null,
+        "floor": "99",
+        "following": true,
+        "held_before": "0",
+        "last_move_ms": 1000000,
+        "qty": "0",
+        "roles": {
+          "1": "stop"
+        },
+        "side": "sell",
+        "trigger": "99",
+        "venue_trigger": "99"
+      }
+    },
+    "side": "sell",
+    "size": null,
+    "size_pct": null,
+    "slippage": 0.01,
+    "start": null
+  },
+  "price_ceiling": null,
+  "price_floor": null,
+  "qty": "0",
+  "quote_action": "rest",
+  "reason": "following",
+  "reduce_only": true,
+  "remaining": null,
+  "rest_price": "99",
+  "rest_qty": null,
+  "side": "sell",
+  "status": "running",
+  "symbol": "ETH",
+  "trade_ids": [],
+  "trade_qty_by_clip": {},
+  "venue": "lighter"
+}
