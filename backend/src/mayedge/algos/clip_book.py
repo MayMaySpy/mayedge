@@ -3,7 +3,8 @@
 Chase, Grid, Ladder and TWAP keep many jobs whose Clips live in one Ledger each. A
 subclass names its algo, its id prefix and its client_order_index band, makes a
 runner, and adds its own start checks. Planner and Trail own more than Clips and keep
-their own books. This is the method-by-method diff the split follows.
+their own books. ``AlgoBook`` is the shared base in this file. ``ClipBook`` adds the
+clip-only methods. This is the method-by-method diff the split follows.
 
 | Method | Kind | What differs |
 | --- | --- | --- |
@@ -123,7 +124,9 @@ def _created_at(snap: Mapping[str, object]) -> int:
     return as_int(snap.get("created_at"))
 
 
-class ClipBook[R: ClipRunner]:
+class AlgoBook[R: ClipRunner]:
+    """Counters, persistence, restore and stop. A subclass supplies the runner."""
+
     ALGO_ID: ClassVar[str]
     ID_PREFIX: ClassVar[str]
     LABEL: ClassVar[str]  # how logs and refusals name the algo
@@ -139,13 +142,11 @@ class ClipBook[R: ClipRunner]:
         broadcast: Callable[[AlgoPayload], None],
         coi_base: int | None = None,
         coi_end: int | None = None,
-        missing_fill_grace_ms: int = 800,
     ) -> None:
         self._execution_fn = execution
         self._broadcast_fn = broadcast
         self._coi_base = coi_base if coi_base is not None else self.COI_BASE
         self._coi_end = coi_end if coi_end is not None else self.COI_END
-        self._missing_fill_grace_ms = missing_fill_grace_ms
         self._jobs: dict[str, R] = {}
         self._archive: list[AlgoPayload] = []
         self._id_seq = 0
@@ -159,20 +160,20 @@ class ClipBook[R: ClipRunner]:
     def _view(self, job: R) -> JobView:
         raise NotImplementedError
 
-    def _side(self, job: R) -> str | None:
-        """The side a job works, for books that allow one job per side."""
+    def _restore_needs_books(self) -> bool:
+        return self.RESTORE_WAITS_FOR_FEEDS
+
+    def _on_restored(self, job: R) -> None:
         del job
-        return None
+
+    def _on_finished(self, job: R) -> None:
+        del job
 
     # ── reads ────────────────────────────────────────────────────────────
 
     @property
     def algo_type(self) -> str:
         return self.ALGO_ID
-
-    @property
-    def missing_fill_grace_ms(self) -> int:
-        return self._missing_fill_grace_ms
 
     def execution(self) -> ChaseExecution:
         return self._execution_fn()
@@ -190,11 +191,6 @@ class ClipBook[R: ClipRunner]:
 
     def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool:
         return any(True for _ in self._live(market_index, exclude))
-
-    def live_on_market_side(
-        self, market_index: int, side: str, *, exclude: str | None = None
-    ) -> bool:
-        return any(self._side(job) == side for job in self._live(market_index, exclude))
 
     def to_dict(self) -> AlgoPayload:
         working = [
@@ -271,6 +267,7 @@ class ClipBook[R: ClipRunner]:
             except Exception:
                 logger.exception("failed to archive %s job %s", self.LABEL, algo_id)
             self._remember(snap)
+        self._on_finished(job)
         self.publish()
 
     def on_gateway(self, msg: AlgoPayload) -> None:
@@ -334,7 +331,7 @@ class ClipBook[R: ClipRunner]:
                 job.hydrate_from_row(row)
                 self._jobs[algo_id] = job
                 mi = int(row.get("market_index") or 0)
-                if mi and self.RESTORE_WAITS_FOR_FEEDS:
+                if mi and self._restore_needs_books():
                     market_indices.add(mi)
                     ex = self.execution()
                     if ex.ensure_book:
@@ -345,13 +342,14 @@ class ClipBook[R: ClipRunner]:
                     "failed to restore %s job %s — archiving as stopped", self.LABEL, algo_id
                 )
                 _ = self._jobs.pop(algo_id, None)
-                self._archive_broken_row(row)
+                self._archive_broken(row)
 
         await self._wait_feeds_ready(market_indices)
 
         for algo_id, job, row in restored:
             if algo_id not in self._jobs:
                 continue
+            self._on_restored(job)
             try:
                 await job.resume()
             except Exception:
@@ -359,10 +357,10 @@ class ClipBook[R: ClipRunner]:
                     "failed to resume %s job %s — archiving as stopped", self.LABEL, algo_id
                 )
                 _ = self._jobs.pop(algo_id, None)
-                self._archive_broken_row(row)
+                self._archive_broken(row)
         self.publish()
 
-    def _archive_broken_row(self, row: Mapping[str, object]) -> None:
+    def _archive_broken(self, row: Mapping[str, object]) -> None:
         """Keep a job that would not come back as stopped history, with its ledger."""
         algo_id = str(row.get("algo_id") or "")
         try:
@@ -393,25 +391,6 @@ class ClipBook[R: ClipRunner]:
             logger.exception("failed to archive broken %s job %s", self.LABEL, algo_id)
 
     # ── control ──────────────────────────────────────────────────────────
-
-    async def _ensure_book(self, market_index: int) -> None:
-        ex = self.execution()
-        if ex.ensure_book:
-            ok = await ex.ensure_book(market_index)
-            if ok is False:
-                raise ValueError("Order book not synced")
-
-    async def _launch(self, begin: Callable[[R, str], Awaitable[None]]) -> None:
-        """Give a new job an id and start it; a job that will not start is forgotten."""
-        algo_id = self.alloc_id()
-        job = self._new_runner()
-        self._jobs[algo_id] = job
-        try:
-            await begin(job, algo_id)
-        except Exception:
-            _ = self._jobs.pop(algo_id, None)
-            raise
-        self.publish()
 
     async def drain_for_shutdown(self) -> None:
         """Pull all venue Clips before process exit."""
@@ -463,3 +442,54 @@ class ClipBook[R: ClipRunner]:
         if not job:
             raise ValueError(f"unknown algo_id {algo_id}")
         await job.unpause()
+
+
+class ClipBook[R: ClipRunner](AlgoBook[R]):
+    """A clip algo's book: one ledger of clips, plus the order book at start."""
+
+    def __init__(
+        self,
+        *,
+        execution: Callable[[], ChaseExecution],
+        broadcast: Callable[[AlgoPayload], None],
+        coi_base: int | None = None,
+        coi_end: int | None = None,
+        missing_fill_grace_ms: int = 800,
+    ) -> None:
+        super().__init__(
+            execution=execution, broadcast=broadcast, coi_base=coi_base, coi_end=coi_end
+        )
+        self._missing_fill_grace_ms = missing_fill_grace_ms
+
+    @property
+    def missing_fill_grace_ms(self) -> int:
+        return self._missing_fill_grace_ms
+
+    def _side(self, job: R) -> str | None:
+        """The side a job works, for books that allow one job per side."""
+        del job
+        return None
+
+    def live_on_market_side(
+        self, market_index: int, side: str, *, exclude: str | None = None
+    ) -> bool:
+        return any(self._side(job) == side for job in self._live(market_index, exclude))
+
+    async def _ensure_book(self, market_index: int) -> None:
+        ex = self.execution()
+        if ex.ensure_book:
+            ok = await ex.ensure_book(market_index)
+            if ok is False:
+                raise ValueError("Order book not synced")
+
+    async def _launch(self, begin: Callable[[R, str], Awaitable[None]]) -> None:
+        """Give a new job an id and start it; a job that will not start is forgotten."""
+        algo_id = self.alloc_id()
+        job = self._new_runner()
+        self._jobs[algo_id] = job
+        try:
+            await begin(job, algo_id)
+        except Exception:
+            _ = self._jobs.pop(algo_id, None)
+            raise
+        self.publish()
