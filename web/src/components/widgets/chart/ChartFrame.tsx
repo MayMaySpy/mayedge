@@ -1,12 +1,15 @@
-import { lazy, Suspense, useMemo, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
+import { lazy, Suspense, useMemo, useRef, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { SquareArrowOutUpRight } from "lucide-react";
 
+import { OverflowMenu } from "@/components/desk/OverflowMenu";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuCheckboxItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
+import { useToolbarFold } from "@/hooks/useToolbarFold";
 import type { ScanTab } from "@/components/widgets/ScanBoard";
 import { TimeframePins } from "@/components/widgets/TimeframePins";
 import type { Candle, LiquidationSummaryHours, Market } from "@/lib/api";
@@ -60,6 +63,14 @@ function BoardFallback({ title, detail }: { title: string; detail: string }) {
     </Empty>
   );
 }
+
+type HeaderToggle = {
+  label: string;
+  pressed: boolean;
+  disabled?: boolean;
+  title: string;
+  onChange: (next: boolean) => void;
+};
 
 export function ChartFrame(props: {
   symbol: string;
@@ -257,117 +268,102 @@ export function ChartFrame(props: {
     });
   };
 
+  // A narrow chart folds its header into `…`: the Axis, Plan and QT tools first, then the layers.
+  const headRef = useRef<HTMLDivElement>(null);
+  const folded = useToolbarFold(headRef, 2, `${mode}:${scanTab}`);
+  const layerToggles: HeaderToggle[] = [
+    { label: "Vol", pressed: volOn, title: volOn ? "Hide volume" : "Show volume", onChange: () => toggleVol() },
+    {
+      label: "OI",
+      pressed: showOi,
+      disabled: !supportsOpenInterest(bar),
+      title: supportsOpenInterest(bar)
+        ? oiOn
+          ? "Hide open interest"
+          : "Show open interest"
+        : "Open interest follows 1m, 5m, 15m, 1h, 4h, and 1d",
+      onChange: () => toggleOi(),
+    },
+    {
+      label: "Fund",
+      pressed: showFund,
+      disabled: !supportsOpenInterest(bar),
+      title: supportsOpenInterest(bar)
+        ? fundOn
+          ? "Hide funding"
+          : "Show funding, APR. Faint bars are the estimate for an hour that has not settled"
+        : "Funding follows 1m, 5m, 15m, 1h, 4h, and 1d",
+      onChange: () => toggleFund(),
+    },
+    { label: "B/A", pressed: bboOn, title: "Top of book", onChange: () => toggleBbo() },
+    { label: "MR", pressed: mayRektOn, title: mayRektOn ? "Hide MayRekt" : "MayRekt", onChange: () => toggleMayRekt() },
+    { label: "Fills", pressed: fillsOn, title: fillsOn ? "Hide your fills" : "Show your fills", onChange: () => toggleFills() },
+  ];
+  const toolToggles: HeaderToggle[] = [
+    {
+      label: "Axis",
+      pressed: axisArmed,
+      title: "Rest a Ticket on the price axis at Quick size. Below live price buys, above sells.",
+      onChange: (next) => setAxisArmed(next),
+    },
+    {
+      label: "Plan",
+      pressed: planArmed,
+      title: "Draw a Draft: click the entry, then the stop. Esc clears it. Nothing is sent until Start.",
+      onChange: (next) => setPlanArmed(next),
+    },
+    { label: "QT", pressed: quickOn, title: quickOn ? "Hide quick trade" : "Quick trade", onChange: (next) => setQuickOn(next) },
+  ];
+  const renderToggle = (t: HeaderToggle) => (
+    <Toggle
+      key={t.label}
+      variant="seg"
+      size="sm"
+      pressed={t.pressed}
+      disabled={t.disabled}
+      title={t.title}
+      className="h-6 px-1.5 font-mono text-sm"
+      onPressedChange={t.onChange}
+    >
+      {t.label}
+    </Toggle>
+  );
+  const renderMenuToggle = (t: HeaderToggle) => (
+    <DropdownMenuCheckboxItem
+      key={t.label}
+      checked={t.pressed}
+      disabled={t.disabled}
+      title={t.title}
+      onCheckedChange={t.onChange}
+    >
+      {t.label}
+    </DropdownMenuCheckboxItem>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="panel-drag grid h-8 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-border">
-        <div className="flex min-w-0 items-center gap-px overflow-hidden px-1">
+        <div ref={headRef} className="flex min-w-0 items-center gap-px overflow-hidden px-1">
           {isPrice ? (
             <>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={volOn}
-                title={volOn ? "Hide volume" : "Show volume"}
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleVol()}
-              >
-                Vol
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={showOi}
-                disabled={!supportsOpenInterest(bar)}
-                title={
-                  supportsOpenInterest(bar)
-                    ? oiOn
-                      ? "Hide open interest"
-                      : "Show open interest"
-                    : "Open interest follows 1m, 5m, 15m, 1h, 4h, and 1d"
-                }
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleOi()}
-              >
-                OI
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={showFund}
-                disabled={!supportsOpenInterest(bar)}
-                title={
-                  supportsOpenInterest(bar)
-                    ? fundOn
-                      ? "Hide funding"
-                      : "Show funding, APR. Faint bars are the estimate for an hour that has not settled"
-                    : "Funding follows 1m, 5m, 15m, 1h, 4h, and 1d"
-                }
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleFund()}
-              >
-                Fund
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={bboOn}
-                title="Top of book"
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleBbo()}
-              >
-                B/A
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={mayRektOn}
-                title={mayRektOn ? "Hide MayRekt" : "MayRekt"}
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleMayRekt()}
-              >
-                MR
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={fillsOn}
-                title={fillsOn ? "Hide your fills" : "Show your fills"}
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={() => toggleFills()}
-              >
-                Fills
-              </Toggle>
-              <span className="mx-1 h-3 w-px shrink-0 bg-border" aria-hidden />
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={axisArmed}
-                title="Rest a Ticket on the price axis at Quick size. Below live price buys, above sells."
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={(next) => setAxisArmed(next)}
-              >
-                Axis
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={planArmed}
-                title="Draw a Draft: click the entry, then the stop. Esc clears it. Nothing is sent until Start."
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={(next) => setPlanArmed(next)}
-              >
-                Plan
-              </Toggle>
-              <Toggle
-                variant="seg"
-                size="sm"
-                pressed={quickOn}
-                title={quickOn ? "Hide quick trade" : "Quick trade"}
-                className="h-6 px-1.5 font-mono text-sm"
-                onPressedChange={(next) => setQuickOn(next)}
-              >
-                QT
-              </Toggle>
+              {folded < 2 ? layerToggles.map(renderToggle) : null}
+              {folded < 1 ? (
+                <>
+                  <span className="mx-1 h-3 w-px shrink-0 bg-border" aria-hidden />
+                  {toolToggles.map(renderToggle)}
+                </>
+              ) : null}
+              {folded > 0 ? (
+                <OverflowMenu label="More chart controls">
+                  {folded > 1 ? (
+                    <>
+                      {layerToggles.map(renderMenuToggle)}
+                      <DropdownMenuSeparator />
+                    </>
+                  ) : null}
+                  {toolToggles.map(renderMenuToggle)}
+                </OverflowMenu>
+              ) : null}
             </>
           ) : isScan && scanTab === "liqs" ? (
             <LiqsReadout hours={liqHours} />

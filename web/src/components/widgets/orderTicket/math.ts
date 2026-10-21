@@ -1,6 +1,6 @@
 import type { Market, Position } from "@/lib/api";
 import { parseDecimal, stripFractionalZeros } from "@/lib/numbers";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, formatUsd } from "@/lib/utils";
 
 const CANONICAL_LEV = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100];
 
@@ -196,12 +196,7 @@ export function usdToBase(usd: number, price: number | null, decimals: number): 
 
 export function formatUsdNotional(value: number): string {
   if (!(value > 0) || !Number.isFinite(value)) return "";
-  return value.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return formatUsd(value);
 }
 
 export function formatUsdRaw(value: number): string {
