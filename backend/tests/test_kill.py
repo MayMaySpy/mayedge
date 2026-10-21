@@ -4,6 +4,7 @@ import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from expect_logs import expects_logs
 from httpx import ASGITransport, AsyncClient
 
 from mayedge.api.app import _account_summary_for_kill, create_app
@@ -19,6 +20,7 @@ class ParseDecimalKillTests(unittest.TestCase):
 
 
 class KillModuleTests(unittest.IsolatedAsyncioTestCase):
+    @expects_logs()
     async def test_partial_when_flatten_fails(self) -> None:
         chase = MagicMock()
         chase.stop = AsyncMock()
@@ -83,6 +85,7 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
         orders.create_market_order.assert_not_called()
 
 
+    @expects_logs()
     async def test_a_book_that_will_not_stop_does_not_hold_up_the_rest(self) -> None:
         algos = MagicMock()
         algos.stop = AsyncMock(side_effect=RuntimeError("grid would not stop"))
@@ -151,6 +154,7 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StopEveryBookTests(unittest.IsolatedAsyncioTestCase):
+    @expects_logs()
     async def test_desk_stops_the_other_books_when_one_fails(self) -> None:
         from mayedge import desk
 
@@ -162,6 +166,7 @@ class StopEveryBookTests(unittest.IsolatedAsyncioTestCase):
             await desk.stop_algo()
         good.stop.assert_awaited_once_with(None)
 
+    @expects_logs()
     async def test_a_book_stops_its_other_jobs_when_one_fails(self) -> None:
         from mayedge.algos.chase.book import ChaseBook
 
@@ -179,6 +184,7 @@ class StopEveryBookTests(unittest.IsolatedAsyncioTestCase):
 class AccountSummaryForKillTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.order_service")
     @patch("mayedge.api.app.account_service")
+    @expects_logs()
     async def test_falls_back_to_cache_when_rest_fails(
         self, account_svc, order_svc
     ) -> None:

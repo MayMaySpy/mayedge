@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from expect_logs import expects_logs
 from pydantic import ValidationError
 
 from mayedge.algos.chase.job import ChaseIcebergRunner
@@ -47,6 +48,7 @@ class BudgetTests(IsolatedAsyncioTestCase):
         self.assertFalse(budget.try_acquire(lane="critical", tx=True))
         self.assertTrue(budget.try_acquire(lane="critical"))
 
+    @expects_logs()
     def test_venue_block_cools_every_lane(self) -> None:
         budget.note_blocked()
         self.assertFalse(budget.try_acquire(lane="critical"))
@@ -87,6 +89,7 @@ class BudgetTests(IsolatedAsyncioTestCase):
         budget._refusals = [time.monotonic() - 61]
         self.assertEqual(budget.snapshot()["refused_60s"], 0)
 
+    @expects_logs()
     def test_a_venue_block_sets_cooling_until(self) -> None:
         before = int(time.time() * 1000)
         budget.note_blocked()
@@ -119,6 +122,7 @@ class NonceAndOrderTests(IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         budget.reset()
 
+    @expects_logs()
     async def test_invalid_nonce_retries_once(self) -> None:
         svc = OrderService()
         calls = 0
@@ -258,6 +262,7 @@ class AlgoBudgetTests(IsolatedAsyncioTestCase):
 
 
 class ToneWsTests(IsolatedAsyncioTestCase):
+    @expects_logs()
     async def test_error_frame_is_not_applied_as_a_book(self) -> None:
         gw = LighterGateway.__new__(LighterGateway)
         gw._books = OrderBookFeed(lambda _msg: None)
@@ -326,6 +331,7 @@ class KillHeadroomTests(IsolatedAsyncioTestCase):
         self.assertFalse(budget.try_acquire(lane="critical", tx=True))
         self.assertTrue(budget.try_acquire(lane=KILL_LANE, tx=True))
 
+    @expects_logs()
     def test_kill_is_sent_through_the_venue_cooldown(self) -> None:
         budget.note_blocked()
         self.assertFalse(budget.try_acquire(lane="critical", tx=True))

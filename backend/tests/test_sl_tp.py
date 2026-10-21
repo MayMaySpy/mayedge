@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from expect_logs import expects_logs
+
 from mayedge.lighter.models import MarketMeta, OpenOrder
 from mayedge.lighter.orders import OrderService
 
@@ -286,6 +288,7 @@ class StopTakeOrderTests(IsolatedAsyncioTestCase):
             )
         signer.cancel_order.assert_not_called()
 
+    @expects_logs()
     async def test_a_stale_stop_that_will_not_cancel_is_reported(self) -> None:
         svc = self._svc()
         signer = svc._signer

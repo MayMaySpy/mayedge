@@ -32,7 +32,7 @@ async def breathe() -> None:
         if prev is not None and not prev.done():
             await prev
         ready: asyncio.Future[None] = loop.create_future()
-        handle = loop.call_later(0, ready.set_result, None)
+        handle = loop.call_later(0, _wake, ready)
         try:
             await ready
         except asyncio.CancelledError:
@@ -41,6 +41,12 @@ async def breathe() -> None:
     finally:
         if not mine.done():
             mine.set_result(None)
+
+
+def _wake(ready: asyncio.Future[None]) -> None:
+    # A waiter cancelled before this timer runs has already cancelled `ready`.
+    if not ready.done():
+        ready.set_result(None)
 
 
 class LoopTurn:

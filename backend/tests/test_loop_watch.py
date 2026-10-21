@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 
+from expect_logs import expects_logs
+
 from mayedge.loop_watch import LoopWatch
 
 
@@ -83,6 +85,7 @@ class FreezeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(freeze["to"], events[0]["to"])
         self.assertGreater(int(freeze["to"]) - int(freeze["from"]), 30_000)
 
+    @expects_logs()
     async def test_both_clocks_jumping_is_a_freeze_and_a_stall_is_not(self) -> None:
         clock = _Clock()
         clock.late = 3

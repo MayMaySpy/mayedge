@@ -4,6 +4,8 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
+from expect_logs import expects_logs
+
 from mayedge.api.ws import _FANOUT_MAX, BroadcastFanout
 
 
@@ -70,6 +72,7 @@ class BroadcastFanoutTests(unittest.IsolatedAsyncioTestCase):
         await fanout.stop()
         self.assertEqual(sent, [{"type": "account", "n": 2}])
 
+    @expects_logs()
     async def test_overflow_drops_instead_of_growing(self) -> None:
         gate = asyncio.Event()
 

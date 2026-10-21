@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from expect_logs import expects_logs
+
 from mayedge.algos.chase.util import _is_would_cross
 from mayedge.config import settings
 from mayedge.lighter.account import AccountService
@@ -173,6 +175,7 @@ class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(out["tx_hash"], "0xabc")
 
+    @expects_logs()
     async def test_waf_on_send_is_venue_blocked(self) -> None:
         svc = OrderService()
         svc._signer = MagicMock()
@@ -340,6 +343,7 @@ class AccountRestCooldownTests(IsolatedAsyncioTestCase):
 
         budget.reset()
 
+    @expects_logs()
     async def test_summary_raises_while_cooling(self) -> None:
         from mayedge.lighter.budget import budget
 
@@ -354,6 +358,7 @@ class AccountRestCooldownTests(IsolatedAsyncioTestCase):
                 await svc.fetch_account_summary()
             api.assert_not_called()
 
+    @expects_logs()
     def test_waf_sets_cooldown(self) -> None:
         svc = AccountService()
         self.assertTrue(svc._note_rest_error(Exception(WAF_HTML), "test"))

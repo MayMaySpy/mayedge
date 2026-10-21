@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocketState
 
-from mayedge.api.turn import LoopTurn
+from mayedge.api.turn import LoopTurn, _wake
 from mayedge.api.ws import send_json
 
 
@@ -99,3 +99,15 @@ async def _receive() -> Any:
 
 async def _send(message: Any) -> None:
     del message
+
+
+class WakeTests(unittest.TestCase):
+    def test_a_cancelled_waiter_is_not_woken(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            ready: asyncio.Future[None] = loop.create_future()
+            ready.cancel()
+            _wake(ready)
+            self.assertTrue(ready.cancelled())
+        finally:
+            loop.close()

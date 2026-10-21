@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
+from expect_logs import expects_logs
+
 from mayedge.algos.chase import (
     ChaseIcebergRunner,
     ChaseStatus,
@@ -420,6 +422,7 @@ class ChaseRunnerCrossAndErrorsTests(IsolatedChaseTestCase):
         self.assertIsNone(boot.job.state.ledger.working())
         self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
 
+    @expects_logs()
     async def test_create_rate_limit_sets_backoff(self) -> None:
         boot = boot_job()
         boot.orders.create_error = RuntimeError("429 too many requests")
@@ -432,6 +435,7 @@ class ChaseRunnerCrossAndErrorsTests(IsolatedChaseTestCase):
             self.assertEqual(boot.orders.creates, [])
             self.assertIn(boot.job.state.reason, ("rate_limited", "requote_wait"))
 
+    @expects_logs()
     async def test_create_invalid_nonce_keeps_job_running(self) -> None:
         boot = boot_job()
         boot.orders.create_error = ValueError(
@@ -807,6 +811,7 @@ class ChaseCancelSafetyTests(IsolatedChaseTestCase):
         assert live is not None
         self.assertEqual(live.status, "live")
 
+    @expects_logs()
     async def test_stop_with_cancel_fail_stays_error(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
@@ -828,6 +833,7 @@ class ChaseCancelSafetyTests(IsolatedChaseTestCase):
         self.assertNotIn(boot.algo_id, boot.book._jobs)
         self.assertEqual(boot.orders.open_orders, [])
 
+    @expects_logs()
     async def test_stop_retries_invalid_nonce_then_succeeds(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
@@ -1154,6 +1160,7 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
         self.assertEqual(len(boot.orders.creates), 2)
         self.assertIsNone(boot.orders.find_by_coi(coi))
 
+    @expects_logs()
     async def test_auto_resume_trades_fail_retries_then_places(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):
@@ -1177,6 +1184,7 @@ class ChaseOvernightTrustTests(IsolatedChaseTestCase):
         self.assertEqual(boot.job.state.status, ChaseStatus.RUNNING)
         self.assertEqual(len(boot.orders.creates), 2)
 
+    @expects_logs()
     async def test_unpause_trades_fail_stays_running_retries(self) -> None:
         boot = boot_job()
         with patch_chase(boot.clock, boot.gateway, boot.orders):

@@ -256,5 +256,7 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         store.init_db()
         close_pool(wait=True)
         journal_routes._ready = None
+        # This step spawns a fresh worker on purpose; debug mode would call it a slow callback.
+        asyncio.get_running_loop().slow_callback_duration = 5.0
         loaded = await real_call(imports_gateway, settings.db_path, {})
         self.assertIs(loaded, False)

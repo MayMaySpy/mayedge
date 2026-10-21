@@ -9,6 +9,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from expect_logs import expects_logs
+
 from mayedge import db as store
 from mayedge.alert_log import AlertLog, MemoryLogStore
 from mayedge.alerts import AlertDetector, AlertSettings, MarketSnapshot
@@ -221,6 +223,7 @@ class FundingCalibrationTest(unittest.TestCase):
 
 
 class FundingBackfillTest(_StoreCase):
+    @expects_logs()
     def test_writes_a_year_once_and_keeps_live_prints(self) -> None:
         live = {_HOUR - 3: 0.0012, _HOUR - 2: -0.003, _HOUR - 1: 0.0005}
         for hour, rate in live.items():

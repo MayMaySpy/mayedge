@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from expect_logs import expects_logs
 from httpx import ASGITransport, AsyncClient
 
 from mayedge.api.app import create_app
@@ -141,6 +142,7 @@ class AutoKillClassTests(unittest.IsolatedAsyncioTestCase):
                 return
         self.fail("auto kill never finished")
 
+    @expects_logs()
     async def test_retries_with_wider_slippage_until_flat(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch("mayedge.auto_kill.RECHECK_S", 0):
             ak = AutoKill(Path(tmp) / "auto_kill.json")
@@ -161,6 +163,7 @@ class AutoKillClassTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ak.view()["last_kill_status"], "killed")
             self.assertFalse(ak.view()["armed"])
 
+    @expects_logs()
     async def test_retries_when_the_venue_refuses_then_reports_partial(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch("mayedge.auto_kill.RECHECK_S", 0):
             ak = AutoKill(Path(tmp) / "auto_kill.json")

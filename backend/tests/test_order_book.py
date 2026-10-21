@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 
+from expect_logs import expects_logs
+
 from mayedge.lighter.gateway import LighterGateway
 from mayedge.lighter.models import MarketMeta, OrderBookLevel
 from mayedge.lighter.order_book import OrderBookFeed
@@ -158,6 +160,7 @@ class TestOrderBookCurrentMarket(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["asks"]), 250)
         self.assertEqual(payload["bids"][0]["price"], "1000")
 
+    @expects_logs()
     async def test_nonce_gap_drops_deltas_until_snapshot(self) -> None:
         resub: list[int] = []
         feed = OrderBookFeed(lambda _msg: None, resubscribe=resub.append)
