@@ -9,12 +9,13 @@ import {
 } from "lightweight-charts";
 import { money, pnlClass } from "@/lib/journalFormat";
 import { theme } from "@/lib/theme";
-import { cn } from "@/lib/utils";
+import { DESK_DATE_LOCALE } from "@/lib/utcTime";
+import { cn, formatNumber } from "@/lib/utils";
 
 type Day = { time: number; net: number };
 
 function dayLabel(time: number): string {
-  return new Date(time * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  return new Date(time * 1000).toLocaleDateString(DESK_DATE_LOCALE, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 /**
@@ -52,6 +53,7 @@ export function JournalChart({
         fontSize: theme.chartFontSize,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: theme.rule } },
+      localization: { locale: theme.chartLocale, priceFormatter: (v: number) => formatNumber(v, 2) },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
       handleScroll: false,

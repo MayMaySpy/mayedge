@@ -14,6 +14,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -28,7 +29,8 @@ import {
 } from "@/lib/portfolioDay";
 import { pageOf } from "@/lib/portfolioShare";
 import { theme } from "@/lib/theme";
-import { cn } from "@/lib/utils";
+import { DESK_DATE_LOCALE } from "@/lib/utcTime";
+import { cn, formatNumber } from "@/lib/utils";
 
 const ASSET_NAMES: Record<number, string> = { 1: "ETH", 2: "LIT", 3: "USDC" };
 
@@ -45,14 +47,14 @@ function usd(value: string | null | undefined): string {
 function apy(value: string | null | undefined): string {
   if (value == null) return "—";
   const n = Number(value);
-  return Number.isFinite(n) ? `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%` : "—";
+  return Number.isFinite(n) ? `${formatNumber(n, 2)}%` : "—";
 }
 
 /** Token amounts behind a share, to the cent's worth of precision: 1,018.21. */
 function units(value: string | null | undefined): string {
   if (value == null) return "—";
   const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+  return Number.isFinite(n) ? formatNumber(n, 2) : "—";
 }
 
 function LineKey({ kind }: { kind: PortfolioKind | "total" }) {
@@ -126,7 +128,7 @@ export function AllocationBar({ now }: { now: PortfolioNow }) {
 
 /** Every time on the page is UTC, and says so (W2). */
 function when(ts: number, hourly: boolean): string {
-  const text = new Date(ts).toLocaleString(undefined, {
+  const text = new Date(ts).toLocaleString(DESK_DATE_LOCALE, {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
@@ -140,8 +142,8 @@ function axisUsd(value: number): string {
   const abs = Math.abs(value);
   const text =
     abs >= 1000
-      ? `${(abs / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k`
-      : abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      ? `${formatNumber(abs / 1000, 0, 1)}k`
+      : formatNumber(abs, 0);
   return `${value < 0 ? "-" : ""}$${text}`;
 }
 
@@ -202,7 +204,7 @@ export function ValueChart({
         fontSize: theme.chartFontSize,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: theme.rule } },
-      localization: { priceFormatter: axisUsd },
+      localization: { locale: theme.chartLocale, priceFormatter: axisUsd },
       // Zero sits on the bottom edge: no margin below it to draw negative ticks into.
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0 } },
       timeScale: { borderVisible: false, timeVisible: hourly },
@@ -358,13 +360,13 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
           <TableBody>
             {rows.map((day) => (
               <TableRow key={day.day}>
-                <TableCell className="font-mono">{day.day}</TableCell>
+                <TableCell>{day.day}</TableCell>
                 {kinds.map((k) => (
-                  <TableCell key={k} className={cn("text-right font-mono tabular-nums", pnlClass(day.kinds[k]))}>
+                  <TableCell key={k} className={cn("text-right", pnlClass(day.kinds[k]))}>
                     {money(day.kinds[k])}
                   </TableCell>
                 ))}
-                <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(day.total))}>{money(day.total)}</TableCell>
+                <TableCell className={cn("text-right", pnlClass(day.total))}>{money(day.total)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -447,8 +449,8 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
           <TableHeader>
             <TableRow>
               <TableHead>Asset</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead className="text-right">Price</TableHead>
+              <TableHead hideBelow="xs" className="text-right">Qty</TableHead>
+              <TableHead hideBelow="sm" className="text-right">Price</TableHead>
               <TableHead className="text-right">Value</TableHead>
               <TableHead className="text-right">uPnL</TableHead>
             </TableRow>
@@ -459,11 +461,13 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             ) : (
               now.spot.map((row) => (
                 <TableRow key={row.symbol}>
-                  <TableCell className="font-mono">{row.symbol}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{size(row.qty)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{price(row.price)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                  <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.upnl))}>
+                  <TableCell>
+                    <TableName>{row.symbol}</TableName>
+                  </TableCell>
+                  <TableCell hideBelow="xs" className="text-right">{size(row.qty)}</TableCell>
+                  <TableCell hideBelow="sm" className="text-right">{price(row.price)}</TableCell>
+                  <TableCell className="text-right">{usd(row.value)}</TableCell>
+                  <TableCell className={cn("text-right", pnlClass(row.upnl))}>
                     {row.upnl == null ? "—" : money(row.upnl)}
                   </TableCell>
                 </TableRow>
@@ -477,7 +481,7 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
           <TableHeader>
             <TableRow>
               <TableHead>Shares</TableHead>
-              <TableHead className="text-right">Put in</TableHead>
+              <TableHead hideBelow="2xs" className="text-right">Put in</TableHead>
               <TableHead className="text-right">Value</TableHead>
               <TableHead className="text-right">APY</TableHead>
             </TableRow>
@@ -488,10 +492,10 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             ) : (
               llp.map((row) => (
                 <TableRow key={row.pool}>
-                  <TableCell className="font-mono tabular-nums">{size(row.shares)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{usd(row.principal)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
+                  <TableCell>{size(row.shares)}</TableCell>
+                  <TableCell hideBelow="2xs" className="text-right">{usd(row.principal)}</TableCell>
+                  <TableCell className="text-right">{usd(row.value)}</TableCell>
+                  <TableCell className="text-right">{apy(row.apy)}</TableCell>
                 </TableRow>
               ))
             )}
@@ -503,7 +507,7 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
           <TableHeader>
             <TableRow>
               <TableHead>Staked</TableHead>
-              <TableHead className="text-right">Put in</TableHead>
+              <TableHead hideBelow="2xs" className="text-right">Put in</TableHead>
               <TableHead className="text-right">Value</TableHead>
               <TableHead className="text-right">APY</TableHead>
             </TableRow>
@@ -514,14 +518,14 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             ) : (
               staking.map((row) => (
                 <TableRow key={row.pool}>
-                  <TableCell className="font-mono tabular-nums">
+                  <TableCell>
                     {units(row.units)} {row.unit}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
+                  <TableCell hideBelow="2xs" className="text-right">
                     {row.principal ? `${units(row.principal)} ${row.unit}` : "—"}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
+                  <TableCell className="text-right">{usd(row.value)}</TableCell>
+                  <TableCell className="text-right">{apy(row.apy)}</TableCell>
                 </TableRow>
               ))
             )}
@@ -538,10 +542,10 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             <TableBody>
               {now.unlocks.map((u) => (
                 <TableRow key={`${u.asset_index}-${u.unlock_ms}`}>
-                  <TableCell className="font-mono tabular-nums">
+                  <TableCell>
                     {size(u.amount)} {ASSET_NAMES[u.asset_index] ?? `asset ${u.asset_index}`}
                   </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{when(u.unlock_ms, true)}</TableCell>
+                  <TableCell className="text-right">{when(u.unlock_ms, true)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
