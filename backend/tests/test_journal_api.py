@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,20 @@ from mayedge.persist_journal import (
     journal_put_note,
 )
 from mayedge.tone_compute import call as real_call
+
+try:
+    from test_loop_free import assert_loop_free
+except ImportError:  # `python -m unittest tests.test_journal_api`
+    from tests.test_loop_free import assert_loop_free
+
+
+def _hold_the_gil(_db_path: str, _upnl: dict[int, Decimal]) -> list[object]:
+    """80 ms of CPU. Sleep would release the GIL and hide a loop stall."""
+    end = time.perf_counter() + 0.08
+    n = 0
+    while time.perf_counter() < end:
+        n += 1
+    return []
 
 
 def _fill(trade_id: str, side: str, ts: int, pnl: str = "0") -> dict[str, object]:
@@ -153,3 +168,10 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             account_service._summary = previous
         self.assertEqual(Decimal(first["trips"][0]["upnl"]), Decimal("1.5"))
         self.assertEqual(Decimal(second["trips"][0]["upnl"]), Decimal("4"))
+
+    async def test_a_slow_rebuild_stays_off_the_loop(self) -> None:
+        journal_routes._ready = None
+        started = time.perf_counter()
+        with patch("mayedge.api.routes.journal.build_off_loop", _hold_the_gil):
+            await assert_loop_free(journal_routes.get_trips(), max_gap_ms=20)
+        self.assertGreaterEqual(time.perf_counter() - started, 0.08)
