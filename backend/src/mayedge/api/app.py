@@ -145,6 +145,12 @@ async def lifespan(app: FastAPI):
     await desk.restore()
     backup = start_backup(pusher)
     app.state.backup = backup
+    try:
+        from mayedge.api.routes.journal import warm as warm_journal
+
+        await warm_journal()
+    except Exception:
+        logger.exception("journal warm failed")
     n_algos = len(desk.algo_book().get("working") or [])
     pusher.push(
         "boot",

@@ -147,6 +147,11 @@ def _upnl_sig(upnl: dict[int, Decimal]) -> tuple[tuple[int, str], ...]:
     return tuple(sorted((market, str(pnl)) for market, pnl in upnl.items()))
 
 
+async def warm() -> None:
+    """One rebuild before the first page, so that open reads the cache."""
+    await _shared_trips(_upnl())
+
+
 async def _shared_trips(upnl: dict[int, Decimal]) -> list[RoundTrip]:
     """One rebuild per database generation and live uPnL. The rest of a page waits."""
     global _ready

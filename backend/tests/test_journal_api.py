@@ -171,6 +171,22 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         self.assertEqual(Decimal(first["trips"][0]["upnl"]), Decimal("1.5"))
         self.assertEqual(Decimal(second["trips"][0]["upnl"]), Decimal("4"))
 
+    async def test_warm_covers_the_next_read(self) -> None:
+        journal_insert_fills(
+            [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]
+        )
+        journal_routes._ready = None
+        calls = {"n": 0}
+
+        async def counting(fn: Any, *args: Any) -> Any:
+            calls["n"] += 1
+            return await real_call(fn, *args)
+
+        with patch("mayedge.api.routes.journal.call", counting):
+            await journal_routes.warm()
+            await journal_routes.get_trips()
+        self.assertEqual(calls["n"], 1)
+
     async def test_a_slow_rebuild_stays_off_the_loop(self) -> None:
         journal_routes._ready = None
         started = time.perf_counter()

@@ -151,6 +151,12 @@ async def _loop() -> None:
                 await run_sync()
             except Exception:
                 logger.exception("journal sync failed")
+            try:
+                from mayedge.api.routes.journal import warm as warm_journal
+
+                await warm_journal()
+            except Exception:
+                logger.exception("journal warm failed")
             _wake.clear()
             try:
                 await asyncio.wait_for(_wake.wait(), timeout=INTERVAL_S)
