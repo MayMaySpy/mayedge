@@ -957,21 +957,29 @@ class LighterGateway:
                 continue
             self._alerts.seed_minute_bars(meta.market_index, candles)
 
+    def _scan_payloads(self) -> list[tuple[str, list[dict[str, Any]], str]]:
+        built = (
+            ("scan_activity", self.scan_activity()),
+            ("tone_board", self.tone_board()),
+            ("funding_extremes", self.funding_extremes()),
+        )
+        return [
+            (kind, rows, json.dumps(rows, sort_keys=True, default=str)) for kind, rows in built
+        ]
+
+    async def _publish_scan_boards(self) -> None:
+        for kind, rows, sig in await asyncio.to_thread(self._scan_payloads):
+            if sig == self._last_scan.get(kind):
+                continue
+            self._last_scan[kind] = sig
+            self.broadcast({"type": kind, "rows": rows})
+
     async def _scan_loop(self) -> None:
-        """Push each Scan board when it has changed."""
+        """Push each Scan board when it has changed. The build stays off the loop."""
         while True:
             try:
                 await asyncio.sleep(_SCAN_BROADCAST_S)
-                for kind, rows in (
-                    ("scan_activity", self.scan_activity()),
-                    ("tone_board", self.tone_board()),
-                    ("funding_extremes", self.funding_extremes()),
-                ):
-                    sig = json.dumps(rows, sort_keys=True, default=str)
-                    if sig == self._last_scan.get(kind):
-                        continue
-                    self._last_scan[kind] = sig
-                    self.broadcast({"type": kind, "rows": rows})
+                await self._publish_scan_boards()
             except asyncio.CancelledError:
                 break
             except Exception:
