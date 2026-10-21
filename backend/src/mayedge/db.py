@@ -1,4 +1,4 @@
-"""SQLite persistence for chase-iceberg algo runs and ledgers."""
+"""The desk database: the writer and reader connections, the base schema, and counters."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from mayedge import migrations
 from mayedge.config import settings
 
 logger = logging.getLogger(__name__)
@@ -48,17 +49,6 @@ CREATE TABLE IF NOT EXISTS journal_notes (
     note TEXT NOT NULL DEFAULT '',
     tags TEXT NOT NULL DEFAULT '[]',
     updated_at INTEGER NOT NULL
-);
-"""
-
-# The venue's pnl buckets (docs/portfolio-rules.md H1). raw is the bucket as answered.
-_PORTFOLIO_TABLES = """
-CREATE TABLE IF NOT EXISTS portfolio_pnl (
-    resolution TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    ts INTEGER NOT NULL,
-    raw TEXT NOT NULL,
-    PRIMARY KEY (resolution, mode, ts)
 );
 """
 
@@ -238,38 +228,9 @@ CREATE TABLE IF NOT EXISTS funding_days (
 );
 """ + _JOURNAL_TABLES
 
-_LIQ_TABLE = """
-CREATE TABLE liquidations (
-    trade_id INTEGER PRIMARY KEY,
-    market_index INTEGER NOT NULL,
-    symbol TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    side TEXT,
-    price TEXT NOT NULL,
-    size TEXT NOT NULL,
-    usd_amount TEXT,
-    ts INTEGER NOT NULL,
-    group_id TEXT
-)
-"""
-
-_LIQ_DAYS_TABLE = """
-CREATE TABLE IF NOT EXISTS liquidation_days (
-    day_index INTEGER NOT NULL,
-    market_index INTEGER NOT NULL,
-    symbol TEXT NOT NULL,
-    long_usd REAL NOT NULL,
-    short_usd REAL NOT NULL,
-    total_usd REAL NOT NULL,
-    fill_count INTEGER NOT NULL,
-    largest_usd REAL NOT NULL,
-    PRIMARY KEY (day_index, market_index)
-)
-"""
-
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = migrations.LATEST
 
 
 def _meta_int(
@@ -297,197 +258,11 @@ def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def _ensure_liquidations(conn: sqlite3.Connection) -> None:
-    """Create liquidations table; additive column repair only (no DROP on live DB)."""
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(liquidations)")}
-    if not cols:
-        conn.execute(_LIQ_TABLE)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(liquidations)")}
-    required: dict[str, str] = {
-        "side": "side TEXT",
-        "usd_amount": "usd_amount TEXT",
-        "group_id": "group_id TEXT",
-    }
-    for name, ddl in required.items():
-        if name not in cols:
-            logger.warning("liquidations: adding missing column %s", name)
-            conn.execute(f"ALTER TABLE liquidations ADD COLUMN {ddl}")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_liq_ts ON liquidations(ts)")
-
-
-def _ensure_algo_venue(conn: sqlite3.Connection) -> None:
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(algo_runs)")}
-    if "venue" not in cols:
-        conn.execute("ALTER TABLE algo_runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'lighter'")
-
-
-def _ensure_algo_mm_columns(conn: sqlite3.Connection) -> None:
-    run_cols = {row[1] for row in conn.execute("PRAGMA table_info(algo_runs)")}
-    if "algo_type" not in run_cols:
-        conn.execute(
-            "ALTER TABLE algo_runs ADD COLUMN algo_type TEXT NOT NULL DEFAULT 'chase-iceberg'"
-        )
-    if "params_json" not in run_cols:
-        conn.execute("ALTER TABLE algo_runs ADD COLUMN params_json TEXT NOT NULL DEFAULT '{}'")
-    clip_cols = {row[1] for row in conn.execute("PRAGMA table_info(algo_clips)")}
-    if "side" not in clip_cols:
-        conn.execute("ALTER TABLE algo_clips ADD COLUMN side TEXT")
-
-
 def _migrate(conn: sqlite3.Connection) -> None:
-    version = _meta_int(conn, "schema_version", 0)
-    if version >= SCHEMA_VERSION:
+    if migrations.stored_version(conn) >= SCHEMA_VERSION:
         return
-    if version < 1:
-        _ensure_liquidations(conn)
-        _ensure_algo_venue(conn)
-    if version < 2:
-        _ensure_algo_mm_columns(conn)
-    if version < 3:
-        _ensure_liquidations(conn)
-    if version < 4:
-        conn.execute(
-            """
-            UPDATE liquidations SET side = CASE
-              WHEN side = 'buy' THEN 'sell'
-              WHEN side = 'sell' THEN 'buy'
-              ELSE side END
-            """
-        )
-    if version < 5:
-        conn.execute(_LIQ_DAYS_TABLE)
-    if version < 6:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS oi_samples (
-                market_index INTEGER NOT NULL,
-                minute_index INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                oi_usd REAL NOT NULL,
-                PRIMARY KEY (market_index, minute_index)
-            );
-            CREATE INDEX IF NOT EXISTS idx_oi_samples_minute ON oi_samples(minute_index);
-            CREATE TABLE IF NOT EXISTS oi_days (
-                day_index INTEGER NOT NULL,
-                market_index INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                oi_high REAL NOT NULL,
-                oi_low REAL NOT NULL,
-                oi_close REAL NOT NULL,
-                PRIMARY KEY (day_index, market_index)
-            );
-            """
-        )
-    if version < 7:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS alert_outcomes (
-                episode_id TEXT NOT NULL,
-                market_index INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                setup TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                horizon_min INTEGER NOT NULL,
-                opened_at INTEGER NOT NULL,
-                raw_pct REAL NOT NULL,
-                excess_pct REAL NOT NULL,
-                hit INTEGER NOT NULL,
-                PRIMARY KEY (episode_id, horizon_min)
-            );
-            CREATE INDEX IF NOT EXISTS idx_alert_outcomes_opened ON alert_outcomes(opened_at);
-            """
-        )
-    if version < 8:
-        # alert_outcomes stays where it is. Nothing reads it; its rows used the old clock.
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS alert_rows (
-                id TEXT PRIMARY KEY,
-                market_index INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                rule TEXT NOT NULL,
-                severity INTEGER NOT NULL,
-                direction TEXT NOT NULL,
-                held TEXT NOT NULL DEFAULT '',
-                fired_at INTEGER NOT NULL,
-                price REAL NOT NULL,
-                facts TEXT NOT NULL DEFAULT '[]',
-                left_pct REAL,
-                against_pct REAL,
-                opened_at INTEGER
-            );
-            CREATE INDEX IF NOT EXISTS idx_alert_rows_fired ON alert_rows(fired_at);
-            """
-        )
-    if version < 9:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS funding_samples (
-                market_index INTEGER NOT NULL,
-                minute_index INTEGER NOT NULL,
-                funding REAL NOT NULL,
-                PRIMARY KEY (market_index, minute_index)
-            );
-            CREATE INDEX IF NOT EXISTS idx_funding_samples_minute
-                ON funding_samples(minute_index);
-            """
-        )
-    if version < 10:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS funding_prints (
-                market_index INTEGER NOT NULL,
-                hour_index INTEGER NOT NULL,
-                rate REAL NOT NULL,
-                PRIMARY KEY (market_index, hour_index)
-            )
-            """
-        )
-    if version < 11:
-        # Old minutes now fold into hours. A folded day becomes its last hour.
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oi_hours (
-                hour_index INTEGER NOT NULL,
-                market_index INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                oi_high REAL NOT NULL,
-                oi_low REAL NOT NULL,
-                oi_close REAL NOT NULL,
-                PRIMARY KEY (hour_index, market_index)
-            )
-            """
-        )
-        has_days = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'oi_days'"
-        ).fetchone()
-        if has_days:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO oi_hours
-                    (hour_index, market_index, symbol, oi_high, oi_low, oi_close)
-                SELECT day_index * 24 + 23, market_index, symbol, oi_high, oi_low, oi_close
-                FROM oi_days
-                """
-            )
-            conn.execute("DROP TABLE oi_days")
-    if version < 12:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS funding_days (
-                market_index INTEGER NOT NULL,
-                day_index INTEGER NOT NULL,
-                rate REAL NOT NULL,
-                PRIMARY KEY (market_index, day_index)
-            )
-            """
-        )
-    if version < 13:
-        conn.executescript(_JOURNAL_TABLES)
-    if version < 14:
-        conn.executescript(_PORTFOLIO_TABLES)
-    _set_meta(conn, "schema_version", str(SCHEMA_VERSION))
-    logger.info("sqlite schema migrated to version %s", SCHEMA_VERSION)
+    version = migrations.migrate(conn)
+    logger.info("sqlite schema migrated to version %s", version)
 
 
 def _connect() -> sqlite3.Connection:
