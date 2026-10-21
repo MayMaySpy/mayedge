@@ -15,6 +15,7 @@ import type {
 } from "@/lib/api.gen";
 
 export type {
+  PortfolioMargin,
   JournalExcursion,
   JournalFill,
   JournalSide,

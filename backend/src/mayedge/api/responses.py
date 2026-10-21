@@ -219,9 +219,27 @@ class PortfolioCollateral(_Shape):
     value: str | None
 
 
+class PortfolioMarginPart(_Shape):
+    symbol: str
+    # The USDC cross portfolio, with the open uPnL in it; otherwise a collateral asset at its LTV.
+    cross: bool
+    qty: str | None
+    price: str | None
+    ltv: str | None
+    value: str | None
+
+
+class PortfolioMargin(_Shape):
+    """Buying power, never part of a value (portfolio-rules N10)."""
+
+    total: str | None
+    parts: list[PortfolioMarginPart]
+
+
 class PortfolioPerps(_Shape):
     collateral: list[PortfolioCollateral]
     upnl: str | None
+    margin: PortfolioMargin | None
 
 
 class PortfolioNow(_Shape):

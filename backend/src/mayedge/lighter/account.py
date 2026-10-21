@@ -17,8 +17,10 @@ from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.channels import split_ws_type
 from mayedge.lighter.equity import (
+    MarginPart,
     format_cross_liquidation_price,
     liquidation_threshold_usd,
+    portfolio_margin_parts,
     portfolio_margin_usd,
     trade_available_usd,
 )
@@ -181,11 +183,18 @@ class AccountService:
             }
         return out
 
-    def _paint_margin(self, summary: AccountSummary | None = None) -> None:
+    def _cross_portfolio(self, summary: AccountSummary | None = None) -> float:
         s = summary or self._summary
         cross = to_float(s.cross_portfolio_value)
-        if cross <= 0:
-            cross = to_float(s.portfolio_value)
+        return cross if cross > 0 else to_float(s.portfolio_value)
+
+    def margin_parts(self) -> list[MarginPart]:
+        """The Portfolio margin term by term, from the same inputs as the header's figure."""
+        return portfolio_margin_parts(self._cross_portfolio(), self._assets, self._live_asset_meta())
+
+    def _paint_margin(self, summary: AccountSummary | None = None) -> None:
+        s = summary or self._summary
+        cross = self._cross_portfolio(s)
         tav = portfolio_margin_usd(cross, self._assets, self._live_asset_meta())
         s.portfolio_margin = str(tav)
         s.trade_available = str(trade_available_usd(to_float(s.available), tav, cross))

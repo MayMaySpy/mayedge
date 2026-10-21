@@ -19,6 +19,7 @@ from mayedge.portfolio import (
     DAY_MS,
     HOUR_MS,
     STAKING_POOL,
+    MarginRow,
     OpenRefused,
     buckets,
     change_pct,
@@ -148,8 +149,33 @@ class HoldingTests(TestCase):
         responses.PortfolioNow.model_validate(now)
         self.assertEqual(
             now["perps"],
-            {"collateral": [{"symbol": "USDC", "qty": "610.5", "price": "1", "value": "610.5"}], "upnl": "-12.25"},
+            {
+                "collateral": [{"symbol": "USDC", "qty": "610.5", "price": "1", "value": "610.5"}],
+                "upnl": "-12.25",
+                "margin": None,
+            },
         )
+
+    def test_the_margin_is_buying_power_beside_the_value(self) -> None:
+        # The live account on 2026-10-21: USDC 1,014.01 and 0.50000082 ETH at 70% LTV.
+        margin = [
+            MarginRow("USDC", True, D("1014.012307"), D("1"), D("1"), D("1014.012307")),
+            MarginRow("ETH", False, D("0.50000082"), D("2518.95"), D("0.7"), D("881.6339458995")),
+        ]
+        plain = portfolio_now(
+            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
+            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"),
+        ).to_json()
+        with_margin = portfolio_now(
+            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
+            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"), margin=margin,
+        ).to_json()
+        responses.PortfolioNow.model_validate(with_margin)
+        self.assertEqual(with_margin["perps"]["margin"]["total"], "1895.6462528995")
+        self.assertEqual([p["symbol"] for p in with_margin["perps"]["margin"]["parts"]], ["USDC", "ETH"])
+        # N10: it changes no value.
+        self.assertEqual(plain["kinds"], with_margin["kinds"])
+        self.assertEqual(plain["total"], with_margin["total"])
 
     def test_spot_value_its_rows_leave_out_is_named(self) -> None:
         rows = spot_rows(LIVE_ASSETS)

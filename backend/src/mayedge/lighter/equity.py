@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -30,13 +31,25 @@ def _rows(assets: Any) -> list[dict[str, Any]]:
     return out
 
 
-def portfolio_margin_usd(
+@dataclass(frozen=True)
+class MarginPart:
+    """One term of the Portfolio margin. The cross part is USDC with the open uPnL."""
+
+    symbol: str
+    cross: bool
+    qty: float
+    index: float
+    ltv: float
+    value: float
+
+
+def portfolio_margin_parts(
     cross_portfolio: float,
     assets: Any,
     details: dict[str, dict[str, float]],
-) -> float:
-    """Lighter TAV: USDC portfolio + Σ LTV × margin_balance × index."""
-    total = cross_portfolio
+) -> list[MarginPart]:
+    """Lighter TAV, term by term: the USDC cross portfolio, then LTV × margin_balance × index."""
+    parts = [MarginPart("USDC", True, cross_portfolio, 1.0, 1.0, cross_portfolio)]
     for row in _rows(assets):
         sym = str(row.get("symbol") or "").upper()
         if sym in _QUOTE:
@@ -49,8 +62,17 @@ def portfolio_margin_usd(
         qty = to_float(row.get("margin_balance"))
         if index <= 0 or qty == 0:
             continue
-        total += ltv * qty * index
-    return total
+        parts.append(MarginPart(sym, False, qty, index, ltv, ltv * qty * index))
+    return parts
+
+
+def portfolio_margin_usd(
+    cross_portfolio: float,
+    assets: Any,
+    details: dict[str, dict[str, float]],
+) -> float:
+    """Lighter TAV: USDC portfolio + Σ LTV × margin_balance × index."""
+    return sum(p.value for p in portfolio_margin_parts(cross_portfolio, assets, details))
 
 
 def liquidation_threshold_usd(

@@ -298,13 +298,17 @@ _Avoid_: margin (unqualified), allocated margin (that’s a Position), collatera
 The free quantity of that Asset. Distinct from account buying power.
 _Avoid_: available (unqualified), trade_available, buying power
 
+**Portfolio margin**:
+The account's buying power: the USDC cross portfolio plus each collateral Asset's Margin balance at its LTV. The header's MARGIN. Not a value: an Asset in it is already counted at full value in its Holding.
+_Avoid_: equity, Portfolio (that is what the account holds), TAV (unqualified)
+
 **LTV**:
-The fraction of an Asset’s index value that counts toward Portfolio Margin. Quote (USDC, USDG) is `100%`.
+The fraction of an Asset’s index value that counts toward the Portfolio margin. Quote (USDC, USDG) is `100%`.
 _Avoid_: haircut (unqualified), weight, discount
 
 **Liquidation threshold**:
 The fraction of an Asset’s index value that counts when deciding if the account is liquidated. At least the LTV. Quote is `100%`.
-_Avoid_: LTV, Portfolio Margin
+_Avoid_: LTV, Portfolio margin
 
 **Liquidation price**:
 The price of a cross Position at which the account, valued with each Asset’s Margin balance at its Liquidation threshold, meets maintenance margin.

@@ -14,7 +14,8 @@ import httpx
 
 from mayedge.config import settings
 from mayedge.lighter.budget import budget
-from mayedge.portfolio import HOUR_MS, PortfolioNow, portfolio_now
+from mayedge.lighter.equity import MarginPart
+from mayedge.portfolio import HOUR_MS, MarginRow, PortfolioNow, portfolio_now
 
 REUSE_S = 30.0
 
@@ -90,6 +91,7 @@ async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: boo
         lit_price=Decimal(str(lit)),
         upnl=_upnl(account_service._summary.unrealized_pnl),  # pyright: ignore[reportPrivateUsage]
         detail=detail,
+        margin=_margin(account_service.margin_parts()) if detail else None,
     )
     _cache[(open_ms, detail)] = (now, result)
     for key in [k for k, (at, _r) in _cache.items() if now - at >= REUSE_S]:
@@ -108,3 +110,17 @@ def _upnl(raw: object) -> Decimal | None:
         return Decimal(str(raw))
     except ArithmeticError:
         return None
+
+
+def _margin(parts: list[MarginPart]) -> list[MarginRow]:
+    return [
+        MarginRow(
+            symbol=p.symbol,
+            cross=p.cross,
+            qty=Decimal(str(p.qty)),
+            price=Decimal(str(p.index)),
+            ltv=Decimal(str(p.ltv)),
+            value=Decimal(str(p.value)),
+        )
+        for p in parts
+    ]

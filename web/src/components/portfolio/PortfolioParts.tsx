@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { PortfolioDay, PortfolioHistory, PortfolioKind, PortfolioNow } from "@/lib/api";
+import type { PortfolioDay, PortfolioHistory, PortfolioKind, PortfolioMargin, PortfolioNow } from "@/lib/api";
 import { magnitude, money, pctPoints, pnlClass, price, size } from "@/lib/journalFormat";
 import {
   type FlowEvent,
@@ -430,6 +430,38 @@ function Empty({ cols, children }: { cols: number; children: React.ReactNode }) 
   );
 }
 
+/** N10: the Portfolio margin, buying power beside the Perps value and never added to it. */
+function MarginLine({ margin }: { margin: PortfolioMargin }) {
+  return (
+    <div
+      className="mx-2 mt-1 border-t border-rule pt-1.5 text-muted-foreground"
+      title="Buying power: USDC with the open uPnL, plus each collateral asset at its LTV. Not part of any value."
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="text-foreground">Portfolio margin</span>
+        <span className="text-xs">buying power, not value</span>
+        <span className="ml-auto font-mono tabular-nums text-foreground">{usd(margin.total)}</span>
+      </div>
+      {margin.parts.map((part) => (
+        <div key={part.symbol + (part.cross ? ":cross" : "")} className="flex items-baseline gap-2 font-mono tabular-nums">
+          <span>{part.cross ? `${part.symbol} and open uPnL` : part.symbol}</span>
+          {!part.cross ? (
+            <span className="text-xs">
+              {size(part.qty)} × {price(part.price)} × {ltvPct(part.ltv)} LTV
+            </span>
+          ) : null}
+          <span className="ml-auto">{usd(part.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ltvPct(ltv: string | null): string {
+  const n = Number(ltv);
+  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : "—";
+}
+
 /** W6: what each Holding is made of, in the Allocation's order. */
 export function Holdings({ now, className }: { now: PortfolioNow; className?: string }) {
   const staking = now.pools.filter((p) => p.kind === "staking");
@@ -464,6 +496,7 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             </TableRow>
           </TableBody>
         </Table>
+        {now.perps.margin ? <MarginLine margin={now.perps.margin} /> : null}
         <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground">
           <a href="/journal" target="_blank" rel="noopener" className="ml-auto hover:text-foreground">
             Trades are in the Journal

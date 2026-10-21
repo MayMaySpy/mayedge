@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import unittest
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from mayedge.lighter.account import AccountService
-from mayedge.lighter.equity import portfolio_margin_usd, trade_available_usd
+from mayedge.lighter.equity import portfolio_margin_parts, portfolio_margin_usd, trade_available_usd
 from mayedge.lighter.models import AccountSummary, Position
 from mayedge.lighter.parse import merge_account_assets, public_assets
 
@@ -484,3 +485,17 @@ class TouchMarksAssetsTests(TestCase):
         with patch("mayedge.lighter.account.gateway", gw):
             svc.touch_marks()
         self.assertEqual(captured, [])
+
+
+class MarginPartsTests(unittest.TestCase):
+    def test_parts_add_up_to_the_portfolio_margin(self) -> None:
+        assets = [
+            {"symbol": "USDC", "margin_balance": "1014.012307"},
+            {"symbol": "ETH", "margin_balance": "0.50000082"},
+        ]
+        details = {"ETH": {"index_price": 2518.95, "loan_to_value": 0.7}}
+        parts = portfolio_margin_parts(1014.012307, assets, details)
+        self.assertEqual([(p.symbol, p.cross) for p in parts], [("USDC", True), ("ETH", False)])
+        self.assertAlmostEqual(parts[1].value, 0.50000082 * 2518.95 * 0.7)
+        self.assertAlmostEqual(sum(p.value for p in parts), portfolio_margin_usd(1014.012307, assets, details))
+        self.assertAlmostEqual(sum(p.value for p in parts), 1895.6462528995, places=6)

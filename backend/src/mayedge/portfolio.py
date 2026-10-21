@@ -261,6 +261,38 @@ def collateral_rows(assets: list[Any]) -> list[CollateralRow]:
     return out
 
 
+@dataclass(frozen=True)
+class MarginRow:
+    """N10: one term of the Portfolio margin. ``cross`` is USDC with the open uPnL."""
+
+    symbol: str
+    cross: bool
+    qty: Decimal
+    price: Decimal
+    ltv: Decimal
+    value: Decimal
+
+
+def margin_json(rows: list[MarginRow]) -> dict[str, Any] | None:
+    """N10: buying power on the Perps card. Never part of any value."""
+    if not rows:
+        return None
+    return {
+        "total": _s(sum((r.value for r in rows), ZERO)),
+        "parts": [
+            {
+                "symbol": r.symbol,
+                "cross": r.cross,
+                "qty": _s(r.qty),
+                "price": _s(r.price),
+                "ltv": _s(r.ltv),
+                "value": _s(r.value),
+            }
+            for r in rows
+        ],
+    }
+
+
 # N6: Spot value its rows leave out, shown when it is over both of these.
 SPOT_GAP_USD = Decimal("1")
 SPOT_GAP_SHARE = Decimal("0.01")
@@ -302,6 +334,7 @@ class PortfolioNow:
     pending: list[Unlock] = field(default_factory=list)
     collateral: list[CollateralRow] = field(default_factory=list)
     upnl: Decimal | None = None
+    margin: list[MarginRow] = field(default_factory=list)
     detail: bool = True
 
     def total(self) -> KindNow:
@@ -352,6 +385,7 @@ class PortfolioNow:
                     for r in self.collateral
                 ],
                 "upnl": _s(self.upnl),
+                "margin": margin_json(self.margin),
             },
             "spot_gap": _s(spot_gap(self.kinds["spot"].value, self.spot)) if self.detail else None,
             "unlocks": [
@@ -379,6 +413,7 @@ def portfolio_now(
     lit_price: Decimal,
     upnl: Decimal | None = None,
     detail: bool = True,
+    margin: list[MarginRow] | None = None,
 ) -> PortfolioNow:
     pnl, values = buckets(pnl_rows), buckets(value_rows)
     return PortfolioNow(
@@ -396,6 +431,7 @@ def portfolio_now(
         collateral=collateral_rows(live_assets),
         upnl=upnl,
         detail=detail,
+        margin=margin or [],
     )
 
 

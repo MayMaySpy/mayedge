@@ -263,6 +263,20 @@ export interface PortfolioKinds {
   staking: PortfolioKindNow;
 }
 
+export interface PortfolioMargin {
+  total: string | null;
+  parts: PortfolioMarginPart[];
+}
+
+export interface PortfolioMarginPart {
+  symbol: string;
+  cross: boolean;
+  qty: string | null;
+  price: string | null;
+  ltv: string | null;
+  value: string | null;
+}
+
 export interface PortfolioMismatch {
   kind: "perps" | "spot" | "llp" | "staking";
   drift: string | null;
@@ -284,6 +298,7 @@ export interface PortfolioNow {
 export interface PortfolioPerps {
   collateral: PortfolioCollateral[];
   upnl: string | null;
+  margin: PortfolioMargin | null;
 }
 
 export interface PortfolioPoint {
