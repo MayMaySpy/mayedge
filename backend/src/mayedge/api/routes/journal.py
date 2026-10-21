@@ -13,6 +13,8 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from mayedge.api import responses
+from mayedge.api.responses import documents
 from mayedge.api.turn import breathe
 from mayedge.config import settings
 from mayedge.journal import Fill, FundingPayment, GroupBy, RoundTrip, seconds_of, summary
@@ -56,7 +58,7 @@ class NoteBody(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
-@router.get("/api/journal/trips")
+@router.get("/api/journal/trips", response_model=None, responses=documents(responses.JournalTrips))
 async def get_trips(
     since: int | None = None,
     until: int | None = None,
@@ -76,7 +78,7 @@ async def get_trips(
     return {"trips": [_trip_json(trip, notes) for trip in capped]}
 
 
-@router.get("/api/journal/summary")
+@router.get("/api/journal/summary", response_model=None, responses=documents(responses.JournalSummary))
 async def get_summary(
     range: str = "30d",
     group: str = "none",
@@ -103,13 +105,13 @@ async def get_summary(
     }
 
 
-@router.put("/api/journal/trips/{trip_key}/note")
+@router.put("/api/journal/trips/{trip_key}/note", response_model=None, responses=documents(responses.JournalNote))
 async def put_note(trip_key: str, body: NoteBody) -> dict[str, Any]:
     await asyncio.to_thread(journal_put_note, trip_key, body.note, body.tags)
     return {"trip_key": trip_key, "note": body.note, "tags": body.tags}
 
 
-@router.post("/api/journal/sync")
+@router.post("/api/journal/sync", response_model=None, responses=documents(responses.JournalSync))
 async def post_sync() -> dict[str, Any]:
     return await run_sync()
 
@@ -203,7 +205,7 @@ async def warm() -> None:
         _open_emit(payload)
 
 
-@router.get("/api/journal/open")
+@router.get("/api/journal/open", response_model=None, responses=documents(responses.JournalOpen))
 async def get_open() -> dict[str, Any]:
     return open_payload(await _shared_trips(_upnl()))
 

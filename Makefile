@@ -2,13 +2,14 @@ VPS ?= mayedge
 REMOTE ?= /opt/mayedge
 RSYNC_EXCL := deploy/rsync-exclude
 
-.PHONY: help ci ci-backend ci-web up down-local logs-local backup push-env deploy serve check logs down
+.PHONY: help ci ci-backend ci-web api-types up down-local logs-local backup push-env deploy serve check logs down
 
 help:
 	@printf '%s\n' \
 		'make ci            local GitHub Actions checks (backend + web)' \
 		'make ci-backend   ruff, basedpyright, unittest' \
 		'make ci-web        lint, test, build' \
+		'make api-types     regenerate web/src/lib/api.gen.ts from the API schemas' \
 		'make up            local docker compose up --build' \
 		'make down-local    local docker compose down' \
 		'make logs-local    local compose logs' \
@@ -33,6 +34,9 @@ ci-web:
 	cd web && npm run lint
 	cd web && npm test
 	cd web && npm run build
+
+api-types:
+	cd backend && uv run python scripts/api_types.py
 
 up:
 	docker compose up -d --build

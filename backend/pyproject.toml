@@ -36,7 +36,7 @@ dev = [
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
-extraPaths = ["src", "tests", "."]
+extraPaths = ["src", "tests", ".", "scripts"]
 typeCheckingMode = "standard"
 reportMissingImports = true
 reportUndefinedVariable = true
@@ -99,7 +99,7 @@ reportUnknownArgumentType = "error"
 # Tests build loose fixtures; they keep standard mode.
 [[tool.basedpyright.executionEnvironments]]
 root = "tests"
-extraPaths = ["src", "tests", "."]
+extraPaths = ["src", "tests", ".", "scripts"]
 reportMissingParameterType = "none"
 reportUnknownParameterType = "none"
 reportUnknownLambdaType = "none"

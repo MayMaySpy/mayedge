@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import type { Account, AccountTrade, AlgoBook, AlgoState } from "@/lib/api";
 import { algoIsWorking } from "@/lib/algos";
+import type { OpenTripRealized } from "@/lib/api.gen";
 import { makeThrottledNotify } from "@/lib/live/notify";
 
 const accountNotify = makeThrottledNotify(150);
@@ -133,19 +134,7 @@ export function useLiveAlgos(): AlgoBook {
 }
 
 /** An open Round trip's Realized, from the journal (journal-rules, On a Position). */
-export type OpenTripRealized = {
-  market_index: number;
-  symbol: string;
-  side: "long" | "short";
-  trip_key: string;
-  open_ts: number;
-  realized: string;
-  pnl: string;
-  fees: string;
-  funding: string;
-  net: string;
-  partial: boolean;
-};
+export type { OpenTripRealized };
 
 let journalOpen: OpenTripRealized[] = [];
 const journalOpenListeners = new Set<() => void>();

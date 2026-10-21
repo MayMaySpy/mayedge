@@ -12,6 +12,7 @@ from unittest.mock import patch
 from httpx import ASGITransport, AsyncClient
 
 from mayedge import db as store
+from mayedge.api import responses
 from mayedge.api.app import create_app
 from mayedge.config import settings
 from mayedge.persist_portfolio import (
@@ -194,6 +195,7 @@ class RouteTests(StoreCase):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
                 week = (await client.get("/api/portfolio/history", params={"range": "7d"})).json()
                 self.assertEqual(week["resolution"], "1h")
+                responses.PortfolioHistory.model_validate(week)
                 self.assertGreater(len(week["points"]), 7 * 24 - 2)
                 month = (await client.get("/api/portfolio/history", params={"range": "30d"})).json()
                 self.assertEqual(month["resolution"], "1d")
@@ -206,5 +208,6 @@ class RouteTests(StoreCase):
                 daily = (await client.get("/api/portfolio/days", params={"range": "7d"})).json()
                 self.assertNotIn("tz", daily)
                 self.assertTrue(daily["days"])
+                responses.PortfolioDays.model_validate(daily)
                 bad = await client.get("/api/portfolio/days", params={"range": "1d"})
                 self.assertEqual(bad.status_code, 400)

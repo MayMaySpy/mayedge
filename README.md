@@ -175,6 +175,8 @@ Open `http://localhost:5173`.
 
 `make ci` runs what GitHub Actions runs: ruff, basedpyright and unittest for the backend; lint, vitest and build for the web.
 
+The web's request and response types for orders, the Journal and the Portfolio are generated from the backend's Pydantic models into `web/src/lib/api.gen.ts`. Change `backend/src/mayedge/api/schemas.py` or `responses.py`, then `make api-types`; a backend test fails while the file is stale, and the endpoint tests check real answers against the models.
+
 ## API key setup (Lighter)
 
 Use the [lighter-python examples](https://github.com/elliottech/lighter-python/blob/main/examples/README.md) `system_setup.py` with API key index **2–254** (not 0/1, reserved for the official app).

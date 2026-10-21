@@ -13,7 +13,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { TrailExitSection } from "@/components/widgets/trail/TrailExitSection";
 import { isAlgoClientOrder } from "@/lib/algoPlugins";
-import { isLongPosition, type AlgoState, type OpenOrder, type Position } from "@/lib/api";
+import {
+  isLongPosition,
+  type AlgoState,
+  type OpenOrder,
+  type Position,
+  type StopTakeRequest,
+} from "@/lib/api";
 import { defaultTrailExitDraft, TRAIL_KIND_LABEL, trailBody, trailExitProblem } from "@/lib/trail";
 import { canonicalDecimal, decimalInput, parseDecimal, stripFractionalZeros } from "@/lib/numbers";
 import {
@@ -88,7 +94,7 @@ export function PositionProtectPopover({
   tradingEnabled: boolean;
   busy: boolean;
   orders: OpenOrder[];
-  onPlace: (body: Record<string, unknown>) => Promise<void>;
+  onPlace: (body: StopTakeRequest) => Promise<void>;
   onCancel: (orderIndex: string) => Promise<void>;
 }) {
   const working = workingProtectOrders(orders, position.market_index);
@@ -150,25 +156,27 @@ export function PositionProtectPopover({
       form.sizeMode === "full"
         ? "0"
         : trimQty(protectCloseSize(posAbs, "partial", qtyNum), sizeDecimals) || "0";
-    const body: Record<string, unknown> = {
+    const body: StopTakeRequest = {
       market_index: position.market_index,
       side: closeIsAsk ? "sell" : "buy",
       size,
       slippage: 0.01,
     };
-    if (tpOk) {
+    const tpTrigger = canonicalDecimal(form.tpTrigger);
+    const slTrigger = canonicalDecimal(form.slTrigger);
+    if (tpOk && tpTrigger) {
       const limit = canonicalDecimal(form.tpLimit);
       body.tp = {
         kind: limit ? "limit" : "market",
-        trigger: canonicalDecimal(form.tpTrigger),
+        trigger: tpTrigger,
         ...(limit ? { price: limit } : {}),
       };
     }
-    if (slOk) {
+    if (slOk && slTrigger) {
       const limit = canonicalDecimal(form.slLimit);
       body.sl = {
         kind: limit ? "limit" : "market",
-        trigger: canonicalDecimal(form.slTrigger),
+        trigger: slTrigger,
         ...(limit ? { price: limit } : {}),
       };
     }

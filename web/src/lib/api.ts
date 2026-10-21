@@ -1,3 +1,33 @@
+import type {
+  AutoKillRequest,
+  JournalNote,
+  JournalSummary,
+  JournalSync,
+  JournalTrips,
+  LimitOrderRequest,
+  MarketOrderRequest,
+  PortfolioDays,
+  PortfolioHistory,
+  PortfolioNow,
+  StopTakeRequest,
+  TwapOrderRequest,
+} from "@/lib/api.gen";
+
+export type {
+  JournalFill,
+  JournalSide,
+  JournalSummaryGroup,
+  JournalTrip,
+  LimitOrderRequest,
+  MarketOrderRequest,
+  PortfolioDay,
+  PortfolioHistory,
+  PortfolioKindNow,
+  PortfolioNow,
+  StopTakeRequest,
+  TwapOrderRequest,
+} from "@/lib/api.gen";
+
 const API_BASE = "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -186,134 +216,7 @@ export interface AccountFunding {
   timestamp: number;
 }
 
-export interface JournalFill {
-  trade_id: string;
-  ts: number;
-  side: string;
-  price: string;
-  size: string;
-  fee: string;
-  pnl: string;
-  is_maker: boolean;
-  closing: boolean;
-}
-
-export interface JournalTrip {
-  trip_key: string;
-  market_index: number;
-  symbol: string;
-  side: string;
-  open_ts: number;
-  close_ts: number | null;
-  size: string | null;
-  avg_in: string | null;
-  avg_out: string | null;
-  net: string | null;
-  fees: string | null;
-  funding: string | null;
-  algo: string;
-  r: string | null;
-  partial: boolean;
-  partial_reason: string | null;
-  open: boolean;
-  upnl: string | null;
-  note: string;
-  tags: string[];
-  fills: JournalFill[];
-}
-
-export interface JournalSummaryGroup {
-  key: string;
-  count: number;
-  wins: number;
-  losses: number;
-  win_rate: string | null;
-  gross_pnl?: string | null;
-  net: string | null;
-  fees: string | null;
-  funding: string | null;
-  avg_win?: string | null;
-  avg_loss?: string | null;
-  profit_factor: string | null;
-  expectancy: string | null;
-  largest_win?: string | null;
-  largest_loss?: string | null;
-  maker_share?: string | null;
-  avg_r: string | null;
-  total_r?: string | null;
-  /** How many Round trips have an R: only Planner runs with a stored stop do. */
-  r_count?: number;
-  max_drawdown: string | null;
-  curve: { ts: number; net: string | null }[];
-  payoff_ratio?: string | null;
-  breakeven_win_rate?: string | null;
-  notional?: string | null;
-  net_bps?: string | null;
-  recovery_factor?: string | null;
-  max_win_streak?: number;
-  max_loss_streak?: number;
-  current_streak?: number;
-  avg_hold_win_s?: string | null;
-  avg_hold_loss_s?: string | null;
-  long?: JournalSide | null;
-  short?: JournalSide | null;
-  trading_days?: number;
-  green_days?: number;
-  best_day?: string | null;
-  worst_day?: string | null;
-}
-
-export interface JournalSide {
-  count: number;
-  win_rate: string | null;
-  net: string | null;
-}
-
 export type PortfolioKind = "perps" | "spot" | "llp" | "staking";
-
-/** One Holding kind, or the total (docs/portfolio-rules.md N2–N4). Decimal strings. */
-export interface PortfolioKindNow {
-  value: string | null;
-  value_at_open: string | null;
-  change: string | null;
-  change_pct: string | null;
-  flows: string | null;
-}
-
-export interface PortfolioNow {
-  ts: number;
-  open: number;
-  total: PortfolioKindNow;
-  kinds: Record<PortfolioKind, PortfolioKindNow>;
-  mismatch: { kind: PortfolioKind; drift: string | null }[];
-  spot: { symbol: string; qty: string | null; price: string | null; value: string | null; upnl: string | null }[];
-  pools: {
-    pool: number;
-    kind: "llp" | "staking";
-    shares: string | null;
-    units: string | null;
-    unit: string;
-    value: string | null;
-    apy: string | null;
-    principal: string | null;
-  }[];
-  unlocks: { asset_index: number; amount: string | null; unlock_ms: number }[];
-}
-
-export interface PortfolioHistory {
-  range: string;
-  resolution: "1h" | "1d";
-  points: ({ ts: number; total: string | null } & Record<PortfolioKind, string | null>)[];
-  flows: { ts: number; kind: PortfolioKind; amount: string | null }[];
-}
-
-/** One UTC day (docs/portfolio-rules.md H6). */
-export interface PortfolioDay {
-  day: string;
-  start: number;
-  kinds: Record<PortfolioKind, string | null>;
-  total: string | null;
-}
 
 export interface AccountTradesPage {
   trades: AccountTrade[];
@@ -768,13 +671,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ timeframes }),
     }),
-  placeMarketOrder: (body: Record<string, unknown>) =>
+  placeMarketOrder: (body: MarketOrderRequest) =>
     request("/orders/market", { method: "POST", body: JSON.stringify(body) }),
-  placeLimitOrder: (body: Record<string, unknown>) =>
+  placeLimitOrder: (body: LimitOrderRequest) =>
     request("/orders/limit", { method: "POST", body: JSON.stringify(body) }),
-  placeTwapOrder: (body: Record<string, unknown>) =>
+  placeTwapOrder: (body: TwapOrderRequest) =>
     request("/orders/twap", { method: "POST", body: JSON.stringify(body) }),
-  placeStopTake: (body: Record<string, unknown>) =>
+  placeStopTake: (body: StopTakeRequest) =>
     request("/orders/sl-tp", { method: "POST", body: JSON.stringify(body) }),
   cancelOrder: (market_index: number, order_index: string | number) =>
     request("/orders/cancel", {
@@ -827,18 +730,18 @@ export const api = {
     if (opts?.algo) q.set("algo", opts.algo);
     if (opts?.limit != null) q.set("limit", String(opts.limit));
     const qs = q.toString();
-    return request<{ trips: JournalTrip[] }>(`/journal/trips${qs ? `?${qs}` : ""}`);
+    return request<JournalTrips>(`/journal/trips${qs ? `?${qs}` : ""}`);
   },
   journalSummary: (opts: { range: string; group: string; market?: string; algo?: string }) => {
     const q = new URLSearchParams({ range: opts.range, group: opts.group });
     if (opts.market) q.set("market", opts.market);
     if (opts.algo) q.set("algo", opts.algo);
-    return request<{ range: string; group: string; groups: JournalSummaryGroup[] }>(
+    return request<JournalSummary>(
       `/journal/summary?${q.toString()}`,
     );
   },
   journalNote: (tripKey: string, body: { note: string; tags: string[] }) =>
-    request<{ trip_key: string; note: string; tags: string[] }>(
+    request<JournalNote>(
       `/journal/trips/${encodeURIComponent(tripKey)}/note`,
       { method: "PUT", body: JSON.stringify(body) },
     ),
@@ -847,9 +750,9 @@ export const api = {
   portfolioHistory: (range: string) =>
     request<PortfolioHistory>(`/portfolio/history?range=${encodeURIComponent(range)}`),
   portfolioDays: (range: string) =>
-    request<{ range: string; days: PortfolioDay[] }>(`/portfolio/days?range=${encodeURIComponent(range)}`),
+    request<PortfolioDays>(`/portfolio/days?range=${encodeURIComponent(range)}`),
   journalSync: () =>
-    request<{ started: boolean; last_synced_at: number | null }>("/journal/sync", { method: "POST" }),
+    request<JournalSync>("/journal/sync", { method: "POST" }),
   accountFunding: (opts?: { market_index?: number | null; cursor?: string | null; limit?: number }) => {
     const q = new URLSearchParams();
     if (opts?.market_index != null) q.set("market_index", String(opts.market_index));
@@ -919,6 +822,6 @@ export const api = {
       algos?: AlgoBook;
     }>("/kill", { method: "POST", body: JSON.stringify({ flatten }) }),
   autoKill: () => request<AutoKillState>("/kill/auto"),
-  setAutoKill: (body: { armed: boolean; loss_usd?: number | null; profit_usd?: number | null }) =>
+  setAutoKill: (body: AutoKillRequest) =>
     request<AutoKillState>("/kill/auto", { method: "PUT", body: JSON.stringify(body) }),
 };

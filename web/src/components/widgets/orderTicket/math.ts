@@ -15,6 +15,8 @@ export const TIF_CHIPS = [
   { id: "post_only", label: "Post", hint: "Post only — maker; rejects if it would take" },
 ] as const;
 
+export type Tif = (typeof TIF_CHIPS)[number]["id"];
+
 export interface CrossHint {
   side: "buy" | "sell";
   text: string;

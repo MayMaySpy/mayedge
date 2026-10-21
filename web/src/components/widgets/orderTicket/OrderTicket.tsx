@@ -82,6 +82,7 @@ import {
   trimQty,
   type OrderKind,
   type SizeUnit,
+  type Tif,
 } from "./math";
 import { SizeField } from "./SizeField";
 
@@ -116,7 +117,7 @@ export function OrderTicket({
   const [price, setPrice] = useState("");
   const [slippagePct, setSlippagePct] = useState(loadSlipPct);
   const [reduceOnly, setReduceOnly] = useState(false);
-  const [tif, setTif] = useState("gtt");
+  const [tif, setTif] = useState<Tif>("gtt");
   const [algo, setAlgo] = useState<AlgoId>("chase-iceberg");
   const [pluginStates, setPluginStates] = useState(initialPluginStates);
   const [leverage, setLeverage] = useState("5");

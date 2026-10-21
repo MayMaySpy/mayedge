@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 from httpx import ASGITransport, AsyncClient
 
 from mayedge import db as store
+from mayedge.api import responses
 from mayedge.api.app import create_app
 from mayedge.api.routes import journal as journal_routes
 from mayedge.config import settings
@@ -82,6 +83,7 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             listed = await client.get("/api/journal/trips")
             self.assertEqual(listed.status_code, 200)
+            responses.JournalTrips.model_validate(listed.json())
             trip = listed.json()["trips"][0]
             self.assertEqual(trip["trip_key"], "1:a")
             self.assertEqual(trip["net"], "20")
@@ -94,12 +96,14 @@ class JournalApiTests(IsolatedAsyncioTestCase):
                 json={"note": "held through the spike", "tags": ["planned"]},
             )
             self.assertEqual(noted.status_code, 200)
+            responses.JournalNote.model_validate(noted.json())
             again = await client.get("/api/journal/trips")
             self.assertEqual(again.json()["trips"][0]["note"], "held through the spike")
             self.assertEqual(again.json()["trips"][0]["tags"], ["planned"])
 
             stats = await client.get("/api/journal/summary", params={"range": "all", "group": "none"})
             self.assertEqual(stats.status_code, 200)
+            responses.JournalSummary.model_validate(stats.json())
             group = stats.json()["groups"][0]
             self.assertEqual(group["count"], 1)
             self.assertEqual(group["net"], "20")
@@ -124,6 +128,7 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             res = await client.post("/api/journal/sync")
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()["started"])
+        responses.JournalSync.model_validate(res.json())
         run_sync.assert_awaited()
 
     async def test_two_reads_parse_fills_once_until_a_write(self) -> None:
@@ -210,6 +215,7 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             res = await client.get("/api/journal/open")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["positions"], sent[0]["positions"])
+        responses.JournalOpen.model_validate(res.json())
 
     async def test_warm_covers_the_next_read(self) -> None:
         journal_insert_fills(

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from httpx import ASGITransport, AsyncClient
 
 from mayedge import portfolio_venue
+from mayedge.api import responses
 from mayedge.api.app import create_app
 from mayedge.config import settings
 from mayedge.portfolio import (
@@ -203,6 +204,7 @@ class ReadTests(IsolatedAsyncioTestCase):
                 ok = await client.get("/api/portfolio")
                 self.assertEqual(ok.status_code, 200)
                 body = ok.json()
+                responses.PortfolioNow.model_validate(body)
                 self.assertEqual(set(body["kinds"]), {"perps", "spot", "llp", "staking"})
                 self.assertEqual(body["mismatch"], [])
                 self.assertIn("change_pct", body["total"])

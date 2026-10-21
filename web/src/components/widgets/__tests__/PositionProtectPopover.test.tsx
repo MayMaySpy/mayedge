@@ -4,7 +4,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
-import type { AlgoState, OpenOrder, Position } from "@/lib/api";
+import type { AlgoState, OpenOrder, Position, StopTakeRequest } from "@/lib/api";
 
 const LONG: Position = {
   market_index: 1,
@@ -34,7 +34,7 @@ const LIVE_STOP: OpenOrder = {
 };
 
 function setup(over: Partial<Parameters<typeof PositionProtectPopover>[0]> = {}) {
-  const onPlace = vi.fn(async (_body: Record<string, unknown>) => {});
+  const onPlace = vi.fn(async (_body: StopTakeRequest) => {});
   const onCancel = vi.fn(async (_orderIndex: string) => {});
   render(
     <PositionProtectPopover
