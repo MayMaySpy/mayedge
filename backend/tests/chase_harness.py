@@ -452,7 +452,7 @@ def patch_chase(
 ) -> Iterator[None]:
     with (
         isolated_db(),
-        patch("mayedge.algos.chase.util.now_ms", clock),
+        patch("mayedge.algos.common.now_ms", clock),
     ):
         yield
 
@@ -465,6 +465,7 @@ def patch_grid(
 ) -> Iterator[None]:
     with (
         isolated_db(),
+        patch("mayedge.algos.common.now_ms", clock),
         patch("mayedge.algos.chase.util.now_ms", clock),
         patch("mayedge.algos.grid.util.now_ms", clock),
     ):

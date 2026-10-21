@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from mayedge.algos.common import in_coi_range
+
 CHASE_COI_BASE = 8_000_000_000
 CHASE_COI_END = 9_000_000_000
+
+
+def is_chase_client_order(coi: int | None) -> bool:
+    return in_coi_range(coi, CHASE_COI_BASE, CHASE_COI_END)
+
+
 HISTORY_CAP = 30
 # Lighter L1 address cap is 40 txs / 60s. Stay under so user txs still fit.
 MIN_REQUOTE_MS = 2_000

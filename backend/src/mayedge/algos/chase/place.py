@@ -7,7 +7,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from mayedge.algos.chase import util
+from mayedge.algos import common
 from mayedge.algos.chase.config import (
     ACK_WAIT_MS,
     MIN_REQUOTE_MS,
@@ -16,6 +16,7 @@ from mayedge.algos.chase.config import (
     STOP_CANCEL_GAP_S,
     STOP_CANCEL_TRIES,
     UNPROVEN_RETRY_MS,
+    is_chase_client_order,
 )
 from mayedge.algos.chase.fills import ChaseFillMixin, FillBook, FillState
 from mayedge.algos.chase.iceberg import (
@@ -25,17 +26,16 @@ from mayedge.algos.chase.iceberg import (
     decide,
 )
 from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.chase.util import (
-    _chase_order_keys,
-    _dec,
-    _fmt,
-    _is_invalid_nonce,
-    _is_min_size,
-    _is_order_not_found,
-    _is_rate_limit,
-    _is_would_cross,
-)
+from mayedge.algos.common import venue_order_keys
 from mayedge.lighter.budget import BudgetRefused
+from mayedge.lighter.errors import (
+    is_blocked,
+    is_invalid_nonce,
+    is_min_size,
+    is_order_not_found,
+    is_would_cross,
+)
+from mayedge.numbers import fmt_decimal, to_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +58,8 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         """Reference price for parent notional cap: book mid, else band mid."""
         bid_s, ask_s = self._exec().best_bid_ask(market_index)
         if bid_s and ask_s:
-            bid = _dec(bid_s)
-            ask = _dec(ask_s)
+            bid = to_decimal(bid_s)
+            ask = to_decimal(ask_s)
             if bid > 0 and ask > 0:
                 return (bid + ask) / 2
         mid = (params.price_floor + params.price_ceiling) / 2
@@ -72,8 +72,8 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         if not meta:
             return None
         bid_s, ask_s = self._exec().best_bid_ask(self._state.market_index)
-        bid = _dec(bid_s) if bid_s else None
-        ask = _dec(ask_s) if ask_s else None
+        bid = to_decimal(bid_s) if bid_s else None
+        ask = to_decimal(ask_s) if ask_s else None
         tick = Decimal(10) ** -meta.price_decimals
         qty_step = Decimal(10) ** -meta.size_decimals
         min_qty = self._clip_min_qty()
@@ -107,7 +107,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
 
     def _on_transient(self, err: BaseException, reason: str) -> None:
         cool = NONCE_COOLDOWN_MS if reason == "invalid_nonce" else RATE_LIMIT_COOLDOWN_MS
-        self._backoff_until = util.now_ms() + cool
+        self._backoff_until = common.now_ms() + cool
         self._backoff_reason = reason
         self._state.quote_action = Action.PAUSE.value
         self._state.reason = reason
@@ -117,10 +117,10 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         if isinstance(err, BudgetRefused):
             self._hold_clip("budget")
             return True
-        if _is_rate_limit(err):
+        if is_blocked(err):
             self._on_rate_limit(err)
             return True
-        if _is_invalid_nonce(err):
+        if is_invalid_nonce(err):
             logger.warning("chase invalid nonce: %s", err)
             self._on_transient(err, "invalid_nonce")
             return True
@@ -170,19 +170,19 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             await self._exec().create_limit_order(
                 market_index=self._state.market_index,
                 side=params.side,
-                size=_fmt(quote.qty) or "0",
-                price=_fmt(quote.price) or "0",
+                size=fmt_decimal(quote.qty) or "0",
+                price=fmt_decimal(quote.price) or "0",
                 time_in_force="post_only",
                 reduce_only=self._state.reduce_only,
                 client_order_index=coi,
             )
         except ValueError as e:
-            if _is_min_size(e):
+            if is_min_size(e):
                 self._state.quote_action = Action.PAUSE.value
                 self._state.reason = "below_min_qty"
                 self._publish()
                 return
-            if _is_would_cross(e):
+            if is_would_cross(e):
                 self._state.quote_action = Action.PAUSE.value
                 self._state.reason = "would_cross"
                 self._publish()
@@ -191,7 +191,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
                 return
             raise
         except Exception as e:
-            if _is_min_size(e):
+            if is_min_size(e):
                 self._state.quote_action = Action.PAUSE.value
                 self._state.reason = "below_min_qty"
                 self._publish()
@@ -199,21 +199,21 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             if self._handle_tx_err(e):
                 return
             raise
-        self._last_tx_ms = util.now_ms()
+        self._last_tx_ms = common.now_ms()
         found = self._find_open(coi)
         idx = int(found["order_index"]) if found and found.get("order_index") else None
         self._state.ledger.place(
             client_order_index=coi,
             price=quote.price,
             qty=quote.qty,
-            now=util.now_ms(),
+            now=common.now_ms(),
             order_index=idx,
         )
         self._publish()
 
     def _hold_clip(self, reason: str) -> None:
         """Leave the venue clip put; cooldown so we don't hammer amend."""
-        self._last_tx_ms = util.now_ms()
+        self._last_tx_ms = common.now_ms()
         self._state.reason = reason
         self._sync_rest_from_live()
         self._publish()
@@ -229,7 +229,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
     async def _modify_working(self, clip: Any, quote: Any) -> None:
         idx = self._modify_index(clip)
         if idx is None:
-            self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
+            self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
             self._reconcile_master()
             await self._place_working(quote)
             return
@@ -237,7 +237,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         # wire but the matching engine then leaves the venue order put.
         rem = clip.remaining if clip.remaining > 0 else quote.qty
         if rem is None or rem <= 0:
-            self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
+            self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
             self._reconcile_master()
             await self._place_working(quote)
             return
@@ -245,24 +245,24 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         if view is not None and rem < view.min_qty:
             await self._abandon_and_replace_working(quote)
             return
-        size = _fmt(rem) or "0"
+        size = fmt_decimal(rem) or "0"
         try:
             await self._exec().modify_order(
                 market_index=self._state.market_index,
                 order_index=idx,
-                price=_fmt(quote.price) or "0",
+                price=fmt_decimal(quote.price) or "0",
                 size=size,
             )
         except ValueError as e:
-            if _is_would_cross(e):
+            if is_would_cross(e):
                 # Keep the resting clip — the current price is still valid.
                 self._hold_clip("would_cross")
                 return
-            if _is_min_size(e):
+            if is_min_size(e):
                 await self._abandon_and_replace_working(quote)
                 return
-            if _is_order_not_found(e):
-                await self._resolve_vanished_clip(clip, now=util.now_ms())
+            if is_order_not_found(e):
+                await self._resolve_vanished_clip(clip, now=common.now_ms())
                 return
             if self._handle_tx_err(e):
                 return
@@ -270,16 +270,16 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             self._hold_clip(self._state.reason or "requote_wait")
             return
         except Exception as e:
-            if _is_order_not_found(e):
-                await self._resolve_vanished_clip(clip, now=util.now_ms())
+            if is_order_not_found(e):
+                await self._resolve_vanished_clip(clip, now=common.now_ms())
                 return
             if self._handle_tx_err(e):
                 return
             logger.warning("chase modify failed, keeping clip: %s", e)
             self._hold_clip(self._state.reason or "requote_wait")
             return
-        self._last_tx_ms = util.now_ms()
-        self._state.ledger.amend(clip, price=quote.price, now=util.now_ms())
+        self._last_tx_ms = common.now_ms()
+        self._state.ledger.amend(clip, price=quote.price, now=common.now_ms())
         self._sync_rest_from_live()
         self._publish()
 
@@ -289,7 +289,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         if clip is None:
             return
         if not self._exec().enabled:
-            self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
+            self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
             self._reconcile_master()
             return
         coi = clip.client_order_index
@@ -299,7 +299,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
                 if await self._coi_open_on_venue(coi):
                     self._reconcile_master()
                     return
-                now = util.now_ms()
+                now = common.now_ms()
                 if self._may_invent_fill(clip, now):
                     self._close_missing_clip(clip, now=now, assume_fill=True)
                 else:
@@ -311,9 +311,9 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             try:
                 try:
                     await self._exec().cancel_order(mi, oid)
-                    self._last_tx_ms = util.now_ms()
+                    self._last_tx_ms = common.now_ms()
                 except Exception as e:
-                    if _is_order_not_found(e) or _is_min_size(e):
+                    if is_order_not_found(e) or is_min_size(e):
                         pass
                     elif self._handle_tx_err(e):
                         return
@@ -326,7 +326,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             finally:
                 self._canceling = False
             if not await self._coi_open_on_venue(coi):
-                self._state.ledger.close_missing(clip, canceling=True, now=util.now_ms())
+                self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
                 self._reconcile_master()
                 return
             if attempt + 1 < STOP_CANCEL_TRIES:
@@ -345,7 +345,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         self._stop.set()
 
     def _abandon_live_clips(self) -> None:
-        now = util.now_ms()
+        now = common.now_ms()
         for clip in self._state.ledger.clips:
             if clip.status == "live":
                 self._state.ledger.close_missing(clip, canceling=True, now=now)
@@ -363,19 +363,24 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
         return keys
 
     def _orders_cancel_keys(self, orders: Any) -> set[tuple[int, int]]:
-        return set(_chase_order_keys(orders, self._cois))
+        return set(
+            venue_order_keys(
+                orders,
+                lambda coi: is_chase_client_order(coi) and coi in self._cois,
+            )
+        )
 
     async def _venue_child_keys(self, *, refresh: bool) -> set[tuple[int, int]]:
         keys = self._ledger_cancel_keys()
         payload = self._exec().cached_account_payload() or {}
         keys.update(self._orders_cancel_keys(payload.get("open_orders")))
-        now = util.now_ms()
+        now = common.now_ms()
         if refresh and self._exec().enabled and getattr(self, "_backoff_until", 0) <= now:
             try:
                 summary = await self._exec().get_account_summary()
                 keys.update(self._orders_cancel_keys(summary.open_orders))
             except Exception as e:
-                if _is_rate_limit(e):
+                if is_blocked(e):
                     self._on_rate_limit(e)
                 else:
                     logger.exception("chase stop: failed to refresh open orders")
@@ -384,7 +389,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
     async def _remaining_child_keys(self, *, rest: bool | None = None) -> set[tuple[int, int]]:
         if not self._exec().enabled:
             return set()
-        now = util.now_ms()
+        now = common.now_ms()
         use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
         if not use_rest or getattr(self, "_backoff_until", 0) > now:
             payload = self._exec().cached_account_payload() or {}
@@ -393,7 +398,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             summary = await self._exec().get_account_summary()
             return self._orders_cancel_keys(summary.open_orders)
         except Exception as e:
-            if _is_rate_limit(e):
+            if is_blocked(e):
                 self._on_rate_limit(e)
             else:
                 logger.exception("chase stop: remaining-orders refresh failed")
@@ -419,12 +424,12 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
     async def _cancel_one(self, mi: int, idx: int) -> str:
         try:
             await self._exec().cancel_order(mi, idx)
-            self._last_tx_ms = util.now_ms()
+            self._last_tx_ms = common.now_ms()
             return "ok"
         except Exception as e:
-            if _is_order_not_found(e):
+            if is_order_not_found(e):
                 return "gone"
-            if _is_rate_limit(e) or _is_invalid_nonce(e):
+            if is_blocked(e) or is_invalid_nonce(e):
                 logger.warning("chase stop: transient cancelling %s/%s: %s", mi, idx, e)
                 return "transient"
             logger.warning("chase stop: cancel %s/%s failed: %s", mi, idx, e)
@@ -459,7 +464,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
     async def _rearm_from_venue(self) -> bool:
         """Credit REST trades, pull venue children, close live ledger clips."""
         if not await self._credit_rest_trades(rest=True):
-            now = util.now_ms()
+            now = common.now_ms()
             self._state.status = ChaseStatus.RUNNING
             self._state.error = None
             self._state.quote_action = Action.PAUSE.value
@@ -504,7 +509,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             if self._state.status == ChaseStatus.ERROR:
                 return
 
-            now = util.now_ms()
+            now = common.now_ms()
             if self._unproven_retry_at:
                 if self._state.ledger.working() is not None:
                     self._unproven_retry_at = 0

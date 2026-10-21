@@ -5,7 +5,7 @@ import contextlib
 import logging
 from typing import Any
 
-from mayedge.algos.chase import util
+from mayedge.algos import common
 from mayedge.algos.chase.config import AUTO_RESUME_ERRORS
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.fills import may_invent_fill
@@ -22,16 +22,11 @@ from mayedge.algos.chase.state import (
     ChaseState,
     ChaseStatus,
 )
-from mayedge.algos.chase.util import (
-    _dec,
-    _fmt,
-    _is_invalid_nonce,
-    _is_rate_limit,
-)
 from mayedge.algos.ledger import Ledger
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
-from mayedge.numbers import check_notional
+from mayedge.lighter.errors import is_blocked, is_invalid_nonce
+from mayedge.numbers import check_notional, fmt_decimal, to_decimal
 from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
@@ -87,17 +82,17 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             "symbol": s.symbol,
             "reduce_only": s.reduce_only,
             "side": p.side if p else None,
-            "qty": _fmt(p.qty) if p else None,
-            "display_qty": _fmt(p.display_qty) if p else None,
-            "offset_bps": _fmt(p.offset_bps) if p else None,
-            "price_floor": _fmt(p.price_floor) if p else None,
-            "price_ceiling": _fmt(p.price_ceiling) if p else None,
-            "remaining": _fmt(s.remaining),
-            "filled": _fmt(s.filled),
+            "qty": fmt_decimal(p.qty) if p else None,
+            "display_qty": fmt_decimal(p.display_qty) if p else None,
+            "offset_bps": fmt_decimal(p.offset_bps) if p else None,
+            "price_floor": fmt_decimal(p.price_floor) if p else None,
+            "price_ceiling": fmt_decimal(p.price_ceiling) if p else None,
+            "remaining": fmt_decimal(s.remaining),
+            "filled": fmt_decimal(s.filled),
             "quote_action": s.quote_action,
             "reason": s.reason,
-            "rest_price": _fmt(s.rest_price),
-            "rest_qty": _fmt(s.rest_qty),
+            "rest_price": fmt_decimal(s.rest_price),
+            "rest_qty": fmt_decimal(s.rest_qty),
             "working_coi": live.client_order_index if live else None,
             "working_order_index": str(live.order_index) if live and live.order_index else None,
             "error": s.error,
@@ -121,11 +116,11 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                 raise ValueError(f"unrecoverable chase row {row.get('algo_id')}: missing {key}")
         params = ChaseIcebergParams(
             side=side,
-            qty=_dec(row["qty"]),
-            display_qty=_dec(row["display_qty"]),
-            offset_bps=_dec(row["offset_bps"]),
-            price_floor=_dec(row["price_floor"]),
-            price_ceiling=_dec(row["price_ceiling"]),
+            qty=to_decimal(row["qty"]),
+            display_qty=to_decimal(row["display_qty"]),
+            offset_bps=to_decimal(row["offset_bps"]),
+            price_floor=to_decimal(row["price_floor"]),
+            price_ceiling=to_decimal(row["price_ceiling"]),
         )
         try:
             status = ChaseStatus(row.get("status") or "stopped")
@@ -147,12 +142,12 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             market_index=int(row.get("market_index") or 0),
             symbol=str(row.get("symbol") or ""),
             reduce_only=bool(row.get("reduce_only")),
-            remaining=_dec(row.get("remaining") or "0"),
-            filled=_dec(row.get("filled") or "0"),
+            remaining=to_decimal(row.get("remaining") or "0"),
+            filled=to_decimal(row.get("filled") or "0"),
             quote_action=str(row.get("quote_action") or Action.PAUSE.value),
             reason=row.get("reason"),
-            rest_price=_dec(row["rest_price"]) if row.get("rest_price") is not None else None,
-            rest_qty=_dec(row["rest_qty"]) if row.get("rest_qty") is not None else None,
+            rest_price=to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None,
+            rest_qty=to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None,
             error=row.get("error"),
             algo_id=str(row.get("algo_id") or ""),
             created_at=int(row.get("created_at") or 0),
@@ -354,7 +349,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             reduce_only=reduce_only,
             remaining=params.qty,
             algo_id=algo_id,
-            created_at=util.now_ms(),
+            created_at=common.now_ms(),
         )
         self._cois.clear()
         self._stop.clear()
@@ -441,7 +436,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
+                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
                         self._handle_tx_err(e)
                         continue
                     logger.exception("chase iceberg error")

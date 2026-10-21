@@ -6,7 +6,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Protocol
 
-from mayedge.algos.chase import util
+from mayedge.algos import common
 from mayedge.algos.chase.config import (
     REST_FALLBACK_COOLDOWN_MS,
     REST_TRADES_MAX_PAGES,
@@ -17,10 +17,11 @@ from mayedge.algos.chase.config import (
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import Action, leftover_is_dust
 from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.chase.util import _dec, _is_rate_limit
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.lighter.budget import BudgetRefused
+from mayedge.lighter.errors import is_blocked
 from mayedge.lighter.models import maker_min_base
+from mayedge.numbers import to_decimal
 from mayedge.rows import is_obj
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         if not meta:
             return Decimal("0")
         bid_s, ask_s = self._exec().best_bid_ask(self._state.market_index)
-        px = _dec(bid_s) if bid_s else (_dec(ask_s) if ask_s else Decimal("0"))
+        px = to_decimal(bid_s) if bid_s else (to_decimal(ask_s) if ask_s else Decimal("0"))
         qty_step = Decimal(10) ** -meta.size_decimals
         min_qty = maker_min_base(
             meta.min_base_amount,
@@ -160,12 +161,12 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
             return
         trades = self._pending_trades
         self._pending_trades = []
-        now = util.now_ms()
+        now = common.now_ms()
         for t in trades:
             mi = int(t.get("market_index") or 0)
             if mi and mi != self._state.market_index:
                 continue
-            qty = _dec(t.get("size") or "0")
+            qty = to_decimal(t.get("size") or "0")
             if qty <= 0:
                 continue
             candidates = [
@@ -189,7 +190,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                         break
             if clip is None:
                 continue
-            px = _dec(t.get("price") or "0")
+            px = to_decimal(t.get("price") or "0")
             tid = int(t.get("trade_id") or 0) or None
             delta = self._state.ledger.apply_trade(
                 clip,
@@ -235,7 +236,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         ex = self._exec()
         if not ex.enabled:
             return []
-        now = util.now_ms()
+        now = common.now_ms()
         if getattr(self, "_backoff_until", 0) > now:
             return None
         use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
@@ -246,7 +247,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         except Exception as e:
             if isinstance(e, BudgetRefused):
                 return None
-            if _is_rate_limit(e):
+            if is_blocked(e):
                 on_limit = getattr(self, "_on_rate_limit", None)
                 if callable(on_limit):
                     on_limit(e)
@@ -281,7 +282,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         Live fills arrive on ``account_all_trades``. REST is for rearm / WS-down
         backup — one recent page, not a history crawl.
         """
-        now = util.now_ms()
+        now = common.now_ms()
         if getattr(self, "_backoff_until", 0) > now:
             return False
         use_rest = bool(rest) if rest is not None else not self._ws_orders_ok()
@@ -320,7 +321,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         except Exception as e:
             if isinstance(e, BudgetRefused):
                 return False
-            if _is_rate_limit(e):
+            if is_blocked(e):
                 on_limit = getattr(self, "_on_rate_limit", None)
                 if callable(on_limit):
                     on_limit(e)
@@ -362,8 +363,8 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
             return
         found = self._find_in_rows(rest_rows, clip.client_order_index)
         if found is not None:
-            rem = _dec(found.get("remaining") or "0")
-            filled = _dec(found.get("filled") or "0")
+            rem = to_decimal(found.get("remaining") or "0")
+            filled = to_decimal(found.get("filled") or "0")
             idx = int(found.get("order_index") or 0) or None
             self._state.ledger.apply_open(
                 clip,
@@ -420,7 +421,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
 
     async def _sync_clip(self, clip: Clip) -> None:
         found = self._find_open(clip.client_order_index)
-        now = util.now_ms()
+        now = common.now_ms()
         if found is None:
             if self._canceling:
                 self._state.ledger.close_missing(clip, canceling=True, now=now)
@@ -446,8 +447,8 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 self._missing_refreshed.add(clip.seq)
             await self._resolve_vanished_clip(clip, now=now)
             return
-        rem = _dec(found.get("remaining") or "0")
-        filled = _dec(found.get("filled") or "0")
+        rem = to_decimal(found.get("remaining") or "0")
+        filled = to_decimal(found.get("filled") or "0")
         idx = int(found.get("order_index") or 0) or None
         self._state.ledger.apply_open(
             clip,

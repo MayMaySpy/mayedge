@@ -112,6 +112,26 @@ def _from_text(text: str) -> Reject | None:
     return None
 
 
+def is_blocked(err: object) -> bool:
+    return reject_reason(err) is Reject.BLOCKED
+
+
+def is_invalid_nonce(err: object) -> bool:
+    return reject_reason(err) is Reject.INVALID_NONCE
+
+
+def is_order_not_found(err: object) -> bool:
+    return reject_reason(err) is Reject.ORDER_NOT_FOUND
+
+
+def is_min_size(err: object) -> bool:
+    return reject_reason(err) is Reject.MIN_SIZE
+
+
+def is_would_cross(err: object) -> bool:
+    return reject_reason(err) is Reject.WOULD_CROSS
+
+
 def reject_reason(err: object) -> Reject | None:
     """The one place a venue failure is classified. Order follows lighter-limits.md."""
     if isinstance(err, VenueReject):

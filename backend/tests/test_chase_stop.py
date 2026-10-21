@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from mayedge.algos.chase.config import CHASE_COI_BASE
-from mayedge.algos.chase.util import _chase_order_keys, is_chase_client_order
+from mayedge.algos.chase.config import CHASE_COI_BASE, is_chase_client_order
+from mayedge.algos.common import venue_order_keys
 
 
 class ChaseStopSweepTests(TestCase):
@@ -19,7 +19,7 @@ class ChaseStopSweepTests(TestCase):
                 self.market_index = 3
                 self.order_index = 44
 
-        keys = _chase_order_keys(
+        keys = venue_order_keys(
             [
                 {
                     "client_order_index": CHASE_COI_BASE + 1,
@@ -37,12 +37,13 @@ class ChaseStopSweepTests(TestCase):
                     "order_index": 0,
                 },
                 Row(),
-            ]
+            ],
+            is_chase_client_order,
         )
         self.assertEqual(keys, [(7, 99), (3, 44)])
 
     def test_keys_filter_by_cois(self) -> None:
-        keys = _chase_order_keys(
+        keys = venue_order_keys(
             [
                 {
                     "client_order_index": CHASE_COI_BASE + 1,
@@ -55,6 +56,6 @@ class ChaseStopSweepTests(TestCase):
                     "order_index": 11,
                 },
             ],
-            cois={CHASE_COI_BASE + 2},
+            lambda coi: is_chase_client_order(coi) and coi == CHASE_COI_BASE + 2,
         )
         self.assertEqual(keys, [(1, 11)])
