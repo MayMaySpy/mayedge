@@ -12,6 +12,7 @@ import type {
 } from "lightweight-charts";
 import { LineStyle } from "lightweight-charts";
 import { theme } from "@/lib/theme";
+import { formatUsd } from "@/lib/utils";
 
 export type ChartOverlayKind = "position" | "order" | "liq" | "algo" | "band" | "draft";
 
@@ -89,13 +90,7 @@ function measure(text: string, font: string): number {
 }
 
 function formatSignedPnl(n: number): string {
-  const body = Math.abs(n).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  if (n > 0) return `+$${body}`;
-  if (n < 0) return `-$${body}`;
-  return `$${body}`;
+  return n > 0 ? `+${formatUsd(n)}` : formatUsd(n);
 }
 
 function roundRect(

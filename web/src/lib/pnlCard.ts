@@ -1,4 +1,5 @@
 import { theme } from "@/lib/theme";
+import { formatNumber } from "@/lib/utils";
 
 /** W9: the PnL card, drawn on a canvas so it saves and copies as a PNG. */
 
@@ -19,7 +20,7 @@ export type PnlCard = {
 
 function signed(value: number, digits: number): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  const abs = Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const abs = formatNumber(Math.abs(value), digits);
   return `${sign}${abs}`;
 }
 

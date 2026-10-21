@@ -13,24 +13,24 @@ beforeEach(() => {
 
 describe("market precision", () => {
   it("shows a price at exactly its market's tick", () => {
-    expect(marketPrice("0.004813", "PUMP")).toBe((0.004813).toLocaleString(undefined, { minimumFractionDigits: 6 }));
-    expect(marketPrice("0.0048", "PUMP")).toBe((0.0048).toLocaleString(undefined, { minimumFractionDigits: 6 }));
-    expect(marketPrice("82759.4", "BTC")).toBe((82759.4).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
-    expect(marketPrice("0.58773", "WLD")).toBe((0.58773).toLocaleString(undefined, { minimumFractionDigits: 5 }));
+    expect(marketPrice("0.004813", "PUMP")).toBe("0.004813");
+    expect(marketPrice("0.0048", "PUMP")).toBe("0.004800");
+    expect(marketPrice("82759.4", "BTC")).toBe("82,759.4");
+    expect(marketPrice("0.58773", "WLD")).toBe("0.58773");
   });
 
   it("never hides a small price's digits when the market is unknown", () => {
-    expect(marketPrice("0.004813", "NOPE")).toBe((0.004813).toLocaleString(undefined, { maximumFractionDigits: 8 }));
+    expect(marketPrice("0.004813", "NOPE")).toBe("0.004813");
     expect(formatPrice("0.00012")).not.toBe(formatPrice("0.0001"));
   });
 
   it("cuts a size to its market's lot", () => {
-    expect(marketSize("100000", "PUMP")).toBe((100000).toLocaleString());
-    expect(marketSize("0.123456789", "BTC")).toBe((0.12346).toLocaleString(undefined, { maximumFractionDigits: 5 }));
+    expect(marketSize("100000", "PUMP")).toBe("100,000");
+    expect(marketSize("0.123456789", "BTC")).toBe("0.12346");
   });
 
   it("prefers the perp when a spot market shares the symbol", () => {
     setMarketDecimals([market("ETH", 2, 4), market("ETH", 4, 4, false)]);
-    expect(marketPrice("2447.95", "ETH")).toBe((2447.95).toLocaleString(undefined, { minimumFractionDigits: 2 }));
+    expect(marketPrice("2447.95", "ETH")).toBe("2,447.95");
   });
 });

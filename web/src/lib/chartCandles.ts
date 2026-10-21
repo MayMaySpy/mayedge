@@ -1,5 +1,6 @@
 import type { CandlestickData, HistogramData, UTCTimestamp } from "lightweight-charts";
 import type { Candle } from "@/lib/api";
+import { formatNumber } from "@/lib/utils";
 
 const VOL_UP = "rgba(46, 204, 113, 0.55)";
 const VOL_DOWN = "rgba(255, 77, 94, 0.55)";
@@ -15,7 +16,7 @@ export function formatBarVolume(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (abs >= 1e3) return `${(n / 1e3).toFixed(abs >= 100_000 ? 0 : 1)}k`;
-  return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return formatNumber(n, 0, 4);
 }
 
 export interface ChartSeriesData {

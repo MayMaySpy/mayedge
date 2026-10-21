@@ -1,5 +1,6 @@
 import type { PortfolioDay, PortfolioHistory, PortfolioKind } from "@/lib/api";
 import { PORTFOLIO_KINDS } from "@/lib/portfolioDay";
+import { formatNumber } from "@/lib/utils";
 
 /** Pure helpers behind the Portfolio's day pages, CSV, calendar and PnL card (docs/portfolio-rules.md W7–W9). */
 
@@ -112,8 +113,7 @@ export function pnlCurve(history: PortfolioHistory, since: number): { ts: number
 export function cellMoney(value: number): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  const fixed = (n: number, digits: number) =>
-    n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const fixed = (n: number, digits: number) => formatNumber(n, digits);
   if (abs >= 10_000) return `${sign}${fixed(abs / 1000, 0)}k`;
   if (abs >= 1000) return `${sign}${fixed(abs / 1000, 1)}k`;
   if (abs >= 10) return `${sign}${fixed(abs, 0)}`;

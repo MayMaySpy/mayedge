@@ -1,6 +1,7 @@
 import type { CandlestickData, ISeriesApi } from "lightweight-charts";
 
 import type { Candle } from "@/lib/api";
+import { formatPrice } from "@/lib/utils";
 
 export type Ohlc = { open: number; high: number; low: number; close: number; volume?: number };
 
@@ -26,12 +27,13 @@ export function ohlcOf(
   return { open: c.open, high: c.high, low: c.low, close: c.close, volume: vol };
 }
 
+/** The price axis, its labels and the chart's lines print prices as the rest of the desk does. */
 export function priceFormat(decimals: number) {
   const d = Math.max(0, Math.min(8, Math.floor(decimals)));
   return {
-    type: "price" as const,
-    precision: d,
+    type: "custom" as const,
     minMove: d === 0 ? 1 : 10 ** -d,
+    formatter: (price: number) => formatPrice(price, d),
   };
 }
 

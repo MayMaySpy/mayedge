@@ -1,3 +1,5 @@
+import { DESK_DATE_LOCALE } from "@/lib/utcTime";
+
 /** Theme tokens for JS APIs (charts, canvas) that can't use Tailwind classes. */
 export const theme = {
   canvas: "#0b1018",
@@ -13,4 +15,6 @@ export const theme = {
   fontMono: '"IBM Plex Mono", ui-monospace, monospace',
   /** Matches `--text-sm` (chart axis / overlay pills). */
   chartFontSize: 11,
+  /** Chart time axes read "21 Oct", not the browser's month names. */
+  chartLocale: DESK_DATE_LOCALE,
 } as const;

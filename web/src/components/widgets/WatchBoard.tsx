@@ -322,6 +322,7 @@ const WatchPane = memo(function WatchPane({
     const chart = createChart(wrap, {
       width: wrap.clientWidth,
       height: wrap.clientHeight,
+      localization: { locale: theme.chartLocale },
       layout: {
         background: { color: theme.panel },
         textColor: theme.muted,
@@ -408,10 +409,7 @@ const WatchPane = memo(function WatchPane({
         priceFormat: {
           type: "custom",
           minMove: 0.01,
-          formatter: (price: number) => {
-            const sign = price > 0 ? "+" : "";
-            return `${sign}${price.toFixed(2)}%`;
-          },
+          formatter: (price: number) => formatPct(price, 2),
         },
       });
       seriesRef.current.set(s, series);

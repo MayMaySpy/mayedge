@@ -145,6 +145,7 @@ export function useChartTicketInteraction(input: Refs) {
     const chart = createChart(containerRef.current, {
       width: wrap.clientWidth,
       height: wrap.clientHeight,
+      localization: { locale: theme.chartLocale },
       layout: {
         background: { color: theme.panel },
         textColor: theme.muted,

@@ -2,9 +2,12 @@
 
 const UTC = { timeZone: "UTC", hourCycle: "h23" } as const;
 
-const clockFmt = new Intl.DateTimeFormat("en-GB", { ...UTC, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const minuteFmt = new Intl.DateTimeFormat("en-GB", { ...UTC, hour: "2-digit", minute: "2-digit" });
-const dateTimeFmt = new Intl.DateTimeFormat("en-GB", {
+/** Dates read "20 Oct" in every browser, beside the desk's one number format. */
+export const DESK_DATE_LOCALE = "en-GB";
+
+const clockFmt = new Intl.DateTimeFormat(DESK_DATE_LOCALE, { ...UTC, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const minuteFmt = new Intl.DateTimeFormat(DESK_DATE_LOCALE, { ...UTC, hour: "2-digit", minute: "2-digit" });
+const dateTimeFmt = new Intl.DateTimeFormat(DESK_DATE_LOCALE, {
   ...UTC,
   day: "numeric",
   month: "short",

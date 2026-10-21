@@ -19,6 +19,7 @@ import { CARD_HEIGHT, CARD_WIDTH, drawPnlCard, type PnlCard } from "@/lib/pnlCar
 import { PORTFOLIO_KIND_LABELS, PORTFOLIO_KINDS } from "@/lib/portfolioDay";
 import { calendarMonth, cellMoney, downloadBlob, periodReturn, pnlCurve } from "@/lib/portfolioShare";
 import { theme } from "@/lib/theme";
+import { DESK_DATE_LOCALE } from "@/lib/utcTime";
 import { cn } from "@/lib/utils";
 
 type CardPeriod = "span" | "7d" | "30d" | "90d" | "all";
@@ -240,7 +241,7 @@ export function PortfolioCalendar({ days, loading = false }: { days: PortfolioDa
   const totals = weeks.flatMap((w) => w.cells).flatMap((c) => (c?.total != null ? [c.total] : []));
   const scale = Math.max(...totals.map(Math.abs), 0);
   const monthTotal = totals.reduce((s, v) => s + v, 0);
-  const label = new Date(Date.UTC(month.year, month.month, 1)).toLocaleDateString(undefined, {
+  const label = new Date(Date.UTC(month.year, month.month, 1)).toLocaleDateString(DESK_DATE_LOCALE, {
     month: "long",
     year: "numeric",
     timeZone: "UTC",

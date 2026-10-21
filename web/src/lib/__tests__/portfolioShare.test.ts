@@ -48,14 +48,12 @@ describe("PnL calendar", () => {
   });
 
   it("keeps a cell's amount short", () => {
-    const two = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2 });
-    const one = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 1 });
     expect([cellMoney(27.94), cellMoney(-4.2), cellMoney(1234), cellMoney(-15_600), cellMoney(0)]).toEqual([
       "+28",
-      `-${two(4.2)}`,
-      `+${one(1.2)}k`,
+      "-4.20",
+      "+1.2k",
       "-16k",
-      two(0),
+      "0.00",
     ]);
   });
 });

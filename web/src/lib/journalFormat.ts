@@ -1,5 +1,6 @@
 import type { JournalTrip } from "@/lib/api";
-import { formatPrice, formatSigned } from "@/lib/utils";
+import { DESK_DATE_LOCALE } from "@/lib/utcTime";
+import { formatNumber, formatPrice, formatSigned } from "@/lib/utils";
 
 /** Journal numbers come as full-precision decimal strings. These cut them to what a person reads. */
 
@@ -32,7 +33,7 @@ export function seconds(ts: number): number {
 
 /** A trip or fill time, in UTC: the desk never uses local time. Column headers say UTC. */
 export function when(ts: number): string {
-  return new Date(seconds(ts) * 1000).toLocaleString(undefined, {
+  return new Date(seconds(ts) * 1000).toLocaleString(DESK_DATE_LOCALE, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -71,7 +72,7 @@ export function streak(value: number | null | undefined): string {
 export function bps(value: string | null | undefined): string {
   const n = num(value);
   if (n == null) return "—";
-  const core = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const core = formatNumber(Math.abs(n), 1);
   return `${n > 0 ? "+" : n < 0 ? "-" : ""}${core} bps`;
 }
 
@@ -84,7 +85,7 @@ export function money(value: string | null | undefined): string {
 export function magnitude(value: string | null | undefined): string {
   const n = num(value);
   if (n == null) return "—";
-  return Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatNumber(Math.abs(n), 2);
 }
 
 /** A 0–1 fraction as a whole percent. */
@@ -97,21 +98,21 @@ export function pct(fraction: string | null | undefined): string {
 export function pctPoints(value: string | null | undefined): string {
   const n = num(value);
   if (n == null) return "";
-  const core = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const core = formatNumber(Math.abs(n), 2);
   return `${n > 0 ? "+" : n < 0 ? "-" : ""}${core}%`;
 }
 
 /** A plain ratio, two decimals: profit factor. */
 export function ratio(value: string | null | undefined): string {
   const n = num(value);
-  return n == null ? "—" : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n == null ? "—" : formatNumber(n, 2);
 }
 
 /** R multiples, two decimals with a sign: +1.25R. */
 export function rValue(value: string | null | undefined): string {
   const n = num(value);
   if (n == null) return "—";
-  const core = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const core = formatNumber(Math.abs(n), 2);
   return `${n > 0 ? "+" : n < 0 ? "-" : ""}${core}R`;
 }
 
@@ -123,7 +124,7 @@ export function price(value: string | null | undefined): string {
 /** A size, trailing zeros dropped, at most six decimals. */
 export function size(value: string | null | undefined): string {
   const n = num(value);
-  return n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return n == null ? "—" : formatNumber(n, 0, 6);
 }
 
 export function pnlClass(value: string | null | undefined): string {

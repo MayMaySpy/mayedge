@@ -1,4 +1,5 @@
 import type { PortfolioKind, PortfolioNow } from "@/lib/api";
+import { formatUsd } from "@/lib/utils";
 
 /** The Day open: 00:00 UTC today, in ms. The desk never uses local time (docs/portfolio-rules.md N1). */
 export function utcMidnightMs(now = Date.now()): number {
@@ -63,8 +64,7 @@ export function flowEvents(flows: { ts: number; kind: PortfolioKind; amount: str
     if (!Number.isFinite(amount) || amount === 0) continue;
     byTs.set(f.ts, [...(byTs.get(f.ts) ?? []), { kind: f.kind, amount }]);
   }
-  const usd = (n: number) =>
-    `$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const usd = (n: number) => formatUsd(Math.abs(n));
   const names = (parts: { kind: PortfolioKind }[]) => parts.map((p) => PORTFOLIO_KIND_LABELS[p.kind]).join(", ");
   return [...byTs.entries()]
     .sort(([a], [b]) => a - b)
