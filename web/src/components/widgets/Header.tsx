@@ -43,7 +43,9 @@ import {
   useSendBudget,
 } from "@/lib/liveData";
 import { AutoKillSection } from "@/components/widgets/AutoKillSection";
-import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
+import { AutoKillMeterBar } from "@/components/widgets/AutoKillMeter";
+import { AUTO_KILL_NEAR, autoKillMeter, autoKillMeterLines, autoKillUpnl } from "@/lib/autoKillMeter";
+import { cn, formatApr, formatPct, formatPrice, formatSigned, formatUsdCompact } from "@/lib/utils";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { averageReading, headlineAverage } from "@/lib/funding";
 import { formatClock } from "@/lib/alertFormat";
@@ -240,6 +242,11 @@ export function Header({
   const budget = useSendBudget();
   const algoBook = useLiveAlgos();
   const autoKill = useAutoKill();
+  const killMeter = autoKillMeter(
+    autoKillUpnl(account?.positions ?? []),
+    autoKill.loss_usd,
+    autoKill.profit_usd
+  );
   const { working: workingAlgos } = algoBlotter(algoBook);
   const algosRunning = workingAlgos.filter((a) => algoIsWorking(a.status)).length;
   const plannersRunning = workingAlgos.filter(
@@ -468,23 +475,36 @@ export function Header({
           <Badge variant="outline">{network}</Badge>
           {!tradingEnabled && <Badge variant="muted">Read-only</Badge>}
           {tradingEnabled && autoKill.armed && (
-            <Badge
-              variant="warn"
-              className="cursor-pointer"
-              onClick={() => setKillOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setKillOpen(true);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              Auto kill
-              {autoKill.loss_usd != null ? ` -${autoKill.loss_usd}` : ""}
-              {autoKill.profit_usd != null ? ` / +${autoKill.profit_usd}` : ""}
-            </Badge>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant={(killMeter.lossShare ?? 0) >= AUTO_KILL_NEAR ? "destructive" : "warn"}
+                  className="cursor-pointer gap-1.5"
+                  onClick={() => setKillOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setKillOpen(true);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
+                  Auto kill
+                  <AutoKillMeterBar meter={killMeter} />
+                  <span className="tabular-nums">
+                    {formatSigned(killMeter.upnl)}
+                    {autoKill.loss_usd != null ? ` / -${autoKill.loss_usd}` : ""}
+                    {autoKill.profit_usd != null ? ` / +${autoKill.profit_usd}` : ""}
+                  </span>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="flex flex-col gap-0.5 font-mono">
+                {autoKillMeterLines(killMeter, autoKill.loss_usd, autoKill.profit_usd).map((line) => (
+                  <span key={line}>{line}</span>
+                ))}
+              </TooltipContent>
+            </Tooltip>
           )}
           {tradingEnabled && (
             <Button type="button" variant="danger" size="sm" className="h-7" onClick={() => setKillOpen(true)}>

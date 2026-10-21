@@ -198,7 +198,7 @@ describe("Auto kill", () => {
     // Armed: the limits lock and the header shows them.
     await waitFor(() => expect(button("Disarm")).toBeTruthy());
     expect((screen.getByPlaceholderText("500") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/Auto kill -250/)).toBeTruthy();
+    expect(screen.getByText("0.00 / -250")).toBeTruthy();
   });
 
   it("will not arm without a limit", async () => {
@@ -227,6 +227,52 @@ describe("Auto kill", () => {
 
     expect(api.setAutoKill).toHaveBeenCalledWith({ armed: false, loss_usd: 250, profit_usd: null });
     expect(api.kill).not.toHaveBeenCalled();
+  });
+
+  it("shows how far uPnL has gone toward the loss floor", () => {
+    // Long 2 from 100, mark 90: −20 of a −80 floor is a quarter used.
+    setAccount({
+      collateral: "1000",
+      available: "1000",
+      unrealized_pnl: "-20",
+      positions: [{ ...LONG, mark_price: "90" }],
+      open_orders: [],
+    });
+    setAutoKill({ ...DISARMED, armed: true, loss_usd: 80 });
+    setup();
+    const meter = screen.getByRole("meter", { name: "uPnL toward the loss floor" });
+    expect(meter.getAttribute("aria-valuenow")).toBe("25");
+    expect(screen.getByText("-20.00 / -80")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Auto kill/ }).className).toContain("text-warn");
+  });
+
+  it("turns the badge red once most of the floor is used", () => {
+    setAccount({
+      collateral: "1000",
+      available: "1000",
+      unrealized_pnl: "-64",
+      positions: [{ ...LONG, mark_price: "68" }],
+      open_orders: [],
+    });
+    setAutoKill({ ...DISARMED, armed: true, loss_usd: 80 });
+    setup();
+    expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("80");
+    expect(screen.getByRole("button", { name: /Auto kill/ }).className).toContain("text-destructive");
+  });
+
+  it("says what is left to each limit in the Kill dialog while armed", async () => {
+    setAccount({
+      collateral: "1000",
+      available: "1000",
+      unrealized_pnl: "50",
+      positions: [{ ...LONG, mark_price: "125" }],
+      open_orders: [],
+    });
+    setAutoKill({ ...DISARMED, armed: true, loss_usd: 80, profit_usd: 200 });
+    const user = setup();
+    await user.click(button("Kill"));
+    expect(screen.getByText("Loss floor -80: 130.00 left (0% used)")).toBeTruthy();
+    expect(screen.getByText("Profit target +200: 150.00 to go (25%)")).toBeTruthy();
   });
 
   it("shows what it did the last time it fired", async () => {
