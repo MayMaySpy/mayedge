@@ -47,6 +47,8 @@ class PushSettings:
     max_per_min: int = 12
     # HH:MM UTC for yesterday's journal. Empty is off.
     daily_at: str = ""
+    # Commands the bot answers from the configured chat: status (read-only /status) or off.
+    commands: str = "status"
 
 
 def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
@@ -69,6 +71,7 @@ def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
         repeat_s=_f(raw.get("repeat_s"), base.repeat_s),
         max_per_min=max(1, int(_f(raw.get("max_per_min"), base.max_per_min))),
         daily_at=_daily_at(raw.get("daily_at")),
+        commands="off" if str(raw.get("commands") or base.commands) == "off" else "status",
     )
 
 

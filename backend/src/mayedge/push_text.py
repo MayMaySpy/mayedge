@@ -288,3 +288,50 @@ def _side_word(raw: Any) -> str:
     if side == "sell":
         return "short"
     return side
+
+
+def status_text(
+    *,
+    network: str,
+    now_s: float,
+    positions: list[tuple[str, str, float | None]],
+    upnl: float | None,
+    account_live: bool,
+    live_algos: int,
+    kill_armed: bool,
+    kill_floor: float | None,
+    kill_target: float | None,
+    venue_since: float | None,
+    venue_reason: str,
+) -> str:
+    """The answer to /status: what the desk holds and watches now. Read-only."""
+    clock = time.strftime("%H:%M", time.gmtime(now_s))
+    lines = [f"Desk status ({network}), {clock} UTC"]
+    if positions:
+        listed = ", ".join(
+            f"{symbol} {size}" + (f" ({_signed_usd(pnl)})" if pnl is not None else "")
+            for symbol, size, pnl in positions
+        )
+        head = _count(len(positions), "Position", "Positions") + " open"
+        if upnl is not None:
+            head += f", uPnL {_signed_usd(upnl)}"
+        lines.append(f"{head}: {listed}")
+    else:
+        lines.append("No Positions open")
+    if not account_live:
+        lines.append("Account feed not live: Positions as last seen")
+    lines.append(_count(live_algos, "algo", "algos") + " live" if live_algos else "No algos live")
+    if kill_armed:
+        parts = []
+        if kill_floor is not None:
+            parts.append(f"floor {_signed_usd(-abs(kill_floor))}")
+        if kill_target is not None:
+            parts.append(f"target {_signed_usd(abs(kill_target))}")
+        lines.append("Auto kill armed" + (f": {', '.join(parts)}" if parts else ""))
+    else:
+        lines.append("Auto kill off")
+    if venue_since is not None:
+        when = time.strftime("%H:%M", time.gmtime(venue_since))
+        reason = f" ({venue_reason})" if venue_reason else ""
+        lines.append(f"Lighter down since {when} UTC{reason}")
+    return "\n".join(lines)

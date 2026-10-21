@@ -18,6 +18,7 @@ from typing import Any, Protocol
 import httpx
 
 from mayedge.config import settings
+from mayedge.push_inbox import TelegramInbox
 from mayedge.push_router import PushRouter, PushSink
 from mayedge.push_settings import (
     Clock,
@@ -113,6 +114,7 @@ class TelegramPusher:
         self._idle = asyncio.Event()
         self._idle.set()
         self._task: asyncio.Task[None] | None = None
+        self._inbox_task: asyncio.Task[None] | None = None
         self._stopped = False
         self._last_sent: dict[str, float] = {}
         self._queued: set[str] = set()
@@ -138,6 +140,10 @@ class TelegramPusher:
             self._router.on_message(msg)
         except Exception:
             logger.warning("push router failed")
+
+    def status_text(self) -> str:
+        """The answer to /status (push-rules, Commands)."""
+        return self._router.status_text("testnet" if self._testnet else "mainnet")
 
     def push(self, key: str, text: str, *, urgent: bool = False, force: bool = False) -> None:
         try:
@@ -166,17 +172,34 @@ class TelegramPusher:
             return
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
+        inbox: TelegramInbox | None = None
         if self._transport is None:
             token = settings.telegram_bot_token or ""
             chat = settings.telegram_chat_id or ""
             self._client = httpx.AsyncClient(timeout=10)
             self._transport = HttpxTransport(token, chat, self._client)
+            if self._cfg.commands == "status":
+                inbox = TelegramInbox(
+                    token=token,
+                    chat_id=chat,
+                    client=self._client,
+                    answer=self.status_text,
+                    send=lambda key, text: self.push(key, text, force=True),
+                    now=self._clock.now,
+                )
         self._stopped = False
         self._task = asyncio.create_task(self._run())
+        if inbox is not None:
+            self._inbox_task = asyncio.create_task(inbox.run())
 
     async def stop(self) -> None:
         self._stopped = True
         self._wake.set()
+        if self._inbox_task is not None:
+            self._inbox_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._inbox_task
+            self._inbox_task = None
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

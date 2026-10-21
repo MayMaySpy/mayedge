@@ -61,6 +61,7 @@ A **Push** repeats a fact to Telegram when no tab is open. It raises nothing and
 2. Send your new bot any message, then open `https://api.telegram.org/bot<token>/getUpdates` and copy `message.chat.id`.
 3. Put `TELEGRAM_BOT_TOKEN=` and `TELEGRAM_CHAT_ID=` in `backend/.env`, then `make push-env && make deploy`.
 4. Use **Send test** in the Alerts panel. The line is there only once pushes are on.
+5. Send the bot `/status` for Positions, uPnL, live algos and Auto kill. It answers only your chat and takes no orders; `commands: off` in the `push:` block turns it off.
 
 #### When the desk was not watching
 

@@ -83,3 +83,5 @@ push:
   max_per_min: 12
   # HH:MM UTC for yesterday's journal. Empty stays off.
   daily_at: ""
+  # Answer /status from TELEGRAM_CHAT_ID (read-only: Positions, uPnL, algos, Auto kill). off to ignore.
+  commands: status

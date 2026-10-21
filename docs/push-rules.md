@@ -2,9 +2,9 @@
 
 A **Push** is a Telegram message the desk sends the operator. It repeats a fact that already happened. It raises nothing, and it never places, amends, or cancels an order.
 
-The `push:` block in [`backend/config/alerts.yaml`](../backend/config/alerts.yaml) is the source of truth for the knobs. Both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` must be set, or every call is a no-op and the rest of the desk is unchanged. There is no inbound command. `/kill` from Telegram would be the first way to trade that does not go through the desk page; it needs its own decision and an ADR.
+The `push:` block in [`backend/config/alerts.yaml`](../backend/config/alerts.yaml) is the source of truth for the knobs. Both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` must be set, or every call is a no-op and the rest of the desk is unchanged. The one inbound command is a read-only `/status` (Commands, below). `/kill` from Telegram would be the first way to trade that does not go through the desk page; it needs its own decision and an ADR.
 
-Pushes are outbound only. The desk posts `sendMessage`. It does not open a webhook and it does not poll `getUpdates`. The desk has no public ingress ([ADR 0005](adr/0005-no-app-auth-loopback-tailscale.md)); do not Funnel.
+Pushes are outbound. The desk posts `sendMessage`, and for Commands it long-polls `getUpdates`, which is also a request the desk makes. It never opens a webhook. The desk has no public ingress ([ADR 0005](adr/0005-no-app-auth-loopback-tailscale.md), [ADR 0017](adr/0017-a-push-is-a-toast-that-leaves-the-desk.md)); do not Funnel.
 
 A push never blocks or fails a trading path. `push()` returns immediately and does not raise. A worker sends later. A failure in that worker is a dropped message, not a failed order.
 
@@ -62,3 +62,18 @@ The worker also sends at most one message a second. An HTTP 429 waits `parameter
 Dynamic text is HTML-escaped (`&`, `<`, `>`). The result is cut at 4,000 characters. When the desk's network is testnet, the message starts with `[testnet] `.
 
 The bot token lives only in the send URL. It is not logged, not returned by `GET /api/push`, and not shown in the panel. httpx request logging stays at WARNING, because that log line would contain the token.
+
+## Commands
+
+`commands: status` (the default) answers `/status`; `commands: off` reads nothing. The bot answers only while pushes are on.
+
+- The desk long-polls `getUpdates` for messages, 50 seconds a request. It reads only messages whose chat is `TELEGRAM_CHAT_ID`; every other chat is ignored without a reply.
+- `/status` (also `/status@yourbot`) answers through the push queue, under the key `status:{update_id}`. It says what the desk holds and watches now, from the same messages the desk page gets: Positions with their uPnL, total uPnL, live algos, Auto kill with its floor and target, whether the account feed is live, and whether Lighter is down.
+
+  `Desk status (mainnet), 14:00 UTC` · `2 Positions open, uPnL +$123: ETH +1.5 (+$100), BTC −0.1 (+$23)` · `No algos live` · `Auto kill armed: floor −$500, target +$1,000`, one per line. Without a live account feed it adds `Account feed not live: Positions as last seen`.
+- Any other command gets `Only /status is answered here. The desk takes no orders from Telegram.` Plain text gets nothing.
+- A command older than 120 seconds is not answered: it was sent while the desk was down, and an answer now would read as an answer then.
+- Nothing a command does places, amends or cancels an order, arms or disarms Auto kill, or changes a knob.
+- A second reader of the same bot (a second desk with the same token, or a webhook) makes Telegram refuse `getUpdates` with 409. The desk logs the failure once, without the URL, which holds the token, and tries again after 5, 15, then every 60 seconds.
+
+Pinned by `tests/test_push_inbox.py`.

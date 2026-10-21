@@ -30,6 +30,7 @@ from mayedge.push_text import (
     _utc_date,
     daily_text,
     freeze_text,
+    status_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ class PushRouter:
         self._algos: dict[str, _SeenAlgo] = {}
         self._live_algos = 0
         self._positions: list[dict[str, str]] = []
+        self._position_pnl: list[float | None] = []
+        self._kill_armed = False
+        self._kill_floor: float | None = None
+        self._kill_target: float | None = None
         self._upnl: float | None = None
         self._account_live = False
         self._kill_seeded = False
@@ -200,6 +205,9 @@ class PushRouter:
             self._out.push(f"algo:{algo_id}:target", f"Trail {symbol}: target filled @ {px}")
 
     def _on_kill(self, msg: dict[str, Any]) -> None:
+        self._kill_armed = bool(msg.get("armed"))
+        self._kill_floor = _opt_num(msg.get("loss_usd"))
+        self._kill_target = _opt_num(msg.get("profit_usd"))
         fired_at = msg.get("fired_at")
         status = msg.get("last_kill_status")
         status_s = str(status) if status else None
@@ -244,6 +252,7 @@ class PushRouter:
 
     def _on_account(self, msg: dict[str, Any]) -> None:
         open_rows: list[dict[str, str]] = []
+        pnls: list[float | None] = []
         for pos in msg.get("positions") or []:
             if not isinstance(pos, dict):
                 continue
@@ -251,7 +260,9 @@ class PushRouter:
             if size == 0:
                 continue
             open_rows.append({"symbol": str(pos.get("symbol") or "?"), "size": _signed(size)})
+            pnls.append(_opt_num(pos.get("unrealized_pnl")))
         self._positions = open_rows
+        self._position_pnl = pnls
         raw = msg.get("unrealized_pnl")
         self._upnl = _num(raw) if raw not in (None, "") else None
 
@@ -297,6 +308,25 @@ class PushRouter:
             self._account_announced = False
         elif self._account_down_since is None:
             self._account_down_since = self._clock.now()
+
+    def status_text(self, network: str) -> str:
+        """The answer to /status, from the latest desk messages."""
+        return status_text(
+            network=network,
+            now_s=self._clock.now(),
+            positions=[
+                (p["symbol"], p["size"], pnl)
+                for p, pnl in zip(self._positions, self._position_pnl, strict=True)
+            ],
+            upnl=self._upnl,
+            account_live=self._account_live,
+            live_algos=self._live_algos,
+            kill_armed=self._kill_armed,
+            kill_floor=self._kill_floor,
+            kill_target=self._kill_target,
+            venue_since=self._venue_since,
+            venue_reason=self._venue_reason,
+        )
 
     def _poll_venue(self) -> None:
         if self._venue_since is None or self._venue_announced:
@@ -405,3 +435,12 @@ def _role_fills(row: dict[str, Any]) -> dict[str, int]:
         if role:
             counts[role] = counts.get(role, 0) + 1
     return counts
+
+
+def _opt_num(raw: Any) -> float | None:
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
