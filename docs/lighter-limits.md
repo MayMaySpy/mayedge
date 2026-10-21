@@ -127,6 +127,29 @@ A 429 or 405 is a 60 second firewall cooldown, and a limited REST window limits 
 
 Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap each other.
 
+## Errors
+
+A send the venue refuses is classified once, in `reject_reason` (`lighter/errors.py`). The order below is the rule. A `VenueReject` keeps the reason it was built with and is never parsed again. `BudgetRefused` is the desk's own limiter and is not `BLOCKED`.
+
+On 2026-10-21 the desk's logs for the previous 30 days had no send-reject text. The sweep matched token-icon 404s and one order-book nonce gap. Those are not fallbacks.
+
+An `ApiException` is classified from its HTTP status and body. Headers are ignored, so `POST` or `cross-origin` cannot decide the reason.
+
+| Order | Reason | Lighter code | Published text | Text fallback | What an algo does | Test |
+|------|--------|--------------|----------------|---------------|-------------------|------|
+| 1 | `BLOCKED` | HTTP 429, `23000` | Too Many Requests! | WAF / captcha / "too many requests" / "rate limit" / "ratelimit", via `venue_client_error` | cooldown, same as a venue 429 | `test_blocked` |
+| 2 | `INVALID_NONCE` | `21104` | invalid nonce | "invalid nonce" | nonce cooldown, one retry in `orders.py` | `test_invalid_nonce` |
+| 3 | `ORDER_NOT_FOUND` | `21701` | invalid base amount | "order not found" | cancel treats the order as gone | `test_order_not_found` |
+| 4 | `MIN_SIZE` | `21706` | invalid order base or quote amount | "base or quote amount" | pause or replace; the operator sentence "Min …" is a `VenueReject`, not a phrase | `test_min_size` |
+| 5 | `ORDER_CAP` | `21717`, `21718`, `21719`, `21720` | maximum active or pending order count | none | the operator sentence, then the usual unhandled path | `test_order_cap` |
+| 6 | `ORDER_EXPIRY` | `21711` | invalid expiry | none | the operator sentence, then the usual unhandled path | `test_order_expiry` |
+| 7 | `DUPLICATE_COI` | `21728` | client order index already exists | none | the operator sentence, then the usual unhandled path | `test_duplicate_coi` |
+| 8 | `WOULD_CROSS` | `21700`, `21702`–`21705`, `21707`–`21709` | invalid order fields (the errors page has no would-cross code) | "post-only", "would cross" | keep the resting order, or wait | `test_would_cross` |
+
+`21701` and `21706` are never `WOULD_CROSS`. Lighter publishes `21701` as invalid base amount; the desk still treats that code as order-not-found, which is what cancel already keys on. The rest of `21700`–`21709` stays would-cross, which is what the algos already did with that family. Bare "post", "cross", and "min " match nothing. A price such as `64290.5`, or an order index that merely contains a code's digits, matches nothing.
+
+Anything `reject_reason` does not classify is logged. It is not treated as would-cross. `test_modify_nonce_is_not_a_quiet_cross` pins the grid amend that used to return on the word "post".
+
 ## Implications for ladder (keep-N)
 
 - Default **window 10**, max **20** live rungs — fits Standard 30/market with other algos.

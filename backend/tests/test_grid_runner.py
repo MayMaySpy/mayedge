@@ -9,7 +9,7 @@ from typing import Any, cast
 from unittest import IsolatedAsyncioTestCase
 
 from mayedge.algos.grid.config import GRID_COI_BASE
-from mayedge.algos.grid.decide import Lot
+from mayedge.algos.grid.decide import GridAction, Lot, SideQuote
 from mayedge.algos.grid.job import GridRunner
 
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -156,3 +156,43 @@ class GridRunnerInventoryTests(IsolatedGridTestCase):
         self.assertEqual(job.state.runtime.lots, [])
         snap = job.snapshot()
         self.assertEqual(snap["inventory"], "0")
+
+
+class GridModifyRejectTests(IsolatedGridTestCase):
+    async def _live_buy(self, boot: Any) -> Any:
+        job = cast(GridRunner, boot.job)
+        await job._evaluate()
+        clip = job._chase_clip("buy")
+        self.assertIsNotNone(clip)
+        return clip
+
+    async def test_modify_nonce_is_not_a_quiet_cross(self) -> None:
+        """A nonce error whose headers say POST must reach the tx handler."""
+        boot = boot_grid_job()
+        job = cast(GridRunner, boot.job)
+        quote = SideQuote(GridAction.REST, price=D("99.5"), qty=D("1"))
+        with patch_grid(boot.clock, boot.gateway, boot.orders):
+            clip = await self._live_buy(boot)
+            boot.orders.modify_error = ValueError(
+                "HTTP response headers: Access-Control-Allow-Methods: GET, POST, cross-origin\n"
+                "HTTP response body: code=21104 message='invalid nonce'"
+            )
+            with self.assertLogs("mayedge.algos.chase.place", level="WARNING") as logs:
+                await job._modify_side(clip, quote)
+        self.assertEqual(job._backoff_reason, "invalid_nonce")
+        self.assertTrue(any("invalid nonce" in line for line in logs.output))
+        self.assertEqual(boot.orders.cancels, [])
+
+    async def test_modify_header_noise_is_logged(self) -> None:
+        boot = boot_grid_job()
+        job = cast(GridRunner, boot.job)
+        quote = SideQuote(GridAction.REST, price=D("99.5"), qty=D("1"))
+        with patch_grid(boot.clock, boot.gateway, boot.orders):
+            clip = await self._live_buy(boot)
+            boot.orders.modify_error = ValueError(
+                "HTTP response headers: Access-Control-Allow-Methods: GET, POST, cross-origin"
+            )
+            with self.assertLogs("mayedge.algos.grid.job", level="WARNING") as logs:
+                await job._modify_side(clip, quote)
+        self.assertIsNone(job._backoff_reason)
+        self.assertTrue(any("grid modify failed" in line for line in logs.output))

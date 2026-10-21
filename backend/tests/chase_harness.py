@@ -20,6 +20,7 @@ from mayedge.algos.chase.job import (
     ChaseState,
     ChaseStatus,
 )
+from mayedge.lighter.errors import Reject, VenueReject
 from mayedge.lighter.models import MarketMeta
 
 
@@ -283,7 +284,7 @@ class FakeOrderService:
                 row = o
                 break
         if row is None:
-            raise ValueError("order not found")
+            raise VenueReject(Reject.ORDER_NOT_FOUND, "order not found")
         row["price"] = price
         if size is not None:
             row["remaining"] = size

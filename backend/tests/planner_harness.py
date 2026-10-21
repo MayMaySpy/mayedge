@@ -12,6 +12,7 @@ from venue_harness import FakeClock
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.planner.config import PLANNER_COI_BASE
 from mayedge.algos.planner.job import PlannerRunner
+from mayedge.lighter.errors import Reject, VenueReject
 from mayedge.lighter.models import MarketMeta
 
 __all__ = ["MI", "FakeBook", "FakeClock", "FakeVenue", "eth"]
@@ -90,7 +91,7 @@ class FakeVenue:
         px = Decimal(kw["price"])
         crosses = px >= Decimal(self.ask) if kw["side"] == "buy" else px <= Decimal(self.bid)
         if kw.get("time_in_force") == "post_only" and crosses:
-            raise ValueError("post-only order would cross")
+            raise VenueReject(Reject.WOULD_CROSS, "post-only order would cross")
         self._rest(
             kw["client_order_index"],
             side=kw["side"],

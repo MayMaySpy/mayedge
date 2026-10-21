@@ -7,12 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END
-from mayedge.lighter.errors import (
-    VenueBlocked,
-    has_code,
-    has_code_prefix,
-    venue_client_error,
-)
+from mayedge.lighter.errors import Reject, reject_reason
 from mayedge.numbers import fmt_decimal
 from mayedge.rows import is_obj
 
@@ -55,31 +50,20 @@ def _chase_order_keys(orders: Any, cois: set[int] | None = None) -> list[tuple[i
 
 
 def _is_rate_limit(err: BaseException) -> bool:
-    from mayedge.lighter.budget import BudgetRefused
-
-    if isinstance(err, BudgetRefused):
-        return False
-    return isinstance(err, VenueBlocked) or venue_client_error(err) is not None
+    return reject_reason(err) is Reject.BLOCKED
 
 
 def _is_order_not_found(err: BaseException) -> bool:
-    text = str(err).lower()
-    return "order not found" in text or has_code(text, "21701")
+    return reject_reason(err) is Reject.ORDER_NOT_FOUND
 
 
 def _is_min_size(err: BaseException) -> bool:
-    text = str(err).lower()
-    return has_code(text, "21706") or "min " in text or "base or quote amount" in text
+    return reject_reason(err) is Reject.MIN_SIZE
 
 
 def _is_would_cross(err: BaseException) -> bool:
-    """Post-only would-cross (2170). Do not match 21701 / 21706."""
-    text = str(err).lower()
-    if has_code(text, "21701") or has_code(text, "21706"):
-        return False
-    return "post" in text or "cross" in text or has_code_prefix(text, "2170")
+    return reject_reason(err) is Reject.WOULD_CROSS
 
 
 def _is_invalid_nonce(err: BaseException | str | None) -> bool:
-    text = str(err or "").lower()
-    return has_code(text, "21104") or "invalid nonce" in text
+    return reject_reason(err) is Reject.INVALID_NONCE

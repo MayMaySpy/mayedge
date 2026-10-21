@@ -26,6 +26,7 @@ from mayedge.algos.chase.config import (
     UNPROVEN_RETRY_MS,
 )
 from mayedge.config import settings
+from mayedge.lighter.errors import Reject, VenueReject
 
 # Allow `from chase_harness import ...` when discover runs from backend/
 _TESTS_DIR = Path(__file__).resolve().parent
@@ -385,7 +386,7 @@ class ChaseRunnerCrossAndErrorsTests(IsolatedChaseTestCase):
             await boot.job._evaluate()
             boot.gateway.set_book("99.99", "100.10")
             boot.clock.advance(MIN_REQUOTE_MS + 1)
-            boot.orders.modify_error = ValueError("Min 3.5 LIT (or $10)")
+            boot.orders.modify_error = VenueReject(Reject.MIN_SIZE, "Min 3.5 LIT (or $10)")
             await boot.job._evaluate()
             n = len(boot.orders.modify_attempts)
             boot.clock.advance(100)

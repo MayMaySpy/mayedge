@@ -17,7 +17,15 @@ from mayedge.lighter.coi import (
     is_algo_client_order,
     next_manual_client_order_index,
 )
-from mayedge.lighter.errors import VenueBlocked, has_code, venue_client_error
+from mayedge.lighter.errors import (
+    RATE_MSG,
+    Reject,
+    VenueBlocked,
+    VenueReject,
+    code_of,
+    reject_reason,
+    venue_client_error,
+)
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import (
     MarketMeta,
@@ -119,7 +127,7 @@ class OrderService:
             return
         need_s = fmt_decimal(need) or "0"
         quote_s = fmt_decimal(Decimal(str(meta.min_quote_amount or 0))) or "0"
-        raise ValueError(f"Min {need_s} {meta.symbol} (or ${quote_s})")
+        raise VenueReject(Reject.MIN_SIZE, f"Min {need_s} {meta.symbol} (or ${quote_s})")
 
     @staticmethod
     def _is_maker_tif(time_in_force: str) -> bool:
@@ -151,25 +159,38 @@ class OrderService:
         check_notional(qty, px, settings.max_order_notional)
 
     def _raise_order_err(self, err: Any, meta: MarketMeta) -> None:
-        text = str(err)
-        if has_code(text, "21706") or "invalid order base or quote amount" in text.lower():
-            raise ValueError(
-                f"Min {meta.min_base_amount} {meta.symbol} or ${meta.min_quote_amount}"
+        if isinstance(err, VenueReject):
+            raise err
+        reason = reject_reason(err)
+        code = code_of(err)
+        if reason is Reject.MIN_SIZE:
+            raise VenueReject(
+                reason,
+                f"Min {meta.min_base_amount} {meta.symbol} or ${meta.min_quote_amount}",
+                code or 21706,
             )
-        if has_code(text, "21717"):
-            raise ValueError("Account order cap reached")
-        if has_code(text, "21718"):
-            raise ValueError("Per-market order cap reached")
-        if has_code(text, "21711"):
-            raise ValueError("Order expiry must be between 5 minutes and 30 days")
-        if has_code(text, "21719") or has_code(text, "21720"):
-            raise ValueError("Pending order cap reached")
-        if has_code(text, "21728"):
-            raise ValueError("Duplicate client order id")
-        mapped = venue_client_error(err)
-        if mapped:
+        if reason is Reject.ORDER_CAP:
+            if code == 21717:
+                message = "Account order cap reached"
+            elif code == 21718:
+                message = "Per-market order cap reached"
+            else:
+                message = "Pending order cap reached"
+            raise VenueReject(reason, message, code)
+        if reason is Reject.ORDER_EXPIRY:
+            raise VenueReject(
+                reason,
+                "Order expiry must be between 5 minutes and 30 days",
+                code or 21711,
+            )
+        if reason is Reject.DUPLICATE_COI:
+            raise VenueReject(reason, "Duplicate client order id", code or 21728)
+        if reason is Reject.BLOCKED:
             budget.note_blocked()
+            mapped = venue_client_error(err) or (429, RATE_MSG)
             raise VenueBlocked(*mapped)
+        if reason is not None:
+            raise VenueReject(reason, str(err), code)
         raise ValueError(err)
 
     def _market_worst_price(self, meta: MarketMeta, *, is_ask: bool, slippage: float) -> int:
@@ -241,8 +262,7 @@ class OrderService:
 
     @staticmethod
     def _is_invalid_nonce(err: Any) -> bool:
-        text = str(err or "").lower()
-        return has_code(text, "21104") or "invalid nonce" in text
+        return reject_reason(err) is Reject.INVALID_NONCE
 
     def _nonce_stale(self, ret: Any, err: Any) -> bool:
         if self._is_invalid_nonce(err):
