@@ -37,6 +37,18 @@ function share(value: number | null | undefined): string {
   return value == null ? "—" : `${Math.round(value * 100)}%`;
 }
 
+function firstSelection(settings: AlertKnobSettings | null): {
+  rule: string;
+  knob: string;
+  value: string;
+} | null {
+  if (!settings) return null;
+  const rule = Object.keys(settings.by_rule)[0] ?? "";
+  const knob = rule ? (settings.by_rule[rule]?.[0] ?? "") : "";
+  if (!rule || !knob) return null;
+  return { rule, knob, value: String(settings.knobs[knob] ?? "") };
+}
+
 function StatPair({ label, base, next }: { label: string; base: string; next: string }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -65,6 +77,10 @@ export function AlertRecordDialog({
   const [knob, setKnob] = useState("");
   const [value, setValue] = useState("");
   const [whatIf, setWhatIf] = useState<AlertWhatIf | null>(null);
+  const seeded = rule ? null : firstSelection(settings);
+  const selectedRule = seeded?.rule ?? rule;
+  const selectedKnob = seeded?.knob ?? knob;
+  const selectedValue = seeded?.value ?? value;
 
   useEffect(() => {
     if (!open) return;
@@ -88,22 +104,12 @@ export function AlertRecordDialog({
   }, [by, open, range]);
 
   useEffect(() => {
-    if (!settings || rule) return;
-    const first = Object.keys(settings.by_rule)[0];
-    const knobName = first ? settings.by_rule[first]?.[0] : "";
-    if (!first || !knobName) return;
-    setRule(first);
-    setKnob(knobName);
-    setValue(String(settings.knobs[knobName] ?? ""));
-  }, [rule, settings]);
-
-  useEffect(() => {
-    if (!open || !rule || !knob || value === "") return;
-    const number = Number(value);
+    if (!open || !selectedRule || !selectedKnob || selectedValue === "") return;
+    const number = Number(selectedValue);
     if (!Number.isFinite(number)) return;
     let cancelled = false;
     void api
-      .alertWhatIf({ rule, knob, value: number, days: DAYS[range] })
+      .alertWhatIf({ rule: selectedRule, knob: selectedKnob, value: number, days: DAYS[range] })
       .then((out) => {
         if (!cancelled) setWhatIf(out);
       })
@@ -113,9 +119,9 @@ export function AlertRecordDialog({
     return () => {
       cancelled = true;
     };
-  }, [knob, open, range, rule, value]);
+  }, [open, range, selectedKnob, selectedRule, selectedValue]);
 
-  const knobsForRule = settings?.by_rule[rule] ?? [];
+  const knobsForRule = settings?.by_rule[selectedRule] ?? [];
 
   const chooseRule = (next: string) => {
     setRule(next);
@@ -205,7 +211,7 @@ export function AlertRecordDialog({
         <div className="flex flex-wrap items-center gap-2 border-t border-rule pt-2">
           <select
             aria-label="Rule"
-            value={rule}
+            value={selectedRule}
             onChange={(e) => chooseRule(e.target.value)}
             className="h-6 rounded border border-border bg-transparent px-1 text-base"
           >
@@ -217,9 +223,10 @@ export function AlertRecordDialog({
           </select>
           <select
             aria-label="Knob"
-            value={knob}
+            value={selectedKnob}
             onChange={(e) => {
               const next = e.target.value;
+              setRule(selectedRule);
               setKnob(next);
               setValue(settings ? String(settings.knobs[next] ?? "") : "");
               setWhatIf(null);
@@ -234,8 +241,12 @@ export function AlertRecordDialog({
           </select>
           <input
             aria-label="Knob value"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={selectedValue}
+            onChange={(e) => {
+              setRule(selectedRule);
+              setKnob(selectedKnob);
+              setValue(e.target.value);
+            }}
             className="h-6 w-20 rounded border border-border bg-transparent px-1.5 font-mono"
           />
         </div>

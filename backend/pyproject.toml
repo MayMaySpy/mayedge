@@ -26,7 +26,11 @@ build-backend = "hatchling.build"
 packages = ["src/mayedge"]
 
 [dependency-groups]
-dev = ["ruff>=0.8.0", "basedpyright>=1.29.0"]
+dev = [
+    "ruff>=0.8.0",
+    "basedpyright>=1.29.0",
+    "httpx2>=2.0.0",
+]
 
 [tool.basedpyright]
 pythonVersion = "3.12"

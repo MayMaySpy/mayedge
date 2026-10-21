@@ -64,4 +64,43 @@ describe("AlertRecordDialog", () => {
     expect(await screen.findByText(/price_x: 3/)).toBeTruthy();
     expect(screen.getByText("Only tighter values can be tested.")).toBeTruthy();
   });
+
+  it("opens on the first rule's first knob", async () => {
+    vi.spyOn(api, "alertStats").mockResolvedValue({
+      hours: 720,
+      by: "rule",
+      rules: [move],
+    });
+    vi.spyOn(api, "alertSettings").mockResolvedValue({
+      knobs: { "spike.price_x": 2, "spike.volume_x": 4, "volume.notional": 9 },
+      by_rule: {
+        move: ["spike.price_x", "spike.volume_x"],
+        volume: ["volume.notional"],
+      },
+    });
+    const whatIf = vi.spyOn(api, "alertWhatIf").mockImplementation(async (opts) => ({
+      rule: opts.rule,
+      knob: opts.knob,
+      value: opts.value,
+      days: opts.days,
+      current: 2,
+      looser: false,
+      baseline: move,
+      whatif: move,
+      yaml: "seeded",
+    }));
+
+    render(<AlertRecordDialog open onOpenChange={() => {}} />);
+
+    await waitFor(() =>
+      expect(
+        whatIf.mock.calls.some(
+          (call) => call[0].rule === "move" && call[0].knob === "spike.price_x" && call[0].value === 2,
+        ),
+      ).toBe(true),
+    );
+    expect((screen.getByLabelText("Rule") as HTMLSelectElement).value).toBe("move");
+    expect((screen.getByLabelText("Knob") as HTMLSelectElement).value).toBe("spike.price_x");
+    expect((screen.getByLabelText("Knob value") as HTMLInputElement).value).toBe("2");
+  });
 });
