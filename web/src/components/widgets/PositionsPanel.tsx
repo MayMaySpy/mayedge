@@ -21,6 +21,7 @@ import { algoBlotter } from "@/lib/algos";
 import { useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   positionNotional,
+  exposure,
   pnlClass,
   positionsForClose,
   roePct,
@@ -28,7 +29,7 @@ import {
   type CloseFilter,
   type PosSort,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatSigned } from "@/lib/utils";
+import { cn, formatPctAbs, formatSigned, formatUsd } from "@/lib/utils";
 
 const TradeHistoryTab = lazy(() =>
   import("@/components/widgets/account/TradeHistoryTab").then((m) => ({
@@ -248,12 +249,30 @@ export function PositionsPanel({
     { filter: "all", label: "All", noun: "positions", menu: "Close all", count: liveRows.length, className: undefined },
   ] as const;
 
-  // A narrow panel folds the close chips into `…` first, then the uPnL readout.
+  const margin = n(account?.portfolio_margin);
+  const exp = exposure(
+    liveRows.map((r) => ({ notional: r.notional, long: isLongPosition(r.p) })),
+    margin
+  );
+  const expTitle = [
+    `Long ${formatUsd(exp.long)} · Short ${formatUsd(exp.short)}`,
+    `Gross ${formatUsd(exp.gross)}${exp.leverage != null ? ` · ${exp.leverage.toFixed(2)}x the Portfolio margin` : ""}`,
+  ].join("\n");
+  const expReadout = (
+    <span className="font-mono text-sm tabular-nums">
+      {formatSigned(exp.net)}
+      {exp.leverage != null && (
+        <span className="ml-1 text-xs text-muted-foreground">({exp.leverage.toFixed(2)}x)</span>
+      )}
+    </span>
+  );
+
+  // A narrow panel folds the close chips into `…` first, then Exposure, then the uPnL readout.
   const barRef = useRef<HTMLDivElement>(null);
   const folded = useToolbarFold(
     barRef,
-    2,
-    `${winners.length}:${losers.length}:${liveRows.length}:${formatSigned(totalPnl).length}`
+    3,
+    `${winners.length}:${losers.length}:${liveRows.length}:${formatSigned(totalPnl).length}:${formatSigned(exp.net).length}`
   );
   const pnlReadout = (
     <span className={cn("font-mono text-sm tabular-nums", pnlClass(totalPnl))}>
@@ -344,7 +363,20 @@ export function PositionsPanel({
                 ))}
               </div>
             ) : null}
-            {folded < 2 ? (
+            {folded < 2 && liveRows.length > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
+                    <span className="text-sm text-muted-foreground">Net</span>
+                    {expReadout}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="whitespace-pre-line">
+                  {`Exposure: net notional, long less short\n${expTitle}`}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+            {folded < 3 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
@@ -357,7 +389,13 @@ export function PositionsPanel({
             ) : null}
             {folded > 0 ? (
               <OverflowMenu label="More position controls">
-                {folded > 1 ? (
+                {folded > 1 && liveRows.length > 0 ? (
+                  <DropdownMenuLabel className="flex items-baseline gap-1.5" title={expTitle}>
+                    <span className="text-muted-foreground">Net</span>
+                    {expReadout}
+                  </DropdownMenuLabel>
+                ) : null}
+                {folded > 2 ? (
                   <>
                     <DropdownMenuLabel className="flex items-baseline gap-1.5">
                       <span className="text-muted-foreground">uPnL</span>
@@ -402,6 +440,7 @@ export function PositionsPanel({
                 markets={markets}
                 algoBook={algoBook}
                 journalOpen={journalOpen}
+                margin={margin}
                 orders={allOrders}
                 tradingEnabled={tradingEnabled}
                 feedReady={feed.ready}

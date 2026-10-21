@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  equityShare,
+  exposure,
   nextFunding,
   nextPosSort,
   pnlAtTrigger,
@@ -276,5 +278,34 @@ describe("nextFunding", () => {
     expect(nextFunding(1, 100, Number.NaN)).toBeNull();
     expect(nextFunding(1, 0, 0.01)).toBeNull();
     expect(nextFunding(0, 100, 0.01)).toBeNull();
+  });
+});
+
+describe("exposure", () => {
+  it("adds notional by side and measures gross against the margin", () => {
+    const out = exposure(
+      [
+        { notional: 6000, long: true },
+        { notional: 1000, long: false },
+        { notional: 0, long: true },
+      ],
+      2000
+    );
+    expect(out).toEqual({ long: 6000, short: 1000, net: 5000, gross: 7000, leverage: 3.5 });
+  });
+
+  it("has no leverage without a margin", () => {
+    expect(exposure([{ notional: 10, long: false }], 0)).toEqual({
+      long: 0,
+      short: 10,
+      net: -10,
+      gross: 10,
+      leverage: null,
+    });
+  });
+
+  it("gives a Position's share of the margin", () => {
+    expect(equityShare(500, 2000)).toBe(25);
+    expect(equityShare(500, 0)).toBeNull();
   });
 });

@@ -274,6 +274,10 @@ _Avoid_: closed PnL, banked, the venue's per-position `realized_pnl`
 Realized PnL less fees, plus funding received (or less funding paid).
 _Avoid_: PnL (unqualified), equity, a limit for Auto kill
 
+**Exposure**:
+The open Positions' notional at mark: long, short, net (long less short) and gross (both), with gross over the Portfolio margin. The Positions bar shows net; its tooltip shows the rest.
+_Avoid_: leverage (unqualified; a Position has its own), risk, delta
+
 **Asset**:
 A token holding on the account (USDC, ETH, …). Not a Position; not a Market.
 _Avoid_: position, coin, token (unqualified), collateral (for the holding itself)

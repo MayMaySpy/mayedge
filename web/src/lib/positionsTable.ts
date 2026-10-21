@@ -230,3 +230,35 @@ export function nextFunding(size: number, mark: number, hourlyPct: number | null
   if (hourlyPct == null || !Number.isFinite(hourlyPct) || !(mark > 0) || !size) return null;
   return (-size * mark * hourlyPct) / 100;
 }
+
+/** Exposure: the open Positions' notional at mark, by side, and gross over the Portfolio margin. */
+export type Exposure = {
+  long: number;
+  short: number;
+  /** Long less short. */
+  net: number;
+  /** Long plus short. */
+  gross: number;
+  /** Gross over the Portfolio margin; unknown without a margin. */
+  leverage: number | null;
+};
+
+export function exposure(
+  rows: readonly { notional: number; long: boolean }[],
+  margin: number
+): Exposure {
+  let long = 0;
+  let short = 0;
+  for (const row of rows) {
+    if (!(row.notional > 0)) continue;
+    if (row.long) long += row.notional;
+    else short += row.notional;
+  }
+  const gross = long + short;
+  return { long, short, net: long - short, gross, leverage: margin > 0 ? gross / margin : null };
+}
+
+/** A Position's notional as a share of the Portfolio margin, in percent; unknown without a margin. */
+export function equityShare(notional: number, margin: number): number | null {
+  return margin > 0 && notional > 0 ? (notional / margin) * 100 : null;
+}

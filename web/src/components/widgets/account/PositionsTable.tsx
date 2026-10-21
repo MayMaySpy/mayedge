@@ -21,6 +21,7 @@ import { setAlgo, useLiveQuotes, type OpenTripRealized } from "@/lib/liveData";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { utcClock } from "@/lib/utcTime";
 import {
+  equityShare,
   nextFunding,
   nextPosSort,
   pnlClass,
@@ -97,6 +98,8 @@ interface PositionsTableProps {
   markets: Market[];
   algoBook: AlgoBook;
   journalOpen: OpenTripRealized[];
+  /** The Portfolio margin, for each Position's share of it. */
+  margin: number;
   orders: OpenOrder[];
   tradingEnabled: boolean;
   feedReady: boolean;
@@ -116,6 +119,7 @@ export function PositionsTable({
   markets,
   algoBook,
   journalOpen,
+  margin,
   orders: allOrders,
   tradingEnabled,
   feedReady,
@@ -220,7 +224,14 @@ export function PositionsTable({
                         <TableCell className={cn("text-right", long ? "text-bid" : "text-ask")}>
                           {formatSize(Math.abs(n(p.size)))}
                         </TableCell>
-                        <TableCell hideBelow="xl" className="text-right">
+                        <TableCell
+                          hideBelow="xl"
+                          className="text-right"
+                          title={(() => {
+                            const share = equityShare(notional, margin);
+                            return share != null ? `${formatPctAbs(share)} of the Portfolio margin` : undefined;
+                          })()}
+                        >
                           {notional > 0 ? formatUsd(notional) : "—"}
                         </TableCell>
                         <TableCell hideBelow="lg" className="text-right">
