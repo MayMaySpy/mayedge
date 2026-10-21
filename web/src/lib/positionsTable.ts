@@ -198,3 +198,25 @@ export function realizedTitle(row: OpenTripRealized, fmt: (n: number) => string)
   if (row.partial) lines.push("Closes before the journal began are not in it");
   return lines.join("\n");
 }
+
+function num(value: string | undefined): number {
+  const x = parseFloat(value ?? "");
+  return Number.isFinite(x) ? x : 0;
+}
+
+/** uPnL over the Position's margin, or over notional / leverage when the venue sends none. */
+export function roePct(p: Position, pnl: number): number | null {
+  const margin = num(p.allocated_margin);
+  if (margin > 0) return (pnl / margin) * 100;
+  const notional = Math.abs(num(p.size)) * num(p.entry_price);
+  const lev = p.leverage || 0;
+  if (notional > 0 && lev > 0) return (pnl / (notional / lev)) * 100;
+  return null;
+}
+
+/** Green for a gain, red for a loss, muted for flat. */
+export function pnlClass(value: number) {
+  if (value > 0) return "text-bid";
+  if (value < 0) return "text-ask";
+  return "text-muted-foreground";
+}

@@ -1,53 +1,34 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { OverflowMenu } from "@/components/desk/OverflowMenu";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
-import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
-import { PositionPlanButton } from "@/components/widgets/planner/PositionPlanButton";
-import { livePlannerFor } from "@/lib/plannerPlan";
-import { liveTrailsFor } from "@/lib/trail";
 import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
-import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
+import { OrdersTab } from "@/components/widgets/account/OrdersTab";
+import { PositionsTable } from "@/components/widgets/account/PositionsTable";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableName,
-  TableRow,
-  type HideBelow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToolbarFold } from "@/hooks/useToolbarFold";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { trimQty } from "@/components/widgets/orderTicket/math";
-import { api, isLongPosition, type Market, type OpenOrder, type Position } from "@/lib/api";
-import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
-import { setAlgo, useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
+import { api, isLongPosition, type Market, type Position } from "@/lib/api";
+import { algoBlotter } from "@/lib/algos";
+import { useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
-  nextPosSort,
   positionNotional,
+  pnlClass,
   positionsForClose,
-  protectOrderLabel,
+  roePct,
   sortPositionRows,
-  stopTakeKind,
   type CloseFilter,
   type PosSort,
-  type PosSortKey,
-  realizedFor,
-  realizedTitle,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatSigned, formatSize, formatUsd } from "@/lib/utils";
-import { marketPrice } from "@/lib/marketFormat";
+import { cn, formatPctAbs, formatSigned } from "@/lib/utils";
 
 const TradeHistoryTab = lazy(() =>
   import("@/components/widgets/account/TradeHistoryTab").then((m) => ({
@@ -89,28 +70,6 @@ function n(value: string | undefined) {
   return Number.isFinite(x) ? x : 0;
 }
 
-function orderQtyEditable(order: OpenOrder): boolean {
-  if (isAlgoClientOrder(order.client_order_index)) return false;
-  if (stopTakeKind(order.order_type)) return false;
-  return parseFloat(order.remaining) > 0;
-}
-
-function roePct(p: Position, pnl: number): number | null {
-  const margin = n(p.allocated_margin);
-  if (margin > 0) return (pnl / margin) * 100;
-  const notional = Math.abs(n(p.size)) * n(p.entry_price);
-  const lev = p.leverage || 0;
-  if (notional > 0 && lev > 0) return (pnl / (notional / lev)) * 100;
-  return null;
-}
-
-function liqCushion(p: Position, mark: number): number | null {
-  const liq = n(p.liquidation_price);
-  const size = n(p.size);
-  if (liq <= 0 || mark <= 0 || size === 0) return null;
-  return size > 0 ? ((mark - liq) / mark) * 100 : ((liq - mark) / mark) * 100;
-}
-
 function liveMark(
   p: Position,
   selected: Market | null,
@@ -145,46 +104,6 @@ function placeCloseOrder(p: Position, markets: Market[], selected: Market | null
     slippage: 0.01,
     reduce_only: true,
   });
-}
-
-function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
-
-function SortHead({
-  label,
-  column,
-  sort,
-  onSort,
-  title,
-  hideBelow,
-}: {
-  label: string;
-  column: PosSortKey;
-  sort: PosSort;
-  onSort: (key: PosSortKey) => void;
-  title?: string;
-  hideBelow?: HideBelow;
-}) {
-  const active = sort.key === column;
-  return (
-    <TableHead hideBelow={hideBelow} className="text-right">
-      <button
-        type="button"
-        title={title ?? `Sort by ${label}`}
-        onClick={() => onSort(column)}
-        className={cn(
-          "ml-auto inline-flex items-center gap-0.5 hover:text-text",
-          active && "text-text"
-        )}
-      >
-        {label}
-        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-      </button>
-    </TableHead>
-  );
 }
 
 function CloseFilterButton({
@@ -239,15 +158,8 @@ export function PositionsPanel({
   const feed = useTradingReady({ connected });
   const [tab, setTab] = useState("positions");
   const [historyKind, setHistoryKind] = useState<"trades" | "funding">("trades");
-  const [orderScope, setOrderScope] = useState<"all" | "pair">("all");
   const [busy, setBusy] = useState<string | null>(null);
-  const [editingOrder, setEditingOrder] = useState<string | number | null>(null);
   const [posSort, setPosSort] = useState<PosSort>({ key: "notional", dir: "desc" });
-
-  const marketByIndex = useMemo(
-    () => new Map(markets.map((m) => [m.market_index, m])),
-    [markets]
-  );
 
   const cancelOrder = async (marketIndex: number, orderIndex: string | number) => {
     if (!tradingEnabled) {
@@ -259,77 +171,6 @@ export function PositionsPanel({
       notifyOk("Order cancelled");
     } catch (e) {
       notifyErr(e instanceof Error ? e.message : "Cancel failed");
-    }
-  };
-
-  const amendRemaining = async (order: OpenOrder, size: string) => {
-    if (!tradingEnabled) {
-      notifyErr("Trading not configured");
-      return;
-    }
-    const key = `amend-${order.order_index}`;
-    if (busy != null) return;
-    setBusy(key);
-    try {
-      await api.amendOrder(order.market_index, order.order_index, order.price, size);
-      notifyOk("Order amended");
-      setEditingOrder(null);
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Amend failed");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const cancelPair = async () => {
-    if (!market) return;
-    try {
-      await api.cancelAll(market.market_index);
-      notifyOk(`Cancelled ${market.symbol} orders`);
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Cancel pair failed");
-    }
-  };
-
-  const cancelAll = async () => {
-    try {
-      await api.cancelAll(null);
-      notifyOk("Cancelled all orders");
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Cancel all failed");
-    }
-  };
-
-  const cancelTickets = async (side: "buy" | "sell") => {
-    if (!tradingEnabled) {
-      notifyErr("Trading not configured");
-      return;
-    }
-    if (!feed.ready) {
-      notifyErr(feed.reason ?? "Feed not ready");
-      return;
-    }
-    const marketIndex = orderScope === "pair" ? market?.market_index : null;
-    if (orderScope === "pair" && marketIndex == null) return;
-    const noun = side === "buy" ? "bids" : "asks";
-    const key = `cancel-${side}`;
-    setBusy(key);
-    try {
-      const out = await api.cancelTickets(side, marketIndex);
-      const n = out.cancelled;
-      if (out.error) {
-        notifyErr(n > 0 ? `Cancelled ${n} ${noun}; ${out.error}` : out.error);
-        return;
-      }
-      if (n === 0) {
-        notifyErr(side === "buy" ? "No buy Tickets" : "No sell Tickets");
-        return;
-      }
-      notifyOk(`Cancelled ${n} ${noun}`);
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Cancel failed");
-    } finally {
-      setBusy(null);
     }
   };
 
@@ -366,25 +207,6 @@ export function PositionsPanel({
   );
 
   const allOrders = useMemo(() => account?.open_orders ?? [], [account]);
-  const userOrders = useMemo(
-    () => allOrders.filter((o) => !isAlgoClientOrder(o.client_order_index)),
-    [allOrders]
-  );
-  const pairOrders = useMemo(
-    () => (market ? allOrders.filter((o) => o.market_index === market.market_index) : allOrders),
-    [allOrders, market]
-  );
-  const pairUserOrders = useMemo(
-    () => (market ? userOrders.filter((o) => o.market_index === market.market_index) : userOrders),
-    [userOrders, market]
-  );
-
-  const listedAll = userOrders;
-  const listedPair = pairUserOrders;
-  const scopedTickets = orderScope === "pair" ? listedPair : listedAll;
-  const bidTickets = scopedTickets.filter((o) => o.side === "buy").length;
-  const askTickets = scopedTickets.filter((o) => o.side === "sell").length;
-  const visibleOrders = orderScope === "pair" ? pairOrders : allOrders;
   const openOrderCount = allOrders.length;
 
   const bid = parseFloat(bbo.bid ?? "");
@@ -572,200 +394,23 @@ export function PositionsPanel({
                 </EmptyHeader>
               </Empty>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="pl-2.5">Market</TableHead>
-                    <SortHead
-                      label="Size"
-                      column="size"
-                      sort={posSort}
-                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
-                    />
-                    <SortHead
-                      label="Notional"
-                      column="notional"
-                      hideBelow="xl"
-                      sort={posSort}
-                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
-                    />
-                    <TableHead hideBelow="lg" className="text-right">Entry</TableHead>
-                    <TableHead hideBelow="2xl" className="text-right">Liq</TableHead>
-                    <SortHead
-                      label="uPnL"
-                      column="pnl"
-                      sort={posSort}
-                      onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
-                    />
-                    <TableHead
-                      hideBelow="lg"
-                      className="text-right"
-                      title="What this Position has closed since it opened, less fees. From the Journal, a few seconds behind a fill."
-                    >
-                      Realized
-                    </TableHead>
-                    <TableHead hideBelow="2xl" className="text-right">Funding</TableHead>
-                    <TableHead hideBelow="sm" className="text-right">TP/SL</TableHead>
-                    <TableHead className="text-right" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedRows.map(({ p, mark, pnl, notional, roe }) => {
-                    const long = isLongPosition(p);
-                    const fund = n(p.funding_paid);
-                    const realized = realizedFor(p, journalOpen);
-                    const realizedNum = realized ? n(realized.realized) : 0;
-                    const cushion = liqCushion(p, mark);
-                    const liq = n(p.liquidation_price);
-                    const m = markets.find((x) => x.market_index === p.market_index) ?? market;
-                    const planner = livePlannerFor(algoBook, p.market_index);
-                    const trails = liveTrailsFor(algoBook, p.market_index);
-                    return (
-                      <TableRow
-                        key={p.market_index}
-                        onClick={
-                          onSymbolChange
-                            ? () => {
-                                if (market?.market_index !== p.market_index) onSymbolChange(p.symbol);
-                              }
-                            : undefined
-                        }
-                        title={onSymbolChange ? `Switch to ${p.symbol}` : undefined}
-                        accent={long ? "bid" : "ask"}
-                        className={cn(
-                          market &&
-                            p.market_index === market.market_index &&
-                            "bg-elevated/35",
-                          onSymbolChange && "cursor-pointer"
-                        )}
-                      >
-                        <TableCell className="pl-2.5">
-                          <TableName
-                            className={cn(
-                              long ? "text-bid" : "text-ask",
-                              market?.market_index === p.market_index && "underline"
-                            )}
-                          >
-                            {p.symbol}
-                          </TableName>
-                          <span className="ml-1.5 text-muted-foreground @max-lg/table:hidden">
-                            {p.leverage}x {p.margin_mode}
-                          </span>
-                        </TableCell>
-                        <TableCell className={cn("text-right", long ? "text-bid" : "text-ask")}>
-                          {formatSize(Math.abs(n(p.size)))}
-                        </TableCell>
-                        <TableCell hideBelow="xl" className="text-right">
-                          {notional > 0 ? formatUsd(notional) : "—"}
-                        </TableCell>
-                        <TableCell hideBelow="lg" className="text-right">
-                          {marketPrice(p.entry_price, p.symbol)}
-                        </TableCell>
-                        <TableCell hideBelow="2xl" className="text-right">
-                          {liq > 0 ? marketPrice(p.liquidation_price, p.symbol) : "—"}
-                          {cushion != null && (
-                            <span
-                              className={cn(
-                                "ml-1 text-xs",
-                                cushion < 8 ? "text-ask" : "text-muted-foreground"
-                              )}
-                            >
-                              ({formatPctAbs(cushion)})
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className={cn("text-right font-medium", pnlClass(pnl))}>
-                          {formatSigned(pnl)}
-                          {roe != null && (
-                            <span className="ml-1 text-xs font-normal">({formatPctAbs(roe)})</span>
-                          )}
-                        </TableCell>
-                        <TableCell
-                          hideBelow="lg"
-                          className={cn("text-right", realized ? pnlClass(realizedNum) : "text-muted-foreground")}
-                          title={realized ? realizedTitle(realized, (x) => formatSigned(x)) : "Not in the Journal yet"}
-                        >
-                          {realized ? (
-                            <>
-                              {realized.partial ? <span className="text-muted-foreground">~</span> : null}
-                              {formatSigned(realizedNum)}
-                            </>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell hideBelow="2xl" className={cn("text-right", pnlClass(fund))}>
-                          {formatSigned(p.funding_paid)}
-                        </TableCell>
-                        <TableCell
-                          hideBelow="sm"
-                          className="text-right"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div className="inline-flex items-center justify-end gap-1.5">
-                            <PositionProtectPopover
-                              lockedBy={planner ? "Planner" : null}
-                              position={p}
-                              mark={mark}
-                              sizeDecimals={m?.size_decimals ?? 4}
-                              priceDecimals={m?.price_decimals ?? 4}
-                              tradingEnabled={tradingEnabled && feed.ready}
-                              busy={busy != null}
-                              orders={allOrders}
-                              onPlace={async (body) => {
-                                const ok = await run(
-                                  `protect-${p.market_index}`,
-                                  () => api.placeStopTake(body),
-                                  `${p.symbol} stop / take profit placed`
-                                );
-                                if (!ok) throw new Error("not placed");
-                              }}
-                              onCancel={async (orderIndex) => {
-                                await cancelOrder(p.market_index, orderIndex);
-                              }}
-                              trails={trails}
-                              onStartTrail={async (body) => {
-                                const ok = await run(
-                                  `trail-${p.market_index}`,
-                                  async () => setAlgo(await api.algoStart("trail", body)),
-                                  `${p.symbol} ${body.kind === "tp" ? "Trail Take Profit" : "Trail Stop"} started`
-                                );
-                                if (!ok) throw new Error("not started");
-                              }}
-                            />
-                            <PositionPlanButton
-                              position={p}
-                              market={m ?? null}
-                              running={planner}
-                              disabled={!tradingEnabled || !feed.ready || busy != null}
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell
-                          className="pl-2 text-right"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="danger"
-                                size="icon"
-                                disabled={!tradingEnabled || busy != null}
-                                onClick={() => closePosition(p)}
-                                className="size-6"
-                              >
-                                <X strokeWidth={2.25} />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Close {p.symbol}</TooltipContent>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+              <PositionsTable
+                rows={sortedRows}
+                posSort={posSort}
+                setPosSort={setPosSort}
+                market={market}
+                markets={markets}
+                algoBook={algoBook}
+                journalOpen={journalOpen}
+                orders={allOrders}
+                tradingEnabled={tradingEnabled}
+                feedReady={feed.ready}
+                busy={busy}
+                run={run}
+                onCancel={cancelOrder}
+                onClosePosition={closePosition}
+                onSymbolChange={onSymbolChange}
+              />
             )}
           </ScrollArea>
         </TabsContent>
@@ -780,182 +425,17 @@ export function PositionsPanel({
         </TabsContent>
 
         <TabsContent value="orders" className="min-h-0 flex-1 px-2">
-          <ScrollArea className="h-full">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <ToggleGroup
-                type="single"
-                variant="seg"
-                size="sm"
-                spacing={0}
-                value={orderScope}
-                onValueChange={(v) => {
-                  if (v === "all" || v === "pair") setOrderScope(v);
-                }}
-              >
-                <ToggleGroupItem value="all">All</ToggleGroupItem>
-                <ToggleGroupItem value="pair" disabled={!market}>
-                  {market?.symbol ?? "Pair"}
-                </ToggleGroupItem>
-              </ToggleGroup>
-              <div className="ml-auto flex gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-bid hover:text-bid"
-                  title="Cancel buy Tickets"
-                  disabled={!tradingEnabled || busy != null || bidTickets === 0}
-                  onClick={() => void cancelTickets("buy")}
-                >
-                  Bids {bidTickets}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-ask hover:text-ask"
-                  title="Cancel sell Tickets"
-                  disabled={!tradingEnabled || busy != null || askTickets === 0}
-                  onClick={() => void cancelTickets("sell")}
-                >
-                  Asks {askTickets}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!tradingEnabled || busy != null || !market || listedPair.length === 0}
-                  onClick={cancelPair}
-                >
-                  Cancel {market?.symbol ?? "pair"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!tradingEnabled || busy != null || listedAll.length === 0}
-                  onClick={cancelAll}
-                >
-                  Cancel all
-                </Button>
-              </div>
-            </div>
-            {!visibleOrders.length ? (
-              <Empty className="rounded-none border-0 p-4">
-                <EmptyDescription>
-                  {orderScope === "pair" && market
-                    ? `No open ${market.symbol} orders`
-                    : "No open orders"}
-                </EmptyDescription>
-              </Empty>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Market</TableHead>
-                    <TableHead hideBelow="sm">Side</TableHead>
-                    <TableHead className="text-right">Price</TableHead>
-                    <TableHead className="text-right">Remaining</TableHead>
-                    <TableHead className="text-right" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleOrders.map((o) => {
-                    const algoKind = algoOrderKind(o.client_order_index, {
-                      reduceOnly: o.reduce_only,
-                    });
-                    const sltp = !algoKind ? stopTakeKind(o.order_type) : null;
-                    return (
-                    <TableRow key={o.order_index} accent={o.side === "buy" ? "bid" : "ask"}>
-                      <TableCell className="pl-2.5">
-                        <span className="inline-flex items-baseline gap-1">
-                          {onSymbolChange ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => onSymbolChange(o.symbol)}
-                                  className={cn(
-                                    "h-auto px-0 hover:underline",
-                                    market?.market_index === o.market_index && "underline"
-                                  )}
-                                >
-                                  <TableName>{o.symbol}</TableName>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Switch to {o.symbol}</TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <TableName>{o.symbol}</TableName>
-                          )}
-                          {algoKind ? (
-                            <span className="text-xs text-muted-foreground">{algoKind}</span>
-                          ) : sltp ? (
-                            <span className="text-xs text-muted-foreground">
-                              {protectOrderLabel(o.order_type, o.trigger_price)}
-                            </span>
-                          ) : null}
-                        </span>
-                      </TableCell>
-                      <TableCell hideBelow="sm" className={o.side === "buy" ? "text-bid" : "text-ask"}>
-                        {o.side}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {marketPrice(
-                          sltp && parseFloat(o.trigger_price ?? "") > 0
-                            ? o.trigger_price
-                            : o.price,
-                          o.symbol
-                        )}
-                      </TableCell>
-                      <TableCell className="relative text-right">
-                        {orderQtyEditable(o) && tradingEnabled ? (
-                          <button
-                            type="button"
-                            className={cn(
-                              "cursor-text font-mono tabular-nums underline decoration-dotted underline-offset-2 hover:decoration-solid",
-                              editingOrder === o.order_index && "invisible"
-                            )}
-                            disabled={busy != null}
-                            title="Edit remaining size"
-                            onClick={() => setEditingOrder(o.order_index)}
-                          >
-                            {formatSize(o.remaining)}
-                          </button>
-                        ) : (
-                          <span>{formatSize(o.remaining)}</span>
-                        )}
-                        {orderQtyEditable(o) && tradingEnabled && editingOrder === o.order_index ? (
-                          <OrderRemainingEditor
-                            initial={formatSize(o.remaining)}
-                            decimals={marketByIndex.get(o.market_index)?.size_decimals ?? 4}
-                            disabled={busy != null}
-                            className="absolute top-1/2 right-2 z-10 h-6 w-24 -translate-y-1/2 rounded-md border border-ring bg-popover px-1.5 text-foreground shadow-md focus-visible:border-ring focus-visible:ring-1"
-                            onCancel={() => setEditingOrder(null)}
-                            onCommit={(size) => void amendRemaining(o, size)}
-                          />
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {algoKind ? (
-                          <span className="text-xs text-muted-foreground">algo</span>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6"
-                            disabled={!tradingEnabled}
-                            onClick={() => cancelOrder(o.market_index, o.order_index)}
-                          >
-                            Cancel
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </ScrollArea>
+          <OrdersTab
+            market={market}
+            markets={markets}
+            orders={allOrders}
+            tradingEnabled={tradingEnabled}
+            feed={feed}
+            busy={busy}
+            setBusy={setBusy}
+            onCancel={cancelOrder}
+            onSymbolChange={onSymbolChange}
+          />
         </TabsContent>
 
         <TabsContent value="algos" className="mt-0 flex min-h-0 flex-1 flex-col">
