@@ -307,7 +307,7 @@ class RestartTests(IsolatedAsyncioTestCase):
             broadcast=gateway.broadcast,
         )
         again: object | None = None
-        with patch("mayedge.algos.twap.job.now_ms", clock):
+        with patch("mayedge.algos.common.now_ms", clock):
             await book.start(market_index=1, params=params)
             job = next(iter(book._jobs.values()))
             await _quiet(job)

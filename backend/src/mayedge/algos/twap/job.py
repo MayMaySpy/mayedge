@@ -4,13 +4,12 @@ import asyncio
 import contextlib
 import logging
 import random
-import time
 from decimal import Decimal
 from typing import Any
 
+from mayedge.algos import common
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import _dec, _fmt, _is_order_not_found, _is_rate_limit
 from mayedge.algos.ledger import Ledger
 from mayedge.algos.twap.plan import (
     ALGO_ID,
@@ -25,14 +24,11 @@ from mayedge.algos.twap.plan import (
 )
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
-from mayedge.numbers import check_notional, fmt_decimal
+from mayedge.lighter.errors import is_blocked, is_order_not_found
+from mayedge.numbers import check_notional, fmt_decimal, to_decimal
 from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
-
-
-def now_ms() -> int:
-    return int(time.time() * 1000)
 
 
 class AdvancedTwapRunner:
@@ -83,17 +79,17 @@ class AdvancedTwapRunner:
             "symbol": self.symbol,
             "reduce_only": self.reduce_only,
             "side": p.side if p else None,
-            "qty": _fmt(p.qty) if p else None,
-            "display_qty": _fmt(display) if display is not None else None,
+            "qty": fmt_decimal(p.qty) if p else None,
+            "display_qty": fmt_decimal(display) if display is not None else None,
             "offset_bps": None,
             "price_floor": None,
-            "price_ceiling": _fmt(p.max_price) if p and p.max_price is not None else None,
-            "remaining": _fmt(self.remaining),
-            "filled": _fmt(self.filled),
+            "price_ceiling": fmt_decimal(p.max_price) if p and p.max_price is not None else None,
+            "remaining": fmt_decimal(self.remaining),
+            "filled": fmt_decimal(self.filled),
             "quote_action": self.quote_action,
             "reason": self.reason,
-            "rest_price": _fmt(self.rest_price),
-            "rest_qty": _fmt(self.rest_qty),
+            "rest_price": fmt_decimal(self.rest_price),
+            "rest_qty": fmt_decimal(self.rest_qty),
             "working_coi": live.client_order_index if live else None,
             "working_order_index": str(live.order_index) if live and live.order_index else None,
             "error": self.error,
@@ -125,7 +121,7 @@ class AdvancedTwapRunner:
             return 0
         total = order_count(p.duration_seconds, p.frequency_seconds)
         left = max(1, total - p.slices_done)
-        if now_ms() >= p.deadline_at:
+        if common.now_ms() >= p.deadline_at:
             return 1
         return left
 
@@ -135,8 +131,8 @@ class AdvancedTwapRunner:
         mi = self.market_index if market_index is None else market_index
         meta = self.execution().get_market_by_index(mi)
         bid_s, ask_s = self.execution().best_bid_ask(mi)
-        bid = _dec(bid_s) if bid_s else None
-        ask = _dec(ask_s) if ask_s else None
+        bid = to_decimal(bid_s) if bid_s else None
+        ask = to_decimal(ask_s) if ask_s else None
         mid = (bid + ask) / 2 if bid and ask and bid > 0 and ask > 0 else None
         mark = None
         index = None
@@ -169,12 +165,12 @@ class AdvancedTwapRunner:
     def _drain_trades(self) -> None:
         trades = self._pending_trades
         self._pending_trades = []
-        now = now_ms()
+        now = common.now_ms()
         for t in trades:
             mi = int(t.get("market_index") or 0)
             if mi and mi != self.market_index:
                 continue
-            qty = _dec(t.get("size") or "0")
+            qty = to_decimal(t.get("size") or "0")
             if qty <= 0:
                 continue
             clip = None
@@ -195,7 +191,7 @@ class AdvancedTwapRunner:
                         break
             if clip is None:
                 continue
-            px = _dec(t.get("price") or "0")
+            px = to_decimal(t.get("price") or "0")
             tid = int(t.get("trade_id") or 0) or None
             self.ledger.apply_trade(
                 clip,
@@ -220,7 +216,7 @@ class AdvancedTwapRunner:
                 self._pending_trades.extend(trades)
                 self._drain_trades()
         except Exception as e:
-            if _is_rate_limit(e):
+            if is_blocked(e):
                 logger.warning("twap REST trades blocked by venue for %s", self.algo_id)
                 return
             logger.exception("twap REST trades failed for %s", self.algo_id)
@@ -233,9 +229,9 @@ class AdvancedTwapRunner:
         try:
             await self.execution().cancel_order(self.market_index, int(idx))
         except Exception as e:
-            if not _is_order_not_found(e):
+            if not is_order_not_found(e):
                 logger.warning("twap cancel %s failed: %s", self.algo_id, e)
-        now = now_ms()
+        now = common.now_ms()
         if assume_fill:
             clip.seen_on_book = True
             self.ledger.close_missing(clip, canceling=False, now=now)
@@ -273,7 +269,7 @@ class AdvancedTwapRunner:
         if ref is None or ref <= 0:
             raise ValueError("Cannot price TWAP — no reference price")
         check_notional(params.qty, ref, settings.max_order_notional)
-        now = now_ms()
+        now = common.now_ms()
         params.started_at = now
         params.deadline_at = now + params.duration_seconds * 1000
         params.slices_done = 0
@@ -299,7 +295,7 @@ class AdvancedTwapRunner:
         side = row.get("side")
         if side not in ("buy", "sell"):
             raise ValueError(f"unrecoverable twap row {row.get('algo_id')}: bad side")
-        qty = _dec(row.get("qty") or "0")
+        qty = to_decimal(row.get("qty") or "0")
         raw = obj(row.get("params_json"))
         params = AdvancedTwapParams.from_json(raw, side=side, qty=qty)
         if not params.duration_seconds:
@@ -313,12 +309,14 @@ class AdvancedTwapRunner:
         self.market_index = int(row.get("market_index") or 0)
         self.symbol = str(row.get("symbol") or "")
         self.reduce_only = bool(row.get("reduce_only"))
-        self.remaining = _dec(row.get("remaining") or "0")
-        self.filled = _dec(row.get("filled") or "0")
+        self.remaining = to_decimal(row.get("remaining") or "0")
+        self.filled = to_decimal(row.get("filled") or "0")
         self.quote_action = str(row.get("quote_action") or "pause")
         self.reason = row.get("reason")
-        self.rest_price = _dec(row["rest_price"]) if row.get("rest_price") is not None else None
-        self.rest_qty = _dec(row["rest_qty"]) if row.get("rest_qty") is not None else None
+        self.rest_price = (
+            to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None
+        )
+        self.rest_qty = to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None
         self.error = row.get("error")
         self.algo_id = str(row.get("algo_id") or "")
         self.created_at = int(row.get("created_at") or 0)
@@ -347,7 +345,7 @@ class AdvancedTwapRunner:
             if meta:
                 self.symbol = meta.symbol
         p = self.params
-        if p and now_ms() >= p.deadline_at and self.remaining <= 0:
+        if p and common.now_ms() >= p.deadline_at and self.remaining <= 0:
             self.status = ChaseStatus.DONE
             self._finish()
             return
@@ -460,7 +458,7 @@ class AdvancedTwapRunner:
             self._finish()
             return
         p = self.params
-        now = now_ms()
+        now = common.now_ms()
         bid, ask, mid, mark, index = self._quotes()
         if now >= p.deadline_at:
             skip = skip_reason(
@@ -531,7 +529,7 @@ class AdvancedTwapRunner:
         self._cois.add(coi)
         size = fmt_decimal(qty) or "0"
         kind = quote.get("kind")
-        now = now_ms()
+        now = common.now_ms()
         px = Decimal(str(quote["price"])) if quote.get("price") else (mark or Decimal("0"))
         self.rest_qty = qty
         self.rest_price = px if px > 0 else None
@@ -555,7 +553,7 @@ class AdvancedTwapRunner:
                 side=p.side,
             )
             clip.seen_on_book = True
-            self.ledger.close_missing(clip, canceling=False, now=now_ms())
+            self.ledger.close_missing(clip, canceling=False, now=common.now_ms())
             self._reconcile()
             self.rest_price = None
             self.rest_qty = None
@@ -602,7 +600,7 @@ class AdvancedTwapRunner:
             await self._credit_trades()
             if clip.status == "live":
                 clip.seen_on_book = True
-                self.ledger.close_missing(clip, canceling=True, now=now_ms())
+                self.ledger.close_missing(clip, canceling=True, now=common.now_ms())
                 self._reconcile()
             self.rest_price = None
             self.rest_qty = None
