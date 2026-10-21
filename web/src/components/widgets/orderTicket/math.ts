@@ -20,11 +20,17 @@ export type Tif = (typeof TIF_CHIPS)[number]["id"];
 export interface CrossHint {
   side: "buy" | "sell";
   text: string;
+  /** Post only: the venue refuses it, so that side's button is blocked rather than marked. */
+  refused: boolean;
 }
+
+/** The blocked label on the side a Post only limit would cross; the button's title says the rest. */
+export const POST_ONLY_TAKES = "Post only would take";
 
 /**
  * A limit at or through the touch takes now: a Buy at or above the ask, a Sell at or below the bid.
- * Resting fills it as a taker. Post only is refused by the venue. IOC is meant to take, so it says nothing.
+ * Only that side's button says so. Resting fills it as a taker. Post only is refused by the venue.
+ * IOC is meant to take, so it says nothing.
  */
 export function limitCrossHint(opts: {
   price: number;
@@ -42,8 +48,13 @@ export function limitCrossHint(opts: {
         ? { side: "sell" as const, label: "Sell", touch: `bid ${formatPrice(bid, priceDecimals)}` }
         : null;
   if (!hit) return null;
-  const tail = tif === "post_only" ? "Post only refuses it." : "It fills now, not resting.";
-  return { side: hit.side, text: `A ${hit.label} at this price crosses the ${hit.touch}. ${tail}` };
+  const refused = tif === "post_only";
+  const tail = refused ? "Post only refuses it." : "It fills now, not resting.";
+  return {
+    side: hit.side,
+    text: `A ${hit.label} at this price crosses the ${hit.touch}. ${tail}`,
+    refused,
+  };
 }
 
 export const ORDER_KINDS = [

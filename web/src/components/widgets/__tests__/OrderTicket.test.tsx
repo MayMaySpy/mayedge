@@ -3,6 +3,7 @@ import "@/test/dom";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { OrderTicket } from "@/components/widgets/orderTicket/OrderTicket";
 import { api, type Market, type Position } from "@/lib/api";
 import {
@@ -69,7 +70,9 @@ function liveDesk(positions: Position[] = []) {
 function setup(props: Partial<Parameters<typeof OrderTicket>[0]> = {}) {
   const onOrderPlaced = vi.fn();
   render(
-    <OrderTicket market={ETH} tradingEnabled connected onOrderPlaced={onOrderPlaced} {...props} />
+    <TooltipProvider>
+      <OrderTicket market={ETH} tradingEnabled connected onOrderPlaced={onOrderPlaced} {...props} />
+    </TooltipProvider>
   );
   return { onOrderPlaced, user: userEvent.setup() };
 }
@@ -143,13 +146,19 @@ describe("OrderTicket", () => {
     );
   });
 
-  it("hints that a limit at the ask would fill now, and still sends it", async () => {
+  it("marks only the Buy that would fill now, says why on hover, and still sends it", async () => {
     const { user } = setup();
     await user.click(screen.getByRole("radio", { name: "Limit" }));
     await user.type(screen.getByLabelText("Size"), "1");
     await user.type(screen.getByLabelText("Price"), "100.2");
 
-    expect(screen.getByRole("status").textContent).toBe(
+    expect(button("Buy").textContent).toBe("Buy· takes");
+    expect(button("Sell").textContent).toBe("Sell");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    await user.hover(button("Sell"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    await user.hover(button("Buy"));
+    expect((await screen.findByRole("tooltip")).textContent).toBe(
       "A Buy at this price crosses the ask 100.10. It fills now, not resting."
     );
     await user.click(button("Buy"));
@@ -158,23 +167,32 @@ describe("OrderTicket", () => {
     );
   });
 
-  it("hints that Post only would refuse a crossing limit, and drops the hint for IOC", async () => {
+  it("blocks the Sell that Post only would refuse, leaves the Buy, and drops it all for IOC", async () => {
     const { user } = setup();
     await user.click(screen.getByRole("radio", { name: "Limit" }));
+    await user.type(screen.getByLabelText("Size"), "1");
     await user.type(screen.getByLabelText("Price"), "99");
     await user.click(screen.getByRole("radio", { name: "Post" }));
-    expect(screen.getByRole("status").textContent).toBe(
-      "A Sell at this price crosses the bid 100.00. Post only refuses it."
-    );
+
+    const sell = button("Post only would take");
+    expect(sell.disabled).toBe(true);
+    expect(sell.title).toBe("A Sell at this price crosses the bid 100.00. Post only refuses it.");
+    expect(button("Buy").disabled).toBe(false);
+    await user.click(sell);
+    expect(api.placeLimitOrder).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole("radio", { name: "IOC" }));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(button("Sell").disabled).toBe(false);
+    expect(button("Sell").textContent).toBe("Sell");
   });
 
-  it("gives no hint for a limit that rests inside the spread", async () => {
+  it("marks neither side for a limit that rests inside the spread", async () => {
     const { user } = setup();
     await user.click(screen.getByRole("radio", { name: "Limit" }));
+    await user.type(screen.getByLabelText("Size"), "1");
     await user.type(screen.getByLabelText("Price"), "100.05");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(button("Buy").textContent).toBe("Buy");
+    expect(button("Sell").textContent).toBe("Sell");
   });
 
   it("will not send without a size", async () => {

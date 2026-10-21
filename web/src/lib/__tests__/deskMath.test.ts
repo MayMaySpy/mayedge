@@ -417,6 +417,7 @@ describe("limitCrossHint", () => {
     expect(limitCrossHint({ ...book, price: 100.1, tif: "gtt" })).toEqual({
       side: "buy",
       text: "A Buy at this price crosses the ask 100.10. It fills now, not resting.",
+      refused: false,
     });
   });
 
@@ -424,6 +425,7 @@ describe("limitCrossHint", () => {
     expect(limitCrossHint({ ...book, price: 99.5, tif: "post_only" })).toEqual({
       side: "sell",
       text: "A Sell at this price crosses the bid 100.00. Post only refuses it.",
+      refused: true,
     });
   });
 

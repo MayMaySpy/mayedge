@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactElement } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { FieldGroup } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
@@ -64,6 +65,7 @@ import {
   convertSizeOnUnitToggle,
   leveragePresets,
   limitCrossHint,
+  POST_ONLY_TAKES,
   loadSizeUnit,
   loadSlipPct,
   makerMinSize,
@@ -367,13 +369,23 @@ export function OrderTicket({
     minSz,
     algoBlocked,
   };
+  // A limit crosses on one side only: Post only blocks that side, Resting marks it as taking.
+  const crossOn = (side: "buy" | "sell") => (crossHint?.side === side ? crossHint : null);
+  const crossBlocked = (side: "buy" | "sell") => (crossOn(side)?.refused ? POST_ONLY_TAKES : null);
+  const takesHint = (side: "buy" | "sell") => {
+    const hit = crossOn(side);
+    return hit && !hit.refused ? hit.text : null;
+  };
+  const sideTitle = (side: "buy" | "sell", blocked: string | null) =>
+    blocked === POST_ONLY_TAKES ? crossOn(side)?.text : (blocked ?? undefined);
   const sharedBlocked = ticketBlockReason(blockOpts);
-  const buyBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxBuy });
-  const sellBlocked = ticketBlockReason({
-    ...blockOpts,
-    maxSize: maxSell,
-    sellBid: bid > 0 ? bid : null,
-  });
+  const buyBlocked = ticketBlockReason({ ...blockOpts, maxSize: maxBuy }) ?? crossBlocked("buy");
+  const sellBlocked =
+    ticketBlockReason({
+      ...blockOpts,
+      maxSize: maxSell,
+      sellBid: bid > 0 ? bid : null,
+    }) ?? crossBlocked("sell");
   const actionBlocked = singleAction
     ? ticketBlockReason({ ...blockOpts, maxSize })
     : null;
@@ -588,7 +600,6 @@ export function OrderTicket({
                   mid={mid}
                   priceDecimals={priceDecimals}
                   tif={tif}
-                  crossHint={crossHint?.text ?? null}
                   onPriceChange={setPrice}
                   onTifChange={setTif}
                 />
@@ -631,34 +642,48 @@ export function OrderTicket({
             </Button>
           ) : (
             <div className="grid grid-cols-2 gap-1">
-              <Button
-                type="button"
-                variant="buy"
-                className="h-8 truncate"
-                disabled={loading || !!buyBlocked}
-                title={buyBlocked ?? undefined}
-                onClick={() => void send("buy")}
-              >
-                {busy === "buy"
-                  ? "Sending…"
-                  : !sharedBlocked && buyBlocked
-                    ? buyBlocked
-                    : orderCtaLabel("buy")}
-              </Button>
-              <Button
-                type="button"
-                variant="sell"
-                className="h-8 truncate"
-                disabled={loading || !!sellBlocked}
-                title={sellBlocked ?? undefined}
-                onClick={() => void send("sell")}
-              >
-                {busy === "sell"
-                  ? "Sending…"
-                  : !sharedBlocked && sellBlocked
-                    ? sellBlocked
-                    : orderCtaLabel("sell")}
-              </Button>
+              <TakesTip hint={buyBlocked ? null : takesHint("buy")}>
+                <Button
+                  type="button"
+                  variant="buy"
+                  className="h-8 truncate"
+                  disabled={loading || !!buyBlocked}
+                  title={sideTitle("buy", buyBlocked)}
+                  onClick={() => void send("buy")}
+                >
+                  {busy === "buy" ? (
+                    "Sending…"
+                  ) : !sharedBlocked && buyBlocked ? (
+                    buyBlocked
+                  ) : (
+                    <>
+                      {orderCtaLabel("buy")}
+                      {!buyBlocked && takesHint("buy") ? <TakesMark /> : null}
+                    </>
+                  )}
+                </Button>
+              </TakesTip>
+              <TakesTip hint={sellBlocked ? null : takesHint("sell")}>
+                <Button
+                  type="button"
+                  variant="sell"
+                  className="h-8 truncate"
+                  disabled={loading || !!sellBlocked}
+                  title={sideTitle("sell", sellBlocked)}
+                  onClick={() => void send("sell")}
+                >
+                  {busy === "sell" ? (
+                    "Sending…"
+                  ) : !sharedBlocked && sellBlocked ? (
+                    sellBlocked
+                  ) : (
+                    <>
+                      {orderCtaLabel("sell")}
+                      {!sellBlocked && takesHint("sell") ? <TakesMark /> : null}
+                    </>
+                  )}
+                </Button>
+              </TakesTip>
             </div>
           )}
         </div>
@@ -691,5 +716,25 @@ export function OrderTicket({
         </Suspense>
       ) : null}
     </div>
+  );
+}
+
+/** Marks the side that would take now; hidden from the name, the tooltip describes it. */
+function TakesMark() {
+  return (
+    <span aria-hidden className="ml-1 text-xs opacity-75">
+      · takes
+    </span>
+  );
+}
+
+/** The full cross hint, on hover or focus of the side that would take now. */
+function TakesTip({ hint, children }: { hint: string | null; children: ReactElement }) {
+  if (!hint) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
   );
 }

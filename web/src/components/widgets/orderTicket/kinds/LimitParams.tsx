@@ -11,8 +11,6 @@ interface LimitParamsProps {
   mid: number | null;
   priceDecimals: number;
   tif: string;
-  /** Set when a side at this price would take now (`limitCrossHint`). */
-  crossHint?: string | null;
   onPriceChange: (raw: string) => void;
   onTifChange: (tif: (typeof TIF_CHIPS)[number]["id"]) => void;
 }
@@ -24,7 +22,6 @@ export function LimitParams({
   mid,
   priceDecimals,
   tif,
-  crossHint,
   onPriceChange,
   onTifChange,
 }: LimitParamsProps) {
@@ -65,11 +62,6 @@ export function LimitParams({
           })),
         }}
       />
-      {crossHint ? (
-        <p role="status" className="-mt-1.5 text-sm text-warn">
-          {crossHint}
-        </p>
-      ) : null}
       <TicketChips
         ariaLabel="Time in force"
         value={tif}
