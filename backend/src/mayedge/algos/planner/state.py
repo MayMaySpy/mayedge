@@ -12,6 +12,7 @@ from mayedge.algos.ledger import Ledger
 from mayedge.algos.planner.plan import Plan, PlannerParams
 from mayedge.algos.trail.engine import Point
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_obj, obj
 
 if TYPE_CHECKING:
     from mayedge.algos.planner.job import PlannerRunner
@@ -77,9 +78,9 @@ class PlannerState:
         phase = raw.get("phase")
         self.phase = "managing" if phase == "managing" else "entering"
         plan = raw.get("plan")
-        self.plan = Plan.from_json(plan) if isinstance(plan, dict) else None
-        roles = raw.get("roles") or {}
-        self.roles = {int(k): str(v) for k, v in roles.items()} if isinstance(roles, dict) else {}
+        self.plan = Plan.from_json(plan) if is_obj(plan) else None
+        roles = obj(raw.get("roles"))
+        self.roles = {int(k): str(v) for k, v in roles.items()} if is_obj(roles) else {}
         self.entry_filled = Decimal(str(raw.get("entry_filled") or "0"))
         self.expected_size = Decimal(str(raw.get("expected_size") or "0"))
         trigger = raw.get("stop_trigger")
@@ -88,19 +89,19 @@ class PlannerState:
         self.steps_done = int(steps) if steps is not None else (1 if raw.get("breakeven_done") else 0)
         deadline = raw.get("entry_deadline_ms")
         self.entry_deadline_ms = int(deadline) if deadline else None
-        trails = raw.get("trails") or {}
+        trails = obj(raw.get("trails"))
         self.trails = {
             str(k): Point(
                 active=bool(v.get("active")),
                 best=_dec(v.get("best")),
                 trigger=_dec(v.get("trigger")),
             )
-            for k, v in (trails.items() if isinstance(trails, dict) else [])
-            if isinstance(v, dict)
+            for k, v in trails.items()
+            if is_obj(v)
         }
-        moves = raw.get("trail_moves") or {}
-        self.trail_moves = {str(k): int(v) for k, v in moves.items()} if isinstance(moves, dict) else {}
-        self.trail_fired = {str(x) for x in raw.get("trail_fired") or []}
+        moves = obj(raw.get("trail_moves"))
+        self.trail_moves = {str(k): int(v) for k, v in moves.items()} if is_obj(moves) else {}
+        self.trail_fired = {str(x) for x in raw.get("trail_fired") or ()}
         self.finish_entry = bool(raw.get("finish_entry"))
 
 

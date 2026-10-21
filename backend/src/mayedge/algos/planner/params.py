@@ -15,6 +15,7 @@ from mayedge.algos.planner.config import (
 )
 from mayedge.algos.trail import engine
 from mayedge.numbers import fmt_decimal, parse_decimal
+from mayedge.rows import is_list, is_obj
 
 Side = Literal["buy", "sell"]
 Mode = Literal["enter", "attach"]
@@ -81,7 +82,7 @@ class Target:
 
     @classmethod
     def from_json(cls, raw: Any) -> Target:
-        if not isinstance(raw, dict):
+        if not is_obj(raw):
             raise PlanRefused("P5", "Each target needs a price or R and a %")
         kind = raw.get("kind")
         if kind not in ("price", "r"):
@@ -127,7 +128,7 @@ class EntryTrail:
 
     @classmethod
     def from_json(cls, raw: Any) -> EntryTrail:
-        if not isinstance(raw, dict):
+        if not is_obj(raw):
             raise PlanRefused("E9", "Set the Trail entry's distance")
         kind = raw.get("distance_kind") or "pct"
         if kind not in ("pct", "price"):
@@ -159,7 +160,7 @@ class EntryChase:
 
     @classmethod
     def from_json(cls, raw: Any) -> EntryChase:
-        if not isinstance(raw, dict):
+        if not is_obj(raw):
             raise PlanRefused("E11", "Set the Chase entry's band")
         try:
             low = parse_decimal(str(raw.get("low") or ""))
@@ -202,7 +203,7 @@ class EntryLadder:
 
     @classmethod
     def from_json(cls, raw: Any) -> EntryLadder:
-        if not isinstance(raw, dict):
+        if not is_obj(raw):
             raise PlanRefused("EL1", "Set the Ladder entry's prices and rungs")
         try:
             price_from = parse_decimal(str(raw.get("price_from") or ""))
@@ -249,7 +250,7 @@ class TrailStop:
 
     @classmethod
     def from_json(cls, raw: Any) -> TrailStop | None:
-        if not isinstance(raw, dict) or raw.get("start") in (None, "", "off"):
+        if not is_obj(raw) or raw.get("start") in (None, "", "off"):
             return None
         start = raw.get("start")
         if start not in ("target", "last", "r"):
@@ -331,8 +332,8 @@ class PlannerParams:
             stop = parse_decimal(str(raw.get("stop") or ""))
         except ValueError:
             raise PlanRefused("S1", "Set a stop") from None
-        targets_raw = raw.get("targets") or []
-        if not isinstance(targets_raw, list):
+        targets_raw: object = raw.get("targets") or []
+        if not is_list(targets_raw):
             raise PlanRefused("P5", "Targets must be a list")
         expiry = raw.get("expiry_min")
         return cls(

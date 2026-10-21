@@ -8,6 +8,7 @@ from typing import Any
 
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_obj
 
 
 def now_ms() -> int:
@@ -28,8 +29,8 @@ def is_ladder_client_order(coi: int | None) -> bool:
 
 def _ladder_order_keys(orders: Any, cois: set[int] | None = None) -> list[tuple[int, int]]:
     keys: list[tuple[int, int]] = []
-    for o in orders or []:
-        if isinstance(o, dict):
+    for o in orders or ():
+        if is_obj(o):
             coi = int(o.get("client_order_index") or 0)
             mi = int(o.get("market_index") or 0)
             idx = int(o.get("order_index") or 0)

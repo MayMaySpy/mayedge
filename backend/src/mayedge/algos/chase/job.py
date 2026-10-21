@@ -32,6 +32,7 @@ from mayedge.algos.ledger import Ledger
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional
+from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,9 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                 "next_clip": row.get("next_clip"),
                 "next_fill": row.get("next_fill"),
                 "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": row.get("trade_qty_by_clip") or {},
-                "clips": row.get("clips") or [],
-                "fills": row.get("fills") or [],
+                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
+                "clips": items(row.get("clips")),
+                "fills": items(row.get("fills")),
             }
         )
         self._state = ChaseState(
@@ -305,7 +306,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             return
         kind = msg.get("type")
         if kind == "account_trades":
-            trades = msg.get("trades") or []
+            trades = items(msg.get("trades"))
             if trades:
                 self._pending_trades.extend(trades)
                 self._wake.set()

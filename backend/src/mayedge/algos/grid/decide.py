@@ -18,6 +18,7 @@ from mayedge.algos.chase.iceberg import (
     decide as chase_decide,
 )
 from mayedge.algos.grid.config import DEFAULT_BE_BPS, MAX_UNMATCHED_TPS
+from mayedge.rows import is_obj, obj
 
 ALGO_ID = "chase-grid"
 ALGO_VERSION = "1"
@@ -178,22 +179,22 @@ class GridRuntime:
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> GridRuntime:
         hot: list[HotCell] = []
-        for item in raw.get("hot_cells") or []:
-            if isinstance(item, dict):
+        for item in raw.get("hot_cells") or ():
+            if is_obj(item):
                 hot.append(
                     HotCell(
                         cell_price=Decimal(str(item.get("cell_price") or "0")),
                         until_ms=int(item.get("until_ms") or 0),
                     )
                 )
-        kinds_raw = raw.get("clip_kinds") or {}
+        kinds_raw = obj(raw.get("clip_kinds"))
         clip_kinds = (
-            {int(k): str(v) for k, v in kinds_raw.items()} if isinstance(kinds_raw, dict) else {}
+            {int(k): str(v) for k, v in kinds_raw.items()} if is_obj(kinds_raw) else {}
         )
-        handled_raw = raw.get("handled_fill_qty") or {}
+        handled_raw = obj(raw.get("handled_fill_qty"))
         handled_fill_qty = (
             {int(k): Decimal(str(v)) for k, v in handled_raw.items()}
-            if isinstance(handled_raw, dict)
+            if is_obj(handled_raw)
             else {}
         )
         inv_vwap = raw.get("inventory_vwap")
@@ -204,7 +205,7 @@ class GridRuntime:
             inventory=Decimal(str(raw.get("inventory") or "0")),
             inventory_vwap=Decimal(str(inv_vwap)) if inv_vwap is not None else None,
             lots=[
-                Lot.from_json(item) for item in (raw.get("lots") or []) if isinstance(item, dict)
+                Lot.from_json(item) for item in (raw.get("lots") or ()) if is_obj(item)
             ],
             hot_cells=hot,
             reentry_until=int(raw.get("reentry_until") or 0),

@@ -21,6 +21,7 @@ from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Ledger
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_list, is_obj
 
 logger = logging.getLogger(__name__)
 
@@ -86,16 +87,16 @@ def _as_int_set(raw: object) -> set[int]:
 
 
 def _as_int_str_map(raw: object) -> dict[int, str]:
-    if not isinstance(raw, dict):
+    if not is_obj(raw):
         return {}
     items = cast(dict[object, object], raw)
     return {int(str(k)): str(v) for k, v in items.items()}
 
 
 def _as_record_list(raw: object) -> list[AlgoPayload]:
-    if not isinstance(raw, list):
+    if not is_list(raw):
         return []
-    return [cast(AlgoPayload, item) for item in cast("list[object]", raw) if isinstance(item, dict)]
+    return [cast(AlgoPayload, item) for item in cast("list[object]", raw) if is_obj(item)]
 
 
 def _created_at(snap: Mapping[str, object]) -> int:

@@ -14,6 +14,7 @@ from mayedge.lighter.errors import (
     venue_client_error,
 )
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_obj
 
 
 def now_ms() -> int:
@@ -36,8 +37,8 @@ def is_chase_client_order(coi: int | None) -> bool:
 def _chase_order_keys(orders: Any, cois: set[int] | None = None) -> list[tuple[int, int]]:
     """(market_index, order_index) for venue children of this algo."""
     keys: list[tuple[int, int]] = []
-    for o in orders or []:
-        if isinstance(o, dict):
+    for o in orders or ():
+        if is_obj(o):
             coi = int(o.get("client_order_index") or 0)
             mi = int(o.get("market_index") or 0)
             idx = int(o.get("order_index") or 0)

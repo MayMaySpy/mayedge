@@ -56,6 +56,7 @@ from mayedge.algos.trail.engine import Follow, Point
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional, fmt_decimal
+from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +150,11 @@ class PlannerRunner:
         }
 
     def hydrate_from_row(self, row: dict[str, Any]) -> None:
-        raw = row.get("params_json") or {}
-        if not isinstance(raw, dict):
+        raw: object = row.get("params_json") or {}
+        if not is_obj(raw):
             raise ValueError(f"unrecoverable planner row {row.get('algo_id')}: no params")
         params = PlannerParams.from_json(raw)
-        runtime = (raw.get("runtime") or {}).get("planner") or {}
+        runtime = obj(obj(raw.get("runtime")).get("planner"))
         try:
             status = ChaseStatus(row.get("status") or "stopped")
         except ValueError:
@@ -172,9 +173,9 @@ class PlannerRunner:
                     "next_clip": row.get("next_clip"),
                     "next_fill": row.get("next_fill"),
                     "trade_ids": row.get("trade_ids") or set(),
-                    "trade_qty_by_clip": row.get("trade_qty_by_clip") or {},
-                    "clips": row.get("clips") or [],
-                    "fills": row.get("fills") or [],
+                    "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
+                    "clips": items(row.get("clips")),
+                    "fills": items(row.get("fills")),
                 }
             ),
         )
@@ -531,9 +532,9 @@ class PlannerRunner:
             return
         kind = msg.get("type")
         if kind == "account_trades":
-            trades = msg.get("trades") or []
+            trades = items(msg.get("trades"))
             if trades:
-                self._pending_trades.extend(t for t in trades if isinstance(t, dict))
+                self._pending_trades.extend(t for t in trades if is_obj(t))
                 self._wake.set()
             return
         if kind == "account":
@@ -545,15 +546,15 @@ class PlannerRunner:
         if kind == "prints":
             if p.reference != "last" or venue.market_of(msg) != self._state.market_index:
                 return
-            for raw in msg.get("prices") or []:
+            for raw in msg.get("prices") or ():
                 px = venue.dec(raw)
                 if px and px > 0:
                     self._prints.append(px)
             self._wake.set()
             return
         if kind == "market_stats":
-            for m in msg.get("markets") or []:
-                if isinstance(m, dict) and venue.market_of(m) == self._state.market_index:
+            for m in msg.get("markets") or ():
+                if is_obj(m) and venue.market_of(m) == self._state.market_index:
                     self._wake.set()
                     return
 

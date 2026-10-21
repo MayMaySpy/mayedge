@@ -21,6 +21,7 @@ from mayedge.algos.chase.util import _dec, _is_rate_limit
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.lighter.budget import BudgetRefused
 from mayedge.lighter.models import maker_min_base
+from mayedge.rows import is_obj
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
     def _cached_open_rows(self) -> list[dict[str, Any]]:
         payload = self._exec().cached_account_payload() or {}
         out: list[dict[str, Any]] = []
-        for raw in payload.get("open_orders") or []:
+        for raw in payload.get("open_orders") or ():
             row = self._order_row(raw)
             if row is not None:
                 out.append(row)
@@ -204,7 +205,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
     def _order_row(self, raw: Any) -> dict[str, Any] | None:
         if raw is None:
             return None
-        if isinstance(raw, dict):
+        if is_obj(raw):
             coi = int(raw.get("client_order_index") or 0)
             if not coi:
                 return None
@@ -221,7 +222,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         }
 
     def _find_in_rows(self, rows: Any, coi: int) -> dict[str, Any] | None:
-        for raw in rows or []:
+        for raw in rows or ():
             row = self._order_row(raw)
             if row is not None and int(row.get("client_order_index") or 0) == coi:
                 return row
@@ -253,7 +254,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
             logger.exception("chase REST open-order refresh failed")
             return None
         out: list[dict[str, Any]] = []
-        for raw in getattr(summary, "open_orders", None) or []:
+        for raw in getattr(summary, "open_orders", None) or ():
             row = self._order_row(raw)
             if row is not None:
                 out.append(row)
@@ -298,7 +299,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 )
                 trades = (
                     resp.get("trades")
-                    if isinstance(resp, dict)
+                    if is_obj(resp)
                     else getattr(resp, "trades", None)
                 )
                 if trades:
@@ -306,7 +307,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 self._drain_trades()
                 next_cursor = (
                     resp.get("next_cursor")
-                    if isinstance(resp, dict)
+                    if is_obj(resp)
                     else getattr(resp, "next_cursor", None)
                 )
                 if not next_cursor:
@@ -462,7 +463,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
 
     def _find_open(self, coi: int) -> dict[str, Any] | None:
         payload = self._exec().cached_account_payload() or {}
-        for o in payload.get("open_orders") or []:
+        for o in payload.get("open_orders") or ():
             if int(o.get("client_order_index") or 0) == coi:
                 return o
         return None

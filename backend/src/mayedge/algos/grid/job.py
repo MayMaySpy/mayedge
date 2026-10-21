@@ -51,6 +51,7 @@ from mayedge.algos.ledger import Clip
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional
+from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -231,9 +232,9 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
         payload["runtime"] = st.runtime.to_json()
         ledger = st.ledger.to_dict()
         kinds = st.runtime.clip_kinds
-        clips = []
-        for clip in ledger.get("clips") or []:
-            if isinstance(clip, dict):
+        clips: list[Any] = []
+        for clip in ledger.get("clips") or ():
+            if is_obj(clip):
                 seq = clip.get("seq")
                 kind = kinds.get(int(seq)) if seq is not None else None
                 clips.append({**clip, "kind": kind})
@@ -311,7 +312,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
 
     def _seed_inventory(self) -> None:
         payload = self._exec().cached_account_payload() or {}
-        for pos in payload.get("positions") or []:
+        for pos in payload.get("positions") or ():
             if int(pos.get("market_index") or 0) != self._state.market_index:
                 continue
             size = _dec(pos.get("size") or "0")
@@ -325,8 +326,8 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
 
     def _venue_position(self) -> tuple[Decimal, Decimal | None]:
         payload = self._exec().cached_account_payload() or {}
-        for pos in payload.get("positions") or []:
-            if isinstance(pos, dict):
+        for pos in payload.get("positions") or ():
+            if is_obj(pos):
                 mi = int(pos.get("market_index") or 0)
                 size = _dec(pos.get("size") or "0")
                 entry_raw = pos.get("avg_entry_price") or pos.get("entry_price")
@@ -529,8 +530,8 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             if grid_util.now_ms() < self._backoff_until:
                 return
         payload = self._exec().cached_account_payload() or {}
-        for raw in payload.get("open_orders") or []:
-            if not isinstance(raw, dict):
+        for raw in payload.get("open_orders") or ():
+            if not is_obj(raw):
                 coi = int(getattr(raw, "client_order_index", 0) or 0)
                 mi = int(getattr(raw, "market_index", 0) or self._state.market_index)
                 oid = int(getattr(raw, "order_index", 0) or 0) or coi
@@ -732,10 +733,8 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             self._publish()
 
     def hydrate_from_row(self, row: dict[str, Any]) -> None:
-        raw = row.get("params_json") or {}
-        if not isinstance(raw, dict):
-            raw = {}
-        runtime_raw = raw.get("runtime") or {}
+        raw = obj(row.get("params_json"))
+        runtime_raw = obj(raw.get("runtime"))
         params = GridParams.from_json(
             {
                 "max_inventory": row.get("qty") or raw.get("max_inventory") or "0",
@@ -768,12 +767,12 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                 "next_clip": row.get("next_clip"),
                 "next_fill": row.get("next_fill"),
                 "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": row.get("trade_qty_by_clip") or {},
-                "clips": row.get("clips") or [],
-                "fills": row.get("fills") or [],
+                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
+                "clips": items(row.get("clips")),
+                "fills": items(row.get("fills")),
             }
         )
-        runtime = GridRuntime.from_json(runtime_raw if isinstance(runtime_raw, dict) else {})
+        runtime = GridRuntime.from_json(runtime_raw if is_obj(runtime_raw) else {})
         for clip in ledger.clips:
             if clip.seq in runtime.handled_fill_qty:
                 continue
@@ -886,7 +885,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             return
         kind = msg.get("type")
         if kind == "account_trades":
-            trades = msg.get("trades") or []
+            trades = items(msg.get("trades"))
             if trades:
                 self._pending_trades.extend(trades)
                 self._wake.set()

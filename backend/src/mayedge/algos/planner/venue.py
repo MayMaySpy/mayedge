@@ -11,6 +11,7 @@ from mayedge.algos.planner.plan import MarketContext
 from mayedge.lighter.coi import is_algo_client_order
 from mayedge.lighter.models import maker_min_base
 from mayedge.lighter.orders import protect_role_kind
+from mayedge.rows import is_obj
 
 
 def dec(raw: object) -> Decimal | None:
@@ -40,8 +41,8 @@ def _payload(ex: ChaseExecution) -> dict[str, Any]:
 
 
 def position(ex: ChaseExecution, market_index: int) -> HeldPosition:
-    for raw in _payload(ex).get("positions") or []:
-        if not isinstance(raw, dict) or market_of(raw) != market_index:
+    for raw in _payload(ex).get("positions") or ():
+        if not is_obj(raw) or market_of(raw) != market_index:
             continue
         size = dec(raw.get("size")) or Decimal("0")
         entry = dec(raw.get("entry_price"))
@@ -55,7 +56,7 @@ def position(ex: ChaseExecution, market_index: int) -> HeldPosition:
 
 
 def open_orders(ex: ChaseExecution) -> list[dict[str, Any]]:
-    return [o for o in _payload(ex).get("open_orders") or [] if isinstance(o, dict)]
+    return [o for o in _payload(ex).get("open_orders") or () if is_obj(o)]
 
 
 def ticket_protects(ex: ChaseExecution, market_index: int) -> list[dict[str, Any]]:

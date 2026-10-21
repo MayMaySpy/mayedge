@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.numbers import fmt_decimal, parse_decimal
+from mayedge.rows import is_obj
 
 
 def now_ms() -> int:
@@ -27,10 +28,10 @@ def _fmt(d: Decimal | None) -> str | None:
 
 def _grid_order_keys(orders: Any, cois: set[int]) -> list[tuple[int, int]]:
     keys: list[tuple[int, int]] = []
-    for raw in orders or []:
+    for raw in orders or ():
         if raw is None:
             continue
-        if isinstance(raw, dict):
+        if is_obj(raw):
             coi = int(raw.get("client_order_index") or 0)
             mi = int(raw.get("market_index") or 0)
             oid = int(raw.get("order_index") or 0)

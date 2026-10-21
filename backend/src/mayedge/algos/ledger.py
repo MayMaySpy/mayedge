@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import obj
 
 ClipStatus = Literal["live", "filled", "cancelled"]
 ClipSide = Literal["buy", "sell"]
@@ -367,12 +368,12 @@ class Ledger:
         ledger = cls(
             next_clip=int(raw.get("next_clip") or 1),
             next_fill=int(raw.get("next_fill") or 1),
-            trade_ids={int(t) for t in (raw.get("trade_ids") or set())},
+            trade_ids={int(t) for t in (raw.get("trade_ids") or ())},
             trade_qty_by_clip={
-                int(k): Decimal(str(v)) for k, v in (raw.get("trade_qty_by_clip") or {}).items()
+                int(k): Decimal(str(v)) for k, v in obj(raw.get("trade_qty_by_clip")).items()
             },
-            clips=[Clip.from_persist(c) for c in (raw.get("clips") or [])],
-            fills=[Fill.from_persist(f) for f in (raw.get("fills") or [])],
+            clips=[Clip.from_persist(c) for c in (raw.get("clips") or ())],
+            fills=[Fill.from_persist(f) for f in (raw.get("fills") or ())],
         )
         if ledger.clips:
             ledger.next_clip = max(ledger.next_clip, max(c.seq for c in ledger.clips) + 1)

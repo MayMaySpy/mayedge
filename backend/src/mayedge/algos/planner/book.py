@@ -19,6 +19,7 @@ from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
 from mayedge.algos.planner.job import PlannerRunner
 from mayedge.algos.planner.plan import ALGO_ID, PlannerParams, PlanRefused, build_plan
 from mayedge.algos.trail.config import MARKET_AMENDS_PER_MIN
+from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -349,14 +350,16 @@ class PlannerBook:
                     "filled": row.get("filled"),
                     "created_at": row.get("created_at") or 0,
                     "error": "restore failed",
-                    "params_json": row.get("params_json") or {},
+                    "params_json": obj(row.get("params_json")),
                 },
                 next_clip=int(row.get("next_clip") or 1),
                 next_fill=int(row.get("next_fill") or 1),
                 trade_ids=set(row.get("trade_ids") or set()),
-                trade_qty_by_clip=dict(row.get("trade_qty_by_clip") or {}),
-                clips=list(row.get("clips") or []),
-                fills=list(row.get("fills") or []),
+                trade_qty_by_clip={
+                    int(k): str(v) for k, v in obj(row.get("trade_qty_by_clip")).items()
+                },
+                clips=list(items(row.get("clips"))),
+                fills=list(items(row.get("fills"))),
                 archived=True,
             )
         except Exception:

@@ -153,17 +153,17 @@ class Plan:
             stop=Decimal(str(raw["stop"])),
             r=Decimal(str(raw["r"])),
             size=Decimal(str(raw["size"])),
-            targets=tuple(PlannedTarget.from_json(t) for t in raw.get("targets") or []),
+            targets=tuple(PlannedTarget.from_json(t) for t in raw.get("targets") or ()),
             runner=Decimal(str(raw.get("runner") or "0")),
             risk_usd=Decimal(str(raw.get("risk_usd") or "0")),
             risk_pct=Decimal(str(risk_pct)) if risk_pct not in (None, "") else None,
             breakeven=Decimal(str(raw.get("breakeven") or "0")),
             stop_pct=Decimal(str(raw.get("stop_pct") or "0")),
-            warnings=tuple(str(w) for w in raw.get("warnings") or []),
-            steps=tuple(PlannedStep.from_json(x) for x in raw.get("steps") or []),
+            warnings=tuple(str(w) for w in raw.get("warnings") or ()),
+            steps=tuple(PlannedStep.from_json(x) for x in raw.get("steps") or ()),
             rungs=tuple(
                 Rung(index=int(x["index"]), price=Decimal(str(x["price"])), qty=Decimal(str(x["qty"])))
-                for x in raw.get("rungs") or []
+                for x in raw.get("rungs") or ()
             ),
         )
 

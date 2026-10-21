@@ -24,6 +24,7 @@ from mayedge.algos.trail.config import (
 from mayedge.algos.trail.job import TrailRunner
 from mayedge.algos.trail.plan import ALGO_ID, KIND_NAMES, TrailParams, TrailRefused, check_start
 from mayedge.lighter.orders import protect_role_kind
+from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -350,14 +351,16 @@ class TrailBook:
                     "qty": row.get("qty"),
                     "created_at": row.get("created_at") or 0,
                     "error": "restore failed",
-                    "params_json": row.get("params_json") or {},
+                    "params_json": obj(row.get("params_json")),
                 },
                 next_clip=int(row.get("next_clip") or 1),
                 next_fill=int(row.get("next_fill") or 1),
                 trade_ids=set(row.get("trade_ids") or set()),
-                trade_qty_by_clip=dict(row.get("trade_qty_by_clip") or {}),
-                clips=list(row.get("clips") or []),
-                fills=list(row.get("fills") or []),
+                trade_qty_by_clip={
+                    int(k): str(v) for k, v in obj(row.get("trade_qty_by_clip")).items()
+                },
+                clips=list(items(row.get("clips"))),
+                fills=list(items(row.get("fills"))),
                 archived=True,
             )
         except Exception:

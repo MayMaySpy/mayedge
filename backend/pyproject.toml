@@ -88,6 +88,14 @@ quote-style = "double"
 docstring-code-format = true
 
 
+# The algos read venue rows; nothing in them may stay of unknown type.
+[[tool.basedpyright.executionEnvironments]]
+root = "src/mayedge/algos"
+extraPaths = ["src", "tests"]
+reportUnknownMemberType = "error"
+reportUnknownVariableType = "error"
+reportUnknownArgumentType = "error"
+
 # Tests build loose fixtures; they keep standard mode.
 [[tool.basedpyright.executionEnvironments]]
 root = "tests"

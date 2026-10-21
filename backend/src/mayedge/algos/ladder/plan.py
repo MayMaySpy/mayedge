@@ -14,6 +14,7 @@ from mayedge.algos.ladder.config import (
     SKEW_STRENGTH,
 )
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_list, is_obj, items
 
 ALGO_ID = "ladder"
 ALGO_VERSION = "1"
@@ -74,11 +75,11 @@ class LadderParams:
         rungs: int,
         window: int,
     ) -> LadderParams:
-        stored = raw.get("rung_list") or []
+        stored = items(raw.get("rung_list"))
         rung_list: list[Rung] = []
-        if isinstance(stored, list) and stored:
+        if is_list(stored) and stored:
             for item in stored:
-                if not isinstance(item, dict):
+                if not is_obj(item):
                     continue
                 rung_list.append(
                     Rung(

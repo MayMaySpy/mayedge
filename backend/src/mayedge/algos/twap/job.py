@@ -26,6 +26,7 @@ from mayedge.algos.twap.plan import (
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.numbers import check_notional, fmt_decimal
+from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class AdvancedTwapRunner:
             return
         kind = msg.get("type")
         if kind == "account_trades":
-            trades = msg.get("trades") or []
+            trades = items(msg.get("trades"))
             if trades:
                 self._pending_trades.extend(trades)
         elif kind == "market_stats" or (
@@ -215,7 +216,7 @@ class AdvancedTwapRunner:
         try:
             resp = await get_trades(market_id=self.market_index, cursor=None, limit=50)
             trades = (
-                resp.get("trades") if isinstance(resp, dict) else getattr(resp, "trades", None)
+                resp.get("trades") if is_obj(resp) else getattr(resp, "trades", None)
             )
             if trades:
                 self._pending_trades.extend(trades)
@@ -301,9 +302,7 @@ class AdvancedTwapRunner:
         if side not in ("buy", "sell"):
             raise ValueError(f"unrecoverable twap row {row.get('algo_id')}: bad side")
         qty = _dec(row.get("qty") or "0")
-        raw = row.get("params_json") or {}
-        if not isinstance(raw, dict):
-            raw = {}
+        raw = obj(row.get("params_json"))
         params = AdvancedTwapParams.from_json(raw, side=side, qty=qty)
         if not params.duration_seconds:
             raise ValueError(f"unrecoverable twap row {row.get('algo_id')}: missing duration")
@@ -330,9 +329,9 @@ class AdvancedTwapRunner:
                 "next_clip": row.get("next_clip"),
                 "next_fill": row.get("next_fill"),
                 "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": row.get("trade_qty_by_clip") or {},
-                "clips": row.get("clips") or [],
-                "fills": row.get("fills") or [],
+                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
+                "clips": items(row.get("clips")),
+                "fills": items(row.get("fills")),
             }
         )
         self._cois = {c.client_order_index for c in self.ledger.clips}
@@ -499,7 +498,9 @@ class AdvancedTwapRunner:
         qty = slice_qty(self.remaining, self._orders_left(), randomize=p.randomize, u=self._u())
         if qty <= 0:
             return
-        quote = slice_quote(p.style, p.side, bid=bid, ask=ask, mid=mid, mark=mark)
+        quote: dict[str, str | None] = slice_quote(
+            p.style, p.side, bid=bid, ask=ask, mid=mid, mark=mark
+        )
         if p.max_price is not None and quote.get("price"):
             px = Decimal(str(quote["price"]))
             if (p.side == "buy" and px > p.max_price) or (p.side == "sell" and px < p.max_price):
@@ -578,11 +579,11 @@ class AdvancedTwapRunner:
             now=now,
             side=p.side,
         )
-        idx = result.get("order_index") if isinstance(result, dict) else None
+        idx = result.get("order_index") if is_obj(result) else None
         if not idx:
             payload = ex.cached_account_payload() or {}
-            for row in payload.get("open_orders") or []:
-                raw = row if isinstance(row, dict) else None
+            for row in payload.get("open_orders") or ():
+                raw = row if is_obj(row) else None
                 coi_row = int((raw or {}).get("client_order_index") or getattr(row, "client_order_index", 0) or 0)
                 if coi_row == coi:
                     idx = (raw or {}).get("order_index") or getattr(row, "order_index", None)

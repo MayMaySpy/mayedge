@@ -12,6 +12,7 @@ from mayedge.algos.ledger import Ledger
 from mayedge.algos.trail.engine import Point, Side
 from mayedge.algos.trail.plan import TrailParams
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import is_obj, obj
 
 if TYPE_CHECKING:
     from mayedge.algos.trail.job import TrailRunner
@@ -89,8 +90,8 @@ class TrailState:
         self.fired_price = _dec(raw.get("fired_price"))
         deadline = raw.get("deadline_ms")
         self.deadline_ms = int(deadline) if deadline else None
-        roles = raw.get("roles") or {}
-        self.roles = {int(k): str(v) for k, v in roles.items()} if isinstance(roles, dict) else {}
+        roles = obj(raw.get("roles"))
+        self.roles = {int(k): str(v) for k, v in roles.items()} if is_obj(roles) else {}
 
 
 class TrailBookView(Protocol):
