@@ -192,6 +192,12 @@ class AccountService:
         """The Portfolio margin term by term, from the same inputs as the header's figure."""
         return portfolio_margin_parts(self._cross_portfolio(), self._assets, self._live_asset_meta())
 
+    def margin_free(self) -> float:
+        """The part of the Portfolio margin free for new orders, from the same inputs as margin_parts."""
+        cross = self._cross_portfolio()
+        tav = portfolio_margin_usd(cross, self._assets, self._live_asset_meta())
+        return trade_available_usd(to_float(self._summary.available), tav, cross)
+
     def _paint_margin(self, summary: AccountSummary | None = None) -> None:
         s = summary or self._summary
         cross = self._cross_portfolio(s)

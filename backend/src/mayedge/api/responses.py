@@ -233,6 +233,9 @@ class PortfolioMargin(_Shape):
     """Buying power, never part of a value (portfolio-rules N10)."""
 
     total: str | None
+    # Free for new orders, and the rest held by open Positions and orders.
+    free: str | None
+    used: str | None
     parts: list[PortfolioMarginPart]
 
 

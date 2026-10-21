@@ -273,12 +273,15 @@ class MarginRow:
     value: Decimal
 
 
-def margin_json(rows: list[MarginRow]) -> dict[str, Any] | None:
-    """N10: buying power on the Perps card. Never part of any value."""
+def margin_json(rows: list[MarginRow], free: Decimal | None = None) -> dict[str, Any] | None:
+    """N10: buying power on the Perps card, free and in use. Never part of any value."""
     if not rows:
         return None
+    total = sum((r.value for r in rows), ZERO)
     return {
-        "total": _s(sum((r.value for r in rows), ZERO)),
+        "total": _s(total),
+        "free": _s(free),
+        "used": None if free is None else _s(max(total - free, ZERO)),
         "parts": [
             {
                 "symbol": r.symbol,
@@ -335,6 +338,7 @@ class PortfolioNow:
     collateral: list[CollateralRow] = field(default_factory=list)
     upnl: Decimal | None = None
     margin: list[MarginRow] = field(default_factory=list)
+    margin_free: Decimal | None = None
     detail: bool = True
 
     def total(self) -> KindNow:
@@ -385,7 +389,7 @@ class PortfolioNow:
                     for r in self.collateral
                 ],
                 "upnl": _s(self.upnl),
-                "margin": margin_json(self.margin),
+                "margin": margin_json(self.margin, self.margin_free),
             },
             "spot_gap": _s(spot_gap(self.kinds["spot"].value, self.spot)) if self.detail else None,
             "unlocks": [
@@ -414,6 +418,7 @@ def portfolio_now(
     upnl: Decimal | None = None,
     detail: bool = True,
     margin: list[MarginRow] | None = None,
+    margin_free: Decimal | None = None,
 ) -> PortfolioNow:
     pnl, values = buckets(pnl_rows), buckets(value_rows)
     return PortfolioNow(
@@ -432,6 +437,7 @@ def portfolio_now(
         upnl=upnl,
         detail=detail,
         margin=margin or [],
+        margin_free=margin_free,
     )
 
 

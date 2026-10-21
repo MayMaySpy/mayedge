@@ -92,6 +92,7 @@ async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: boo
         upnl=_upnl(account_service._summary.unrealized_pnl),  # pyright: ignore[reportPrivateUsage]
         detail=detail,
         margin=_margin(account_service.margin_parts()) if detail else None,
+        margin_free=Decimal(str(account_service.margin_free())) if detail else None,
     )
     _cache[(open_ms, detail)] = (now, result)
     for key in [k for k, (at, _r) in _cache.items() if now - at >= REUSE_S]:

@@ -265,6 +265,8 @@ export interface PortfolioKinds {
 
 export interface PortfolioMargin {
   total: string | null;
+  free: string | null;
+  used: string | null;
   parts: PortfolioMarginPart[];
 }
 

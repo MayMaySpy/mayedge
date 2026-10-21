@@ -169,9 +169,13 @@ class HoldingTests(TestCase):
         with_margin = portfolio_now(
             now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
             account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"), margin=margin,
+            margin_free=D("1500.25"),
         ).to_json()
         responses.PortfolioNow.model_validate(with_margin)
         self.assertEqual(with_margin["perps"]["margin"]["total"], "1895.6462528995")
+        # Free for new orders, and the rest held by open Positions and orders.
+        self.assertEqual(with_margin["perps"]["margin"]["free"], "1500.25")
+        self.assertEqual(with_margin["perps"]["margin"]["used"], "395.3962528995")
         self.assertEqual([p["symbol"] for p in with_margin["perps"]["margin"]["parts"]], ["USDC", "ETH"])
         # N10: it changes no value.
         self.assertEqual(plain["kinds"], with_margin["kinds"])

@@ -430,30 +430,69 @@ function Empty({ cols, children }: { cols: number; children: React.ReactNode }) 
   );
 }
 
-/** N10: the Portfolio margin, buying power beside the Perps value and never added to it. */
-function MarginLine({ margin }: { margin: PortfolioMargin }) {
+/**
+ * N10: the Portfolio margin as buying power, in use and free, and where it comes from.
+ * Never added to the Perps value: a collateral asset is already counted in Spot.
+ */
+function BuyingPower({ margin }: { margin: PortfolioMargin }) {
+  const total = num(margin.total);
+  const used = Math.min(Math.max(num(margin.used), 0), total);
+  const borrowed = margin.parts.filter((p) => !p.cross);
   return (
-    <div
-      className="mx-2 mt-1 border-t border-rule pt-1.5 text-muted-foreground"
-      title="Buying power: USDC with the open uPnL, plus each collateral asset at its LTV. Not part of any value."
+    <section
+      aria-label="Buying power"
+      className="mx-2 mt-1 flex flex-col gap-1 border-t border-rule pt-1.5 text-muted-foreground"
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-foreground">Portfolio margin</span>
-        <span className="text-xs">buying power, not value</span>
+        <span className="text-foreground" title="The header's Margin: the Portfolio margin">
+          Buying power
+        </span>
         <span className="ml-auto font-mono tabular-nums text-foreground">{usd(margin.total)}</span>
       </div>
-      {margin.parts.map((part) => (
-        <div key={part.symbol + (part.cross ? ":cross" : "")} className="flex items-baseline gap-2 font-mono tabular-nums">
-          <span>{part.cross ? `${part.symbol} and open uPnL` : part.symbol}</span>
-          {!part.cross ? (
-            <span className="text-xs">
-              {size(part.qty)} × {price(part.price)} × {ltvPct(part.ltv)} LTV
+      {margin.free != null && total > 0 ? (
+        <>
+          <div
+            className="h-1 w-full overflow-hidden rounded-full bg-rule"
+            role="img"
+            aria-label={`${((used / total) * 100).toFixed(0)}% in use`}
+          >
+            <div className="h-full rounded-full bg-muted-foreground" style={{ width: `${(used / total) * 100}%` }} />
+          </div>
+          <div className="flex items-baseline gap-2 font-mono tabular-nums">
+            <span title="Held by open Positions and orders">In use {usd(margin.used)}</span>
+            <span className="ml-auto" title="Free for new orders">
+              Free {usd(margin.free)}
             </span>
-          ) : null}
-          <span className="ml-auto">{usd(part.value)}</span>
+          </div>
+        </>
+      ) : null}
+      {borrowed.length > 0 ? (
+        <div className="flex flex-col">
+          {margin.parts.map((part) =>
+            part.cross ? (
+              <div key={`${part.symbol}:cross`} className="flex items-baseline gap-2">
+                <span>From {part.symbol} and the open uPnL above</span>
+                <span className="ml-auto font-mono tabular-nums">{usd(part.value)}</span>
+              </div>
+            ) : (
+              <div key={part.symbol} className="flex items-baseline gap-2">
+                <span>
+                  From {part.symbol} in Spot{" "}
+                  <span className="font-mono text-xs tabular-nums">
+                    {size(part.qty)} at {usd(part.price)}, {ltvPct(part.ltv)} counts
+                  </span>
+                </span>
+                <span className="ml-auto font-mono tabular-nums">{usd(part.value)}</span>
+              </div>
+            ),
+          )}
+          <span className="text-xs">
+            Margin to trade with, not money held: {borrowed.map((p) => p.symbol).join(", ")}{" "}
+            {borrowed.length > 1 ? "are" : "is"} counted once, in Spot.
+          </span>
         </div>
-      ))}
-    </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -496,7 +535,7 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             </TableRow>
           </TableBody>
         </Table>
-        {now.perps.margin ? <MarginLine margin={now.perps.margin} /> : null}
+        {now.perps.margin ? <BuyingPower margin={now.perps.margin} /> : null}
         <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground">
           <a href="/journal" target="_blank" rel="noopener" className="ml-auto hover:text-foreground">
             Trades are in the Journal

@@ -65,6 +65,8 @@ const NOW: PortfolioNow = {
     upnl: "0",
     margin: {
       total: "2073.8",
+      free: "1873.8",
+      used: "200",
       parts: [
         { symbol: "USDC", cross: true, qty: "1221.01", price: "1", ltv: "1", value: "1221.01" },
         { symbol: "ETH", cross: false, qty: "0.50000082", price: "2436.49", ltv: "0.7", value: "852.79" },
@@ -157,14 +159,18 @@ describe("PortfolioPage", () => {
     // USDC is the Perps collateral, never a Spot row (portfolio-rules A1, N6).
     const perps = screen.getByRole("heading", { name: "Perps" }).closest("section") as HTMLElement;
     expect(within(perps).getByText("USDC")).toBeTruthy();
-    // Once as the collateral row, once as the margin's USDC part.
+    // Once as the collateral row, once as where the buying power's USDC part comes from.
     expect(within(perps).getAllByText("$1,221.01")).toHaveLength(2);
     expect(within(perps).getByText("Open uPnL")).toBeTruthy();
-    // N10: the margin is beside the value, not in it; the card's value stays the collateral.
-    expect(within(perps).getByText("Portfolio margin")).toBeTruthy();
-    expect(within(perps).getByText("$2,073.80")).toBeTruthy();
-    expect(within(perps).getByText("USDC and open uPnL")).toBeTruthy();
-    expect(within(perps).getByText(/× 70% LTV/)).toBeTruthy();
+    // N10: buying power is beside the value, not in it; the card's value stays the collateral.
+    const power = within(perps).getByRole("region", { name: "Buying power" });
+    expect(within(power).getByText("$2,073.80")).toBeTruthy();
+    expect(within(power).getByText("In use $200.00")).toBeTruthy();
+    expect(within(power).getByText("Free $1,873.80")).toBeTruthy();
+    expect(within(power).getByText("From USDC and the open uPnL above")).toBeTruthy();
+    expect(within(power).getByText(/From ETH in Spot/)).toBeTruthy();
+    expect(within(power).getByText(/70% counts/)).toBeTruthy();
+    expect(within(power).getByText(/ETH is counted once, in Spot/)).toBeTruthy();
     expect(within(perps.querySelector("header") as HTMLElement).getByText("$1,221.00")).toBeTruthy();
     const spotCard = screen.getByRole("heading", { name: "Spot" }).closest("section") as HTMLElement;
     expect(within(spotCard).queryByText("USDC")).toBeNull();
