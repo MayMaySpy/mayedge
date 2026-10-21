@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import time
 from decimal import Decimal
@@ -186,6 +187,24 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             await journal_routes.warm()
             await journal_routes.get_trips()
         self.assertEqual(calls["n"], 1)
+
+    async def test_readers_of_one_rebuild_do_not_pile_up(self) -> None:
+        journal_routes._ready = None
+
+        async def fake(_fn: Any, *_args: Any) -> list[object]:
+            return []
+
+        async def follow() -> None:
+            await journal_routes._shared_trips({})
+            end = time.perf_counter() + 0.015
+            while time.perf_counter() < end:
+                pass
+
+        with patch("mayedge.api.routes.journal.call", fake):
+            await assert_loop_free(
+                asyncio.gather(*(follow() for _ in range(4))),
+                max_gap_ms=20,
+            )
 
     async def test_a_slow_rebuild_stays_off_the_loop(self) -> None:
         journal_routes._ready = None

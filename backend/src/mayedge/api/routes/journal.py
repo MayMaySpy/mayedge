@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from mayedge.api.turn import breathe
 from mayedge.config import settings
 from mayedge.journal import Fill, FundingPayment, GroupBy, RoundTrip, seconds_of, summary
 from mayedge.journal import round_trips as build_trips
@@ -43,7 +45,7 @@ _Inputs = tuple[
 ]
 _cache_lock = threading.Lock()
 _cache: tuple[int, _Inputs] | None = None
-_ready: tuple[tuple[str, int, tuple[tuple[int, str], ...]], list[RoundTrip]] | None = None
+_ready: tuple[tuple[str, int], list[RoundTrip]] | None = None
 _build_lock: asyncio.Lock | None = None
 _lock_loop: asyncio.AbstractEventLoop | None = None
 
@@ -143,8 +145,14 @@ def _build_lock_for() -> asyncio.Lock:
     return _build_lock
 
 
-def _upnl_sig(upnl: dict[int, Decimal]) -> tuple[tuple[int, str], ...]:
-    return tuple(sorted((market, str(pnl)) for market, pnl in upnl.items()))
+def _stamp(trips: list[RoundTrip], upnl: dict[int, Decimal]) -> list[RoundTrip]:
+    """Live uPnL changes every tick. It is not part of the rebuild."""
+    if not any(trip.open for trip in trips):
+        return trips
+    return [
+        replace(trip, upnl=upnl.get(trip.market_index)) if trip.open else trip
+        for trip in trips
+    ]
 
 
 async def warm() -> None:
@@ -153,17 +161,18 @@ async def warm() -> None:
 
 
 async def _shared_trips(upnl: dict[int, Decimal]) -> list[RoundTrip]:
-    """One rebuild per database generation and live uPnL. The rest of a page waits."""
+    """One rebuild per database generation. Readers of that rebuild take turns."""
     global _ready
-    sig = (settings.db_path, journal_generation(), _upnl_sig(upnl))
+    sig = (settings.db_path, journal_generation())
     if _ready is not None and _ready[0] == sig:
-        return _ready[1]
+        return _stamp(_ready[1], upnl)
     async with _build_lock_for():
-        if _ready is not None and _ready[0] == sig:
-            return _ready[1]
-        trips = await call(build_off_loop, settings.db_path, upnl)
-        _ready = (sig, trips)
-        return trips
+        if _ready is None or _ready[0] != sig:
+            built = await call(build_off_loop, settings.db_path, {})
+            _ready = (sig, built)
+        trips = _ready[1]
+    await breathe()
+    return _stamp(trips, upnl)
 
 
 def _trips(upnl: dict[int, Decimal] | None = None) -> list[RoundTrip]:
