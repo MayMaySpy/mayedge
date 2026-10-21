@@ -1,5 +1,6 @@
 import type { Market, Position } from "@/lib/api";
 import { parseDecimal, stripFractionalZeros } from "@/lib/numbers";
+import { formatPrice } from "@/lib/utils";
 
 const CANONICAL_LEV = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100];
 
@@ -13,6 +14,35 @@ export const TIF_CHIPS = [
   { id: "ioc", label: "IOC", hint: "Immediate or cancel — take liquidity now" },
   { id: "post_only", label: "Post", hint: "Post only — maker; rejects if it would take" },
 ] as const;
+
+export interface CrossHint {
+  side: "buy" | "sell";
+  text: string;
+}
+
+/**
+ * A limit at or through the touch takes now: a Buy at or above the ask, a Sell at or below the bid.
+ * Resting fills it as a taker. Post only is refused by the venue. IOC is meant to take, so it says nothing.
+ */
+export function limitCrossHint(opts: {
+  price: number;
+  bid: number;
+  ask: number;
+  tif: string;
+  priceDecimals: number;
+}): CrossHint | null {
+  const { price, bid, ask, tif, priceDecimals } = opts;
+  if (tif === "ioc" || !(price > 0)) return null;
+  const hit =
+    ask > 0 && price >= ask
+      ? { side: "buy" as const, label: "Buy", touch: `ask ${formatPrice(ask, priceDecimals)}` }
+      : bid > 0 && price <= bid
+        ? { side: "sell" as const, label: "Sell", touch: `bid ${formatPrice(bid, priceDecimals)}` }
+        : null;
+  if (!hit) return null;
+  const tail = tif === "post_only" ? "Post only refuses it." : "It fills now, not resting.";
+  return { side: hit.side, text: `A ${hit.label} at this price crosses the ${hit.touch}. ${tail}` };
+}
 
 export const ORDER_KINDS = [
   { id: "market", label: "Market" },

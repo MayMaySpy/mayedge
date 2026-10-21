@@ -68,7 +68,7 @@ A boot after more than `down_after_s` (60 seconds) says how long the desk was do
 
 ### Execution
 
-Market and limit Tickets from the Order panel, typed in the asset or in USD (**Notional**). Floating Buy/Sell are market at **Quick size** (the same size Axis rest uses). From a Positions row: **Stop** and **Take Profit** Tickets (Market or Limit), a Trail Stop or Trail Take Profit, or a Planner. On the Orders tab, **Bids** and **Asks** cancel Tickets of that side in the current All/Market scope; Clips stay with the algo. Size on a working order can be edited in place (**Amend**).
+Market and limit Tickets from the Order panel, typed in the asset or in USD (**Notional**). A limit at or through the touch says so under its price: on Resting it fills now, on Post the venue refuses it. Floating Buy/Sell are market at **Quick size** (the same size Axis rest uses). From a Positions row: **Stop** and **Take Profit** Tickets (Market or Limit), a Trail Stop or Trail Take Profit, or a Planner. On the Orders tab, **Bids** and **Asks** cancel Tickets of that side in the current All/Market scope; Clips stay with the algo. Size on a working order can be edited in place (**Amend**).
 
 **Kill** stops all algos then cancels working orders; flatten is optional, not implied. **Auto kill**, armed from the Kill menu, does the same plus a flatten when total uPnL crosses a loss floor or a profit target. The flatten is retried at wider slippage while a Position stays open. While armed, its header badge shows total uPnL as Auto kill measures it, (mark − entry) × size, with a meter toward the floor and the target; it turns red once 75% of the floor is used.
 

@@ -5,6 +5,7 @@ import {
   baseToUsd,
   convertSizeOnUnitToggle,
   formatUsdNotional,
+  limitCrossHint,
   makerMinSize,
   maxOrderSize,
   minSizeHint,
@@ -406,5 +407,30 @@ describe("slippage cap", () => {
     expect(loadSlipPct()).toBe("5");
     persistSlipPct("1.5");
     expect(loadSlipPct()).toBe("1.5");
+  });
+});
+
+describe("limitCrossHint", () => {
+  const book = { bid: 100, ask: 100.1, priceDecimals: 2 };
+
+  it("says a Resting Buy at or above the ask fills now", () => {
+    expect(limitCrossHint({ ...book, price: 100.1, tif: "gtt" })).toEqual({
+      side: "buy",
+      text: "A Buy at this price crosses the ask 100.10. It fills now, not resting.",
+    });
+  });
+
+  it("says a Post only Sell at or below the bid is refused", () => {
+    expect(limitCrossHint({ ...book, price: 99.5, tif: "post_only" })).toEqual({
+      side: "sell",
+      text: "A Sell at this price crosses the bid 100.00. Post only refuses it.",
+    });
+  });
+
+  it("says nothing inside the spread, for IOC, or without a price or a book", () => {
+    expect(limitCrossHint({ ...book, price: 100.05, tif: "gtt" })).toBeNull();
+    expect(limitCrossHint({ ...book, price: 101, tif: "ioc" })).toBeNull();
+    expect(limitCrossHint({ ...book, price: 0, tif: "gtt" })).toBeNull();
+    expect(limitCrossHint({ bid: NaN, ask: NaN, priceDecimals: 2, price: 101, tif: "gtt" })).toBeNull();
   });
 });

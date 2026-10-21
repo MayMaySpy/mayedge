@@ -63,6 +63,7 @@ import { LeverageModal } from "./LeverageModal";
 import {
   convertSizeOnUnitToggle,
   leveragePresets,
+  limitCrossHint,
   loadSizeUnit,
   loadSlipPct,
   makerMinSize,
@@ -243,6 +244,8 @@ export function OrderTicket({
     ? snapReduceOnlySize(sizeNum, absPos, decimals)
     : sizeNum;
   const limitPx = kind === "limit" && priceNum > 0 ? priceNum : spot;
+  const crossHint =
+    kind === "limit" ? limitCrossHint({ price: priceNum, bid, ask, tif, priceDecimals }) : null;
   // Planner E16, EL6: a ticket set to Chase or Ladder opens Planner with that entry from its fields.
   const plannerFromTicket = (() => {
     if (kind !== "algo" || (algo !== "chase-iceberg" && algo !== "ladder")) return undefined;
@@ -584,6 +587,7 @@ export function OrderTicket({
                   mid={mid}
                   priceDecimals={priceDecimals}
                   tif={tif}
+                  crossHint={crossHint?.text ?? null}
                   onPriceChange={setPrice}
                   onTifChange={setTif}
                 />

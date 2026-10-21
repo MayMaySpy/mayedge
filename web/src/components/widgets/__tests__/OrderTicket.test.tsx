@@ -143,6 +143,40 @@ describe("OrderTicket", () => {
     );
   });
 
+  it("hints that a limit at the ask would fill now, and still sends it", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Limit" }));
+    await user.type(screen.getByLabelText("Size"), "1");
+    await user.type(screen.getByLabelText("Price"), "100.2");
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "A Buy at this price crosses the ask 100.10. It fills now, not resting."
+    );
+    await user.click(button("Buy"));
+    expect(api.placeLimitOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ side: "buy", price: "100.2", time_in_force: "gtt" })
+    );
+  });
+
+  it("hints that Post only would refuse a crossing limit, and drops the hint for IOC", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Limit" }));
+    await user.type(screen.getByLabelText("Price"), "99");
+    await user.click(screen.getByRole("radio", { name: "Post" }));
+    expect(screen.getByRole("status").textContent).toBe(
+      "A Sell at this price crosses the bid 100.00. Post only refuses it."
+    );
+    await user.click(screen.getByRole("radio", { name: "IOC" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("gives no hint for a limit that rests inside the spread", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("radio", { name: "Limit" }));
+    await user.type(screen.getByLabelText("Price"), "100.05");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("will not send without a size", async () => {
     const { user } = setup();
     await user.click(screen.getByRole("radio", { name: "Market" }));
