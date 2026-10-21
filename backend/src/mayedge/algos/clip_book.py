@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any, ClassVar, Protocol, cast
 
@@ -41,6 +42,7 @@ from mayedge.algos.chase.config import HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Ledger
+from mayedge.algos.trail.config import MARKET_AMENDS_PER_MIN
 from mayedge.rows import is_list, is_obj
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,35 @@ def _as_record_list(raw: object) -> list[AlgoPayload]:
 
 def _created_at(snap: Mapping[str, object]) -> int:
     return as_int(snap.get("created_at"))
+
+
+class MarketWatch:
+    """Amend budget and print watch. Trail and planner use it. Clip books do not."""
+
+    def __init__(
+        self,
+        market_conflict: Callable[[int], bool] | None = None,
+        watch_prints: Callable[[int, bool], None] | None = None,
+    ) -> None:
+        self._market_conflict = market_conflict
+        self._watch_prints = watch_prints
+        self._amends: dict[int, deque[int]] = {}
+
+    def set_market_conflict(self, fn: Callable[[int], bool]) -> None:
+        self._market_conflict = fn
+
+    def set_watch_prints(self, fn: Callable[[int, bool], None]) -> None:
+        self._watch_prints = fn
+
+    def take_amend(self, market_index: int, now_ms: int) -> bool:
+        """One amend budget a minute, shared by the jobs on a market."""
+        sent = self._amends.setdefault(market_index, deque())
+        while sent and now_ms - sent[0] >= 60_000:
+            sent.popleft()
+        if len(sent) >= MARKET_AMENDS_PER_MIN:
+            return False
+        sent.append(now_ms)
+        return True
 
 
 class AlgoBook[R: ClipRunner]:

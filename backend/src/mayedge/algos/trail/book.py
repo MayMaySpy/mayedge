@@ -8,20 +8,14 @@ rename the import.
 from __future__ import annotations
 
 import logging
-from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.clip_book import AlgoBook, AlgoPayload
+from mayedge.algos.clip_book import AlgoBook, AlgoPayload, MarketWatch
 from mayedge.algos.planner import venue
-from mayedge.algos.trail.config import (
-    MARKET_AMENDS_PER_MIN,
-    MAX_PER_MARKET,
-    TRAIL_COI_BASE,
-    TRAIL_COI_END,
-)
+from mayedge.algos.trail.config import MAX_PER_MARKET, TRAIL_COI_BASE, TRAIL_COI_END
 from mayedge.algos.trail.job import TrailRunner
 from mayedge.algos.trail.plan import ALGO_ID, KIND_NAMES, TrailParams, TrailRefused, check_start
 from mayedge.algos.trail.state import TrailState
@@ -46,7 +40,7 @@ def stop_tickets(ex: ChaseExecution, market_index: int, side: str) -> list[dict[
     return out
 
 
-class TrailBook(AlgoBook[TrailRunner]):
+class TrailBook(AlgoBook[TrailRunner], MarketWatch):
     ALGO_ID = ALGO_ID
     ID_PREFIX = "TR-"
     LABEL = "Trail"
@@ -67,9 +61,7 @@ class TrailBook(AlgoBook[TrailRunner]):
         super().__init__(
             execution=execution, broadcast=broadcast, coi_base=coi_base, coi_end=coi_end
         )
-        self._market_conflict = market_conflict
-        self._watch_prints = watch_prints
-        self._amends: dict[int, deque[int]] = {}
+        MarketWatch.__init__(self, market_conflict, watch_prints)
 
     def _new_runner(self) -> TrailRunner:
         return TrailRunner(self)
@@ -118,25 +110,9 @@ class TrailBook(AlgoBook[TrailRunner]):
             "params_json": obj(row.get("params_json")),
         }
 
-    def set_market_conflict(self, fn: MarketConflictFn) -> None:
-        self._market_conflict = fn
-
-    def set_watch_prints(self, fn: Callable[[int, bool], None]) -> None:
-        self._watch_prints = fn
-
     def stop_live_on_market(self, market_index: int) -> bool:
         """TS4: the Stop editor refuses a new Stop beside a Trail Stop."""
         return any(job.kind == "stop" for job in self._live(market_index, None))
-
-    def take_amend(self, market_index: int, now_ms: int) -> bool:
-        """F7: the Trails on one Market share one Amend budget a minute."""
-        sent = self._amends.setdefault(market_index, deque())
-        while sent and now_ms - sent[0] >= 60_000:
-            sent.popleft()
-        if len(sent) >= MARKET_AMENDS_PER_MIN:
-            return False
-        sent.append(now_ms)
-        return True
 
     def _sync_watch(self, market_index: int) -> None:
         """F9: keep a Market's prints while a Trail on Last runs there."""

@@ -509,25 +509,45 @@ class RestartTests(IsolatedAsyncioTestCase):
         finally:
             await _stop_books(book)
 
-    async def test_trail_restores_without_waiting_for_the_order_book(self) -> None:
-        _plant("trail_restore.json")
+    async def test_planner_restores_a_row_written_before_the_shared_book(self) -> None:
+        """The persisted planner row keeps its id, its counters and its status."""
+        row = _plant("planner_restore.json")
         venue = FakeVenue()
-        venue.position = D("2")
-        venue.entry = D("100")
-        execution, seen = _unsynced(venue)
-        book = TrailBook(execution=execution, broadcast=lambda _p: None)
-        started = time.monotonic()
-        with (
-            patch("mayedge.algos.common.now_ms", FakeClock()),
-            patch("mayedge.algos.clip_book.RESTORE_FEED_TIMEOUT_S", 2),
-        ):
+        book = PlannerBook(execution=lambda: venue.execution(), broadcast=lambda _p: None)
+        with patch("mayedge.algos.common.now_ms", FakeClock()):
             await book.restore()
         try:
-            self.assertLess(time.monotonic() - started, 0.5)
-            self.assertEqual(seen, [])
-            self.assertIn("TR-0001", book._jobs)
+            job = book._jobs[str(row["algo_id"])]
+            self.assertEqual(job.state.status.value, row["status"])
+            self.assertEqual(job.state.algo_id, "PL-0001")
+            self.assertEqual(store.load_book_counters("planner"), {"id_seq": 1, "coi_seq": 1})
         finally:
             await _stop_books(book)
+
+    async def test_trail_and_planner_restore_without_waiting_for_the_order_book(self) -> None:
+        for name, book_cls, prep in (
+            ("trail_restore.json", TrailBook, lambda venue: setattr(venue, "position", D("2"))),
+            ("planner_restore.json", PlannerBook, lambda venue: None),
+        ):
+            store.close_db()
+            _plant(name)
+            venue = FakeVenue()
+            venue.entry = D("100")
+            prep(venue)
+            execution, seen = _unsynced(venue)
+            book = book_cls(execution=execution, broadcast=lambda _p: None)
+            started = time.monotonic()
+            with (
+                patch("mayedge.algos.common.now_ms", FakeClock()),
+                patch("mayedge.algos.clip_book.RESTORE_FEED_TIMEOUT_S", 2),
+            ):
+                await book.restore()
+            try:
+                self.assertLess(time.monotonic() - started, 0.5)
+                self.assertEqual(seen, [])
+                self.assertTrue(book._jobs)
+            finally:
+                await _stop_books(book)
 
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"

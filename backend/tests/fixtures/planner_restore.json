@@ -1,0 +1,141 @@
+{
+  "algo_id": "PL-0001",
+  "algo_type": "planner",
+  "archived": false,
+  "clips": [
+    {
+      "client_order_index": 11000000001,
+      "closed_at": null,
+      "filled": "0",
+      "missing_since": null,
+      "order_index": null,
+      "placed_at": 1000000,
+      "price": "100",
+      "qty": "2",
+      "seen_on_book": false,
+      "seq": 1,
+      "side": "buy",
+      "status": "live"
+    }
+  ],
+  "created_at": 1000000,
+  "display_qty": null,
+  "error": null,
+  "filled": "0",
+  "fills": [],
+  "market_index": 1,
+  "next_clip": 2,
+  "next_fill": 1,
+  "offset_bps": null,
+  "params_json": {
+    "entry_chase": null,
+    "entry_ladder": null,
+    "entry_price": "100",
+    "entry_trail": null,
+    "entry_type": "limit",
+    "expiry_min": null,
+    "mode": "enter",
+    "reference": "mark",
+    "risk_pct": null,
+    "runtime": {
+      "planner": {
+        "breakeven_done": false,
+        "entry_deadline_ms": null,
+        "entry_filled": "0",
+        "expected_size": "0",
+        "finish_entry": false,
+        "phase": "entering",
+        "plan": {
+          "breakeven": "100",
+          "entry": "100",
+          "r": "5",
+          "risk_pct": "0.1",
+          "risk_usd": "10",
+          "rungs": [],
+          "runner": "0",
+          "side": "buy",
+          "size": "2",
+          "steps": [
+            {
+              "after": 1,
+              "price": "100",
+              "to": "breakeven"
+            }
+          ],
+          "stop": "95",
+          "stop_pct": "-5",
+          "targets": [
+            {
+              "index": 1,
+              "move_pct": "5",
+              "order": "trigger",
+              "pct": "50",
+              "price": "105",
+              "qty": "1",
+              "r": "1",
+              "trail_distance": null,
+              "trail_kind": "price",
+              "usd": "5"
+            },
+            {
+              "index": 2,
+              "move_pct": "10",
+              "order": "trigger",
+              "pct": "50",
+              "price": "110",
+              "qty": "1",
+              "r": "2",
+              "trail_distance": null,
+              "trail_kind": "price",
+              "usd": "10"
+            }
+          ],
+          "warnings": []
+        },
+        "roles": {
+          "1": "entry"
+        },
+        "steps_done": 0,
+        "stop_trigger": null,
+        "trail_fired": [],
+        "trail_moves": {},
+        "trails": {}
+      }
+    },
+    "side": "buy",
+    "size": "2",
+    "slippage": 0.01,
+    "stop": "95",
+    "stop_steps": "breakeven",
+    "targets": [
+      {
+        "kind": "r",
+        "order": "trigger",
+        "pct": "50",
+        "value": "1"
+      },
+      {
+        "kind": "r",
+        "order": "trigger",
+        "pct": "50",
+        "value": "2"
+      }
+    ],
+    "trail_stop": null
+  },
+  "price_ceiling": null,
+  "price_floor": null,
+  "qty": "2",
+  "quote_action": "rest",
+  "reason": null,
+  "reduce_only": false,
+  "remaining": "2",
+  "rest_price": "100",
+  "rest_qty": "2",
+  "side": "buy",
+  "status": "running",
+  "symbol": "ETH",
+  "trade_ids": [],
+  "trade_qty_by_clip": {},
+  "venue": "lighter"
+}
