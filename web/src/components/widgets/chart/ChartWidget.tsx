@@ -36,7 +36,7 @@ import { candleSource, loadPins, loadTimeframe, parseTimeframe, supportsOpenInte
 import { loadWatchWindow, type WatchWindow } from "@/lib/watchWindow";
 
 import type { Ohlc } from "./chartFormat";
-import { loadBbo, loadFund, loadMayRekt, loadMode, loadOi, loadScanTab, loadVol, type ChartMode } from "./chartPrefs";
+import { loadBbo, loadFills, loadFund, loadMayRekt, loadMode, loadOi, loadScanTab, loadVol, type ChartMode } from "./chartPrefs";
 import { ChartFrame } from "./ChartFrame";
 import { useChartFeed } from "./useChartFeed";
 import { useChartSeries } from "./useChartSeries";
@@ -100,6 +100,7 @@ export const ChartWidget = memo(function ChartWidget({
   const [fundOn, setFundOn] = useState(loadFund);
   const [bboOn, setBboOn] = useState(loadBbo);
   const [mayRektOn, setMayRektOn] = useState(loadMayRekt);
+  const [fillsOn, setFillsOn] = useState(loadFills);
   const [mode, setMode] = useState<ChartMode>(loadMode);
   const [scanTab, setScanTab] = useState<ScanTab>(loadScanTab);
   const [watchWindow, setWatchWindow] = useState<WatchWindow>(loadWatchWindow);
@@ -214,10 +215,10 @@ export const ChartWidget = memo(function ChartWidget({
     return rate != null && Number.isFinite(rate) ? rate : null;
   }, [chartMarket, quotedFunding]);
   const fillMarkList = useMemo(() => {
-    if (!isPrice || !chartMarket) return EMPTY_FILLS;
+    if (!isPrice || !chartMarket || !fillsOn) return EMPTY_FILLS;
     const rest = fillPage?.key === chartMarket.market_index ? fillPage.rows : [];
     return fillMarks([...rest, ...liveFills], chartMarket.market_index, bar.seconds);
-  }, [isPrice, chartMarket, fillPage, liveFills, bar.seconds]);
+  }, [isPrice, chartMarket, fillsOn, fillPage, liveFills, bar.seconds]);
   const hoverFills =
     hover?.key === seriesKey && hover.time != null
       ? fillMarkList.filter((mark) => mark.time === hover.time)
@@ -457,6 +458,8 @@ export const ChartWidget = memo(function ChartWidget({
       setBboOn={setBboOn}
       mayRektOn={mayRektOn}
       setMayRektOn={setMayRektOn}
+      fillsOn={fillsOn}
+      setFillsOn={setFillsOn}
       axisArmed={axisArmed}
       setAxisArmed={setAxisArmed}
       quickOn={quickOn}

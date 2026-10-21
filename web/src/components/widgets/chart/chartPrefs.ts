@@ -5,6 +5,7 @@ export const OI_KEY = "mayedge-chart-oi";
 export const FUND_KEY = "mayedge-chart-fund";
 export const BBO_KEY = "mayedge-chart-bbo";
 export const MAYREKT_KEY = "mayedge-chart-mayrekt";
+export const FILLS_KEY = "mayedge-chart-fills";
 export const MODE_KEY = "mayedge-chart-mode";
 export const SCAN_TAB_KEY = "mayedge-scan-tab";
 export const RIGHT_OFFSET = 8;
@@ -42,6 +43,15 @@ export function loadBbo(): boolean {
     return localStorage.getItem(BBO_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+/** Fill marks are on unless turned off. */
+export function loadFills(): boolean {
+  try {
+    return localStorage.getItem(FILLS_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 

@@ -29,6 +29,7 @@ import { WATCH_WINDOWS, WATCH_WINDOW_SEC, persistWatchWindow, type WatchWindow }
 import {
   BBO_KEY,
   CHART_MODES,
+  FILLS_KEY,
   FUND_KEY,
   MAYREKT_KEY,
   MODE_KEY,
@@ -87,6 +88,8 @@ export function ChartFrame(props: {
   setBboOn: Dispatch<SetStateAction<boolean>>;
   mayRektOn: boolean;
   setMayRektOn: Dispatch<SetStateAction<boolean>>;
+  fillsOn: boolean;
+  setFillsOn: Dispatch<SetStateAction<boolean>>;
   axisArmed: boolean;
   setAxisArmed: (next: boolean) => void;
   quickOn: boolean;
@@ -119,7 +122,7 @@ export function ChartFrame(props: {
     symbol, markets, onSymbolChange, onClose, children, priceDecimals,
     tf, setTf, pins, setPins, mode, setMode, scanTab, setScanTab,
     watchWindow, setWatchWindow, volOn, setVolOn, oiOn, setOiOn, fundOn, setFundOn,
-    bboOn, setBboOn, mayRektOn, setMayRektOn, axisArmed, setAxisArmed, quickOn, setQuickOn,
+    bboOn, setBboOn, mayRektOn, setMayRektOn, fillsOn, setFillsOn, axisArmed, setAxisArmed, quickOn, setQuickOn,
     liqHours, setLiqHours, isPrice, isScan, isWatch, popped, showOi, showFund, bar,
     wrapRef, containerRef, shownQtyEdit, setQtyEdit, marketByIndex, amendRef, onAmendRef,
     display, hover, hoverBar, seriesKey, liveOi, fundBars, hoverFills,
@@ -230,6 +233,18 @@ export function ChartFrame(props: {
     });
   };
 
+  const toggleFills = () => {
+    setFillsOn((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem(FILLS_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   const toggleMayRekt = () => {
     setMayRektOn((on) => {
       const next = !on;
@@ -311,6 +326,16 @@ export function ChartFrame(props: {
                 onPressedChange={() => toggleMayRekt()}
               >
                 MR
+              </Toggle>
+              <Toggle
+                variant="seg"
+                size="sm"
+                pressed={fillsOn}
+                title={fillsOn ? "Hide your fills" : "Show your fills"}
+                className="h-6 px-1.5 font-mono text-sm"
+                onPressedChange={() => toggleFills()}
+              >
+                Fills
               </Toggle>
               <span className="mx-1 h-3 w-px shrink-0 bg-border" aria-hidden />
               <Toggle

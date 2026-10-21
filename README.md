@@ -24,7 +24,7 @@ Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout ed
 
 One panel, three modes — not extra mosaic tiles.
 
-- **Price chart** — candles, volume, Top of Book, with optional Open interest and **Fund pane**s underneath. **Pinned timeframes** (cap 7), including custom ones folded from a native resolution. **MayRekt** colors each candle by its **Tone**. Working Tickets draw on the chart: drag the line to Amend, click X to cancel. Clips, Planner and Trail lines are display-only. Armed **Axis** click on the price scale rests a GTT Ticket at Quick size (below live price buys, above sells).
+- **Price chart** — candles, volume, Top of Book, with optional Open interest and **Fund pane**s underneath. **Pinned timeframes** (cap 7), including custom ones folded from a native resolution. **MayRekt** colors each candle by its **Tone**. Working Tickets draw on the chart: drag the line to Amend, click X to cancel. Clips, Planner and Trail lines are display-only. Armed **Axis** click on the price scale rests a GTT Ticket at Quick size (below live price buys, above sells). Your fills mark their candles; **Fills** in the chart header hides them.
 - **Scan** — four boards of the liquid perps. Nothing on Scan alerts.
   - **Relative Strength** vs BTC.
   - Liquidation heat over a 1h / 4h / 24h / 7d / 30d window: **Window share**, **Liquidation intensity**, **Largest liquidation**.
