@@ -10,6 +10,8 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from mayedge.api.turn import breathe
+
 logger = logging.getLogger(__name__)
 
 BroadcastFn = Callable[[dict[str, Any]], Awaitable[None]]
@@ -38,6 +40,7 @@ async def send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     """Send JSON, mapping a client that already left to WebSocketDisconnect."""
     if not ws_connected(ws):
         raise WebSocketDisconnect()
+    await breathe()
     try:
         await ws.send_json(payload)
     except RuntimeError as e:

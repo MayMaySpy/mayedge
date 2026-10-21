@@ -17,7 +17,7 @@ from mayedge.alive import last_down, mark_clean, note_boot, start_alive
 from mayedge.api.guard import BrowserGuard
 from mayedge.api.routes import include_api
 from mayedge.api.spa import mount_spa
-from mayedge.api.turn import LoopTurn
+from mayedge.api.turn import LoopTurn, breathe
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.auto_kill import auto_kill
 from mayedge.backup import health as backup_health
@@ -228,13 +228,15 @@ def create_app() -> FastAPI:
     async def websocket_endpoint(ws: WebSocket) -> None:
         await manager.connect(ws)
         try:
+            await breathe()
+            markets = [m.as_public_dict() for m in gateway.list_markets()]
             await send_json(
                 ws,
                 {
                     "type": "init",
                     "network": settings.lighter_network.value,
                     "trading_enabled": order_service.enabled,
-                    "markets": [m.as_public_dict() for m in gateway.list_markets()],
+                    "markets": markets,
                 },
             )
             acct = account_service.cached_account_payload()
@@ -242,7 +244,9 @@ def create_app() -> FastAPI:
                 payload = dict(acct)
                 payload.pop("venue", None)
                 await send_json(ws, payload)
-            await send_json(ws, desk.algo_book())
+            await breathe()
+            book = desk.algo_book()
+            await send_json(ws, book)
             await send_json(ws, auto_kill.view())
             await send_json(ws, feed_health.snapshot())
             await send_json(ws, budget.snapshot())

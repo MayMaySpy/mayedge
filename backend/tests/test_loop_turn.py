@@ -6,10 +6,13 @@ import asyncio
 import time
 import unittest
 from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 from starlette.types import Receive, Scope, Send
+from starlette.websockets import WebSocketState
 
 from mayedge.api.turn import LoopTurn
+from mayedge.api.ws import send_json
 
 
 async def _gap(awaitable: object) -> float:
@@ -55,6 +58,38 @@ class LoopTurnTests(unittest.IsolatedAsyncioTestCase):
         gap = await _gap(asyncio.gather(once(), once(), once(), once()))
         self.assertEqual(ran, 4)
         # Four 15 ms handlers in one turn would be about 60 ms.
+        self.assertLess(gap, 20.0)
+
+    async def test_sends_do_not_add_up_with_handlers(self) -> None:
+        async def burn(_payload: object) -> None:
+            end = time.perf_counter() + 0.015
+            while time.perf_counter() < end:
+                pass
+
+        def socket() -> MagicMock:
+            ws = MagicMock()
+            ws.client_state = WebSocketState.CONNECTED
+            ws.application_state = WebSocketState.CONNECTED
+            ws.send_json = AsyncMock(side_effect=burn)
+            return ws
+
+        async def once_send() -> None:
+            await send_json(socket(), {"type": "init"})
+
+        async def app(scope: Scope, receive: Receive, send: Send) -> None:
+            del scope, receive, send
+            end = time.perf_counter() + 0.015
+            while time.perf_counter() < end:
+                pass
+
+        turn = LoopTurn(app)
+
+        async def once_http() -> None:
+            await turn(cast(Scope, {"type": "http"}), _receive, _send)
+
+        gap = await _gap(
+            asyncio.gather(once_http(), once_http(), once_send(), once_send())
+        )
         self.assertLess(gap, 20.0)
 
 
