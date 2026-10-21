@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from mayedge.algos.common import in_coi_range
+
 GRID_COI_BASE = 10_000_000_000
 GRID_COI_END = 11_000_000_000
+
+
+def is_grid_client_order(coi: int | None) -> bool:
+    return in_coi_range(coi, GRID_COI_BASE, GRID_COI_END)
+
+
 HISTORY_CAP = 30
 
 # Two live chase clips — stagger requotes vs single chase.

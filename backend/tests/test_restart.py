@@ -18,7 +18,6 @@ from unittest.mock import patch
 from mayedge import db as store
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END, MIN_REQUOTE_MS
-from mayedge.algos.grid import util as grid_util
 from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
@@ -66,7 +65,7 @@ class RestartTests(IsolatedAsyncioTestCase):
         gateway = FakeGateway()
         orders = FakeOrderService()
         clock = FakeClock()
-        with patch.object(util, "now_ms", clock):
+        with patch("mayedge.algos.common.now_ms", clock):
             boot = boot_job(
                 clock=clock,
                 params=buy_params(qty=D("10"), display_qty=D("1")),
@@ -137,8 +136,7 @@ class RestartTests(IsolatedAsyncioTestCase):
         orders = FakeOrderService()
         clock = FakeClock()
         with (
-            patch.object(util, "now_ms", clock),
-            patch.object(grid_util, "now_ms", clock),
+            patch("mayedge.algos.common.now_ms", clock),
         ):
             boot = boot_grid_job(gateway=gateway, orders=orders, clock=clock)
             await boot.job._evaluate()
@@ -223,10 +221,7 @@ class RestartTests(IsolatedAsyncioTestCase):
             broadcast=gateway.broadcast,
         )
         again: object | None = None
-        with (
-            patch("mayedge.algos.common.now_ms", clock),
-            patch.object(util, "now_ms", clock),
-        ):
+        with patch("mayedge.algos.common.now_ms", clock):
             await book.start(market_index=1, params=params)
             job = next(iter(book._jobs.values()))
             await _quiet(job)
