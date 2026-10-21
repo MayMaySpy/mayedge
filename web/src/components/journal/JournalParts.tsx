@@ -5,6 +5,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -77,7 +78,7 @@ function Stat({ label, value, tone, hint }: { label: string; value: string; tone
     <div className="flex min-w-0 flex-col gap-0.5">
       <span className="truncate text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-baseline gap-1.5">
-        <span className={cn("truncate font-mono tabular-nums", tone)} title={value}>
+        <span className={cn("shrink-0 font-mono tabular-nums", tone)}>
           {value}
         </span>
         {hint ? <span className="truncate text-xs text-muted-foreground">{hint}</span> : null}
@@ -214,11 +215,13 @@ export function JournalStats({
 function BreakdownRow({ label, row, total = false }: { label: string; row: JournalSummaryGroup; total?: boolean }) {
   return (
     <TableRow className={total ? "border-t border-border font-medium" : undefined}>
-      <TableCell className="font-mono">{label}</TableCell>
-      <TableCell className="text-right font-mono tabular-nums">{row.count}</TableCell>
-      <TableCell className="text-right font-mono tabular-nums">{pct(row.win_rate)}</TableCell>
-      <TableCell className="text-right font-mono tabular-nums">{ratio(row.profit_factor)}</TableCell>
-      <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.net))}>{money(row.net)}</TableCell>
+      <TableCell>
+        <TableName>{label}</TableName>
+      </TableCell>
+      <TableCell className="text-right">{row.count}</TableCell>
+      <TableCell hideBelow="2xs" className="text-right">{pct(row.win_rate)}</TableCell>
+      <TableCell hideBelow="2xs" className="text-right">{ratio(row.profit_factor)}</TableCell>
+      <TableCell className={cn("text-right", pnlClass(row.net))}>{money(row.net)}</TableCell>
     </TableRow>
   );
 }
@@ -244,8 +247,8 @@ export function JournalBreakdown({
           <TableRow>
             <TableHead>{column}</TableHead>
             <TableHead className="text-right">Trips</TableHead>
-            <TableHead className="text-right">Win %</TableHead>
-            <TableHead className="text-right">PF</TableHead>
+            <TableHead hideBelow="2xs" className="text-right">Win %</TableHead>
+            <TableHead hideBelow="2xs" className="text-right">PF</TableHead>
             <TableHead className="text-right">Net</TableHead>
           </TableRow>
         </TableHeader>
@@ -286,16 +289,16 @@ export function JournalTrips({ journal }: { journal: JournalState }) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Market</TableHead>
-          <TableHead>Side</TableHead>
+          <TableHead className="pl-2.5">Market</TableHead>
+          <TableHead hideBelow="lg">Side</TableHead>
           <TableHead>Opened (UTC)</TableHead>
-          <TableHead>Held</TableHead>
-          <TableHead className="text-right">Size</TableHead>
-          <TableHead className="text-right">Avg</TableHead>
+          <TableHead hideBelow="lg">Held</TableHead>
+          <TableHead hideBelow="md" className="text-right">Size</TableHead>
+          <TableHead hideBelow="md" className="text-right">Avg</TableHead>
           <TableHead className="text-right">Net</TableHead>
-          <TableHead className="text-right">R</TableHead>
-          <TableHead>Algo</TableHead>
-          <TableHead>Note</TableHead>
+          <TableHead hideBelow="lg" className="text-right">R</TableHead>
+          <TableHead hideBelow="3xl">Algo</TableHead>
+          <TableHead hideBelow="3xl">Note</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -328,27 +331,30 @@ function TripRows({
   return (
     <>
       <TableRow
+        accent={trip.side === "long" ? "bid" : "ask"}
         className={cn("cursor-pointer", trip.partial && "opacity-60")}
         title={trip.partial_reason ?? undefined}
         onClick={onToggle}
       >
-        <TableCell className="font-mono">{trip.symbol}</TableCell>
-        <TableCell className={trip.side === "long" ? "text-bid" : "text-ask"}>
+        <TableCell className="pl-2.5">
+          <TableName>{trip.symbol}</TableName>
+        </TableCell>
+        <TableCell hideBelow="lg" className={trip.side === "long" ? "text-bid" : "text-ask"}>
           {trip.open ? `${trip.side} · open` : trip.side}
         </TableCell>
-        <TableCell className="whitespace-nowrap font-mono">{when(trip.open_ts)}</TableCell>
-        <TableCell className="font-mono">{heldFor(trip.open_ts, trip.close_ts)}</TableCell>
-        <TableCell className="text-right font-mono tabular-nums">{size(trip.size)}</TableCell>
-        <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
+        <TableCell>{when(trip.open_ts)}</TableCell>
+        <TableCell hideBelow="lg">{heldFor(trip.open_ts, trip.close_ts)}</TableCell>
+        <TableCell hideBelow="md" className="text-right">{size(trip.size)}</TableCell>
+        <TableCell hideBelow="md" className="text-right">
           {marketPrice(trip.avg_in, trip.symbol)}
           {trip.avg_out ? ` → ${marketPrice(trip.avg_out, trip.symbol)}` : ""}
         </TableCell>
-        <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(net))}>{money(net)}</TableCell>
-        <TableCell className={cn("text-right font-mono tabular-nums", trip.r ? pnlClass(trip.r) : undefined)}>
+        <TableCell className={cn("text-right", pnlClass(net))}>{money(net)}</TableCell>
+        <TableCell hideBelow="lg" className={cn("text-right", trip.r ? pnlClass(trip.r) : undefined)}>
           {rValue(trip.r)}
         </TableCell>
-        <TableCell>{trip.algo}</TableCell>
-        <TableCell onClick={(e) => e.stopPropagation()}>
+        <TableCell hideBelow="3xl">{trip.algo}</TableCell>
+        <TableCell hideBelow="3xl" onClick={(e) => e.stopPropagation()}>
           <input
             aria-label={`Note for ${trip.symbol}`}
             defaultValue={trip.note}
@@ -364,17 +370,16 @@ function TripRows({
       {open
         ? trip.fills.map((fill) => (
             <TableRow key={fill.trade_id} className="text-muted-foreground">
-              <TableCell className="font-mono">{fill.closing ? "close" : "open"}</TableCell>
-              <TableCell>{fill.side}</TableCell>
-              <TableCell className="whitespace-nowrap font-mono">{when(fill.ts)}</TableCell>
-              <TableCell>{fill.is_maker ? "maker" : "taker"}</TableCell>
-              <TableCell className="text-right font-mono tabular-nums">{size(fill.size)}</TableCell>
-              <TableCell className="text-right font-mono tabular-nums">{marketPrice(fill.price, trip.symbol)}</TableCell>
-              <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(fill.pnl))}>
-                {money(fill.pnl)}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums">{money(fill.fee)}</TableCell>
-              <TableCell colSpan={2} />
+              <TableCell className="pl-2.5">{fill.closing ? "close" : "open"}</TableCell>
+              <TableCell hideBelow="lg">{fill.side}</TableCell>
+              <TableCell>{when(fill.ts)}</TableCell>
+              <TableCell hideBelow="lg">{fill.is_maker ? "maker" : "taker"}</TableCell>
+              <TableCell hideBelow="md" className="text-right">{size(fill.size)}</TableCell>
+              <TableCell hideBelow="md" className="text-right">{marketPrice(fill.price, trip.symbol)}</TableCell>
+              <TableCell className={cn("text-right", pnlClass(fill.pnl))}>{money(fill.pnl)}</TableCell>
+              <TableCell hideBelow="lg" className="text-right">{money(fill.fee)}</TableCell>
+              <TableCell hideBelow="3xl" />
+              <TableCell hideBelow="3xl" />
             </TableRow>
           ))
         : null}

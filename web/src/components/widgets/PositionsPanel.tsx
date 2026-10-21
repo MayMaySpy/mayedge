@@ -1,6 +1,7 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
+import { OverflowMenu } from "@/components/desk/OverflowMenu";
 import { PanelCloseButton } from "@/components/desk/PanelHeader";
 import { PositionProtectPopover } from "@/components/widgets/PositionProtectPopover";
 import { PositionPlanButton } from "@/components/widgets/planner/PositionPlanButton";
@@ -10,6 +11,7 @@ import { AssetsTab } from "@/components/widgets/account/AssetsTab";
 import { AlgoOrdersPanel } from "@/components/widgets/AlgoOrdersPanel";
 import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -18,13 +20,16 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
+  type HideBelow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useToolbarFold } from "@/hooks/useToolbarFold";
 import { useTradingReady } from "@/hooks/useTradingReady";
-import { formatUsdNotional, trimQty } from "@/components/widgets/orderTicket/math";
+import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api, isLongPosition, type Market, type OpenOrder, type Position } from "@/lib/api";
 import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
 import { setAlgo, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
@@ -39,7 +44,7 @@ import {
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatPctAbs, formatSigned, formatSize, formatUsd } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 
 const TradeHistoryTab = lazy(() =>
@@ -152,16 +157,18 @@ function SortHead({
   sort,
   onSort,
   title,
+  hideBelow,
 }: {
   label: string;
   column: PosSortKey;
   sort: PosSort;
   onSort: (key: PosSortKey) => void;
   title?: string;
+  hideBelow?: HideBelow;
 }) {
   const active = sort.key === column;
   return (
-    <TableHead className="text-right">
+    <TableHead hideBelow={hideBelow} className="text-right">
       <button
         type="button"
         title={title ?? `Sort by ${label}`}
@@ -409,6 +416,26 @@ export function PositionsPanel({
   const accountRoe = usedMargin > 0 ? (totalPnl / usedMargin) * 100 : null;
   const winners = positionsForClose(liveRows, "winners");
   const losers = positionsForClose(liveRows, "losers");
+  const closeBlocked = !tradingEnabled || !feed.ready || busy != null;
+  const closeChoices = [
+    { filter: "winners", label: "W", noun: "winners", menu: "Close winners", count: winners.length, className: "text-bid hover:text-bid" },
+    { filter: "losers", label: "L", noun: "losers", menu: "Close losers", count: losers.length, className: "text-ask hover:text-ask" },
+    { filter: "all", label: "All", noun: "positions", menu: "Close all", count: liveRows.length, className: undefined },
+  ] as const;
+
+  // A narrow panel folds the close chips into `…` first, then the uPnL readout.
+  const barRef = useRef<HTMLDivElement>(null);
+  const folded = useToolbarFold(
+    barRef,
+    2,
+    `${winners.length}:${losers.length}:${liveRows.length}:${formatSigned(totalPnl).length}`
+  );
+  const pnlReadout = (
+    <span className={cn("font-mono text-sm tabular-nums", pnlClass(totalPnl))}>
+      {formatSigned(totalPnl)}
+      {accountRoe != null && <span className="ml-1 text-xs">({formatPctAbs(accountRoe)})</span>}
+    </span>
+  );
 
   const closeMany = async (filter: CloseFilter) => {
     if (!tradingEnabled) {
@@ -453,8 +480,8 @@ export function PositionsPanel({
         onValueChange={setTab}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="panel-drag flex h-8 shrink-0 items-center border-b border-rule pr-1">
-          <TabsList className="min-w-0 px-1">
+        <div ref={barRef} className="panel-drag flex h-8 shrink-0 items-center border-b border-rule pr-1">
+          <TabsList className="min-w-0 overflow-hidden px-1">
             <TabsTrigger value="positions">
               Positions
               <span className="ml-1 font-mono text-xs text-muted-foreground">({openPositions.length})</span>
@@ -477,45 +504,55 @@ export function PositionsPanel({
             <TabsTrigger value="journal">Journal</TabsTrigger>
           </TabsList>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <div className="flex items-center gap-1">
-              <CloseFilterButton
-                label="W"
-                count={winners.length}
-                noun="winners"
-                className="text-bid hover:text-bid"
-                disabled={!tradingEnabled || !feed.ready || busy != null || winners.length === 0}
-                onClick={() => void closeMany("winners")}
-              />
-              <CloseFilterButton
-                label="L"
-                count={losers.length}
-                noun="losers"
-                className="text-ask hover:text-ask"
-                disabled={!tradingEnabled || !feed.ready || busy != null || losers.length === 0}
-                onClick={() => void closeMany("losers")}
-              />
-              <CloseFilterButton
-                label="All"
-                count={liveRows.length}
-                noun="positions"
-                disabled={!tradingEnabled || !feed.ready || busy != null || liveRows.length === 0}
-                onClick={() => void closeMany("all")}
-              />
-            </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
-                  <span className="text-sm text-muted-foreground">uPnL</span>
-                  <span className={cn("font-mono text-sm tabular-nums", pnlClass(totalPnl))}>
-                    {formatSigned(totalPnl)}
-                    {accountRoe != null && (
-                      <span className="ml-1 text-xs">({formatPctAbs(accountRoe)})</span>
-                    )}
+            {folded < 1 ? (
+              <div className="flex items-center gap-1">
+                {closeChoices.map((c) => (
+                  <CloseFilterButton
+                    key={c.filter}
+                    label={c.label}
+                    count={c.count}
+                    noun={c.noun}
+                    className={c.className}
+                    disabled={closeBlocked || c.count === 0}
+                    onClick={() => void closeMany(c.filter)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {folded < 2 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex cursor-default items-baseline gap-1.5 px-1">
+                    <span className="text-sm text-muted-foreground">uPnL</span>
+                    {pnlReadout}
                   </span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Unrealized PnL across open positions</TooltipContent>
-            </Tooltip>
+                </TooltipTrigger>
+                <TooltipContent>Unrealized PnL across open positions</TooltipContent>
+              </Tooltip>
+            ) : null}
+            {folded > 0 ? (
+              <OverflowMenu label="More position controls">
+                {folded > 1 ? (
+                  <>
+                    <DropdownMenuLabel className="flex items-baseline gap-1.5">
+                      <span className="text-muted-foreground">uPnL</span>
+                      {pnlReadout}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                {closeChoices.map((c) => (
+                  <DropdownMenuItem
+                    key={c.filter}
+                    className={c.className}
+                    disabled={closeBlocked || c.count === 0}
+                    onSelect={() => void closeMany(c.filter)}
+                  >
+                    {c.menu} ({c.count})
+                  </DropdownMenuItem>
+                ))}
+              </OverflowMenu>
+            ) : null}
             {onClose ? <PanelCloseButton onClose={onClose} /> : null}
           </div>
         </div>
@@ -545,19 +582,20 @@ export function PositionsPanel({
                     <SortHead
                       label="Notional"
                       column="notional"
+                      hideBelow="xl"
                       sort={posSort}
                       onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
                     />
-                    <TableHead className="text-right">Entry</TableHead>
-                    <TableHead className="text-right">Liq</TableHead>
+                    <TableHead hideBelow="lg" className="text-right">Entry</TableHead>
+                    <TableHead hideBelow="2xl" className="text-right">Liq</TableHead>
                     <SortHead
                       label="uPnL"
                       column="pnl"
                       sort={posSort}
                       onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
                     />
-                    <TableHead className="text-right">Funding</TableHead>
-                    <TableHead className="text-right">TP/SL</TableHead>
+                    <TableHead hideBelow="2xl" className="text-right">Funding</TableHead>
+                    <TableHead hideBelow="sm" className="text-right">TP/SL</TableHead>
                     <TableHead className="text-right" />
                   </TableRow>
                 </TableHeader>
@@ -581,10 +619,8 @@ export function PositionsPanel({
                             : undefined
                         }
                         title={onSymbolChange ? `Switch to ${p.symbol}` : undefined}
+                        accent={long ? "bid" : "ask"}
                         className={cn(
-                          long
-                            ? "shadow-[inset_2px_0_0_0_var(--color-bid)]"
-                            : "shadow-[inset_2px_0_0_0_var(--color-ask)]",
                           market &&
                             p.market_index === market.market_index &&
                             "bg-elevated/35",
@@ -592,26 +628,28 @@ export function PositionsPanel({
                         )}
                       >
                         <TableCell className="pl-2.5">
-                          <span
+                          <TableName
                             className={cn(
                               long ? "text-bid" : "text-ask",
                               market?.market_index === p.market_index && "underline"
                             )}
                           >
                             {p.symbol}
-                          </span>
-                          <span className="ml-1.5 text-muted-foreground">
+                          </TableName>
+                          <span className="ml-1.5 text-muted-foreground @max-lg/table:hidden">
                             {p.leverage}x {p.margin_mode}
                           </span>
                         </TableCell>
                         <TableCell className={cn("text-right", long ? "text-bid" : "text-ask")}>
                           {formatSize(Math.abs(n(p.size)))}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatUsdNotional(notional) || "—"}
+                        <TableCell hideBelow="xl" className="text-right">
+                          {notional > 0 ? formatUsd(notional) : "—"}
                         </TableCell>
-                        <TableCell className="text-right">{marketPrice(p.entry_price, p.symbol)}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell hideBelow="lg" className="text-right">
+                          {marketPrice(p.entry_price, p.symbol)}
+                        </TableCell>
+                        <TableCell hideBelow="2xl" className="text-right">
                           {liq > 0 ? marketPrice(p.liquidation_price, p.symbol) : "—"}
                           {cushion != null && (
                             <span
@@ -624,16 +662,17 @@ export function PositionsPanel({
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className={cn("text-right text-lg font-medium", pnlClass(pnl))}>
+                        <TableCell className={cn("text-right font-medium", pnlClass(pnl))}>
                           {formatSigned(pnl)}
                           {roe != null && (
                             <span className="ml-1 text-xs font-normal">({formatPctAbs(roe)})</span>
                           )}
                         </TableCell>
-                        <TableCell className={cn("text-right", pnlClass(fund))}>
+                        <TableCell hideBelow="2xl" className={cn("text-right", pnlClass(fund))}>
                           {formatSigned(p.funding_paid)}
                         </TableCell>
                         <TableCell
+                          hideBelow="sm"
                           className="text-right"
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -688,7 +727,7 @@ export function PositionsPanel({
                                 size="icon"
                                 disabled={!tradingEnabled || busy != null}
                                 onClick={() => closePosition(p)}
-                                className="size-7"
+                                className="size-6"
                               >
                                 <X strokeWidth={2.25} />
                               </Button>
@@ -784,7 +823,7 @@ export function PositionsPanel({
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Market</TableHead>
-                    <TableHead>Side</TableHead>
+                    <TableHead hideBelow="sm">Side</TableHead>
                     <TableHead className="text-right">Price</TableHead>
                     <TableHead className="text-right">Remaining</TableHead>
                     <TableHead className="text-right" />
@@ -797,8 +836,8 @@ export function PositionsPanel({
                     });
                     const sltp = !algoKind ? stopTakeKind(o.order_type) : null;
                     return (
-                    <TableRow key={o.order_index}>
-                      <TableCell>
+                    <TableRow key={o.order_index} accent={o.side === "buy" ? "bid" : "ask"}>
+                      <TableCell className="pl-2.5">
                         <span className="inline-flex items-baseline gap-1">
                           {onSymbolChange ? (
                             <Tooltip>
@@ -809,17 +848,17 @@ export function PositionsPanel({
                                   size="sm"
                                   onClick={() => onSymbolChange(o.symbol)}
                                   className={cn(
-                                    "h-auto px-0 text-base hover:underline",
+                                    "h-auto px-0 hover:underline",
                                     market?.market_index === o.market_index && "underline"
                                   )}
                                 >
-                                  {o.symbol}
+                                  <TableName>{o.symbol}</TableName>
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>Switch to {o.symbol}</TooltipContent>
                             </Tooltip>
                           ) : (
-                            o.symbol
+                            <TableName>{o.symbol}</TableName>
                           )}
                           {algoKind ? (
                             <span className="text-xs text-muted-foreground">{algoKind}</span>
@@ -830,7 +869,7 @@ export function PositionsPanel({
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell className={o.side === "buy" ? "text-bid" : "text-ask"}>
+                      <TableCell hideBelow="sm" className={o.side === "buy" ? "text-bid" : "text-ask"}>
                         {o.side}
                       </TableCell>
                       <TableCell className="text-right">
@@ -856,7 +895,7 @@ export function PositionsPanel({
                             {formatSize(o.remaining)}
                           </button>
                         ) : (
-                          <span className="font-mono tabular-nums">{formatSize(o.remaining)}</span>
+                          <span>{formatSize(o.remaining)}</span>
                         )}
                         {orderQtyEditable(o) && tradingEnabled && editingOrder === o.order_index ? (
                           <OrderRemainingEditor
@@ -876,6 +915,7 @@ export function PositionsPanel({
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-6"
                             disabled={!tradingEnabled}
                             onClick={() => cancelOrder(o.market_index, o.order_index)}
                           >

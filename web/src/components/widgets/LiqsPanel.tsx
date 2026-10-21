@@ -12,12 +12,14 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
+  type RowAccent,
 } from "@/components/ui/table";
 import { isSignificantLiq, liqUsd } from "@/lib/liqs";
 import { useLiveLiquidations, type LiquidationEvent } from "@/lib/liveData";
 import { liqIdentity, pairLabel } from "@/lib/venuePair";
-import { cn, formatSize } from "@/lib/utils";
+import { cn, formatSize, formatUsdCompact } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
 
@@ -66,16 +68,16 @@ function persist(key: string, value: string) {
 
 function formatUsd(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return n.toFixed(0);
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
+  return formatUsdCompact(n);
 }
 
-function sigRowClass(l: LiquidationEvent, tint: boolean): string | undefined {
-  if (!tint) return undefined;
-  if (l.side === "buy") return "bg-bid/15";
-  if (l.side === "sell") return "bg-ask/15";
-  return "bg-warn/15";
+function sigAccent(l: LiquidationEvent, tint: boolean): RowAccent | null {
+  if (!tint) return null;
+  if (l.side === "buy") return "bid";
+  if (l.side === "sell") return "ask";
+  return "warn";
 }
 
 interface LiqsPanelProps {
@@ -150,10 +152,10 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
             <TableRow className="hover:bg-transparent">
-              <TableHead>Time (UTC)</TableHead>
+              <TableHead hideBelow="2xs" className="pl-2.5">Time (UTC)</TableHead>
               <TableHead>Pair</TableHead>
-              <TableHead>Kind</TableHead>
-              <TableHead className="text-right">Size</TableHead>
+              <TableHead hideBelow="md">Kind</TableHead>
+              <TableHead hideBelow="sm" className="text-right">Size</TableHead>
               <TableHead className="text-right">Px</TableHead>
               <TableHead className="text-right">USD</TableHead>
             </TableRow>
@@ -179,16 +181,19 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
                 return (
                   <TableRow
                     key={liqIdentity(l.trade_id)}
-                    className={cn("cursor-pointer", sigRowClass(l, tint))}
+                    accent={sigAccent(l, tint)}
+                    className="cursor-pointer"
                     title={`${kind} ${pairLabel(l.symbol)}${l.fill_count != null && l.fill_count > 1 ? ` · ${l.fill_count} fills` : ""}${significant ? " · significant" : ""}`}
                     onClick={() => onOpenPair?.(l.symbol)}
                   >
-                    <TableCell className="text-muted-foreground">{utcClock(l.timestamp)}</TableCell>
-                    <TableCell className={cn(l.side === "buy" ? "text-bid" : "text-ask")}>
-                      {pairLabel(l.symbol)}
+                    <TableCell hideBelow="2xs" className="pl-2.5 text-muted-foreground">{utcClock(l.timestamp)}</TableCell>
+                    <TableCell>
+                      <TableName className={l.side === "buy" ? "text-bid" : "text-ask"}>
+                        {pairLabel(l.symbol)}
+                      </TableName>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{kind}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    <TableCell hideBelow="md" className="text-muted-foreground">{kind}</TableCell>
+                    <TableCell hideBelow="sm" className="text-right text-muted-foreground">
                       {formatSize(l.size)}
                       {l.fill_count != null && l.fill_count > 1 ? (
                         <span className="ml-1 text-xs">×{l.fill_count}</span>

@@ -6,7 +6,9 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
+  type HideBelow,
 } from "@/components/ui/table";
 import type { Market } from "@/lib/api";
 import { formatFundingPct } from "@/lib/marketPicker";
@@ -25,15 +27,16 @@ type PersistedSort = { key: RsSort; dir: RsSortDir };
 const COLS: {
   key: RsSort | null;
   label: string;
+  hideBelow?: HideBelow;
   align: "start" | "end";
 }[] = [
-  { key: null, label: "#", align: "end" },
+  { key: null, label: "#", align: "end", hideBelow: "lg" },
   { key: null, label: "Market", align: "start" },
   { key: null, label: "24h", align: "end" },
   { key: "rs", label: "vs BTC", align: "end" },
-  { key: "volume", label: "Volume", align: "end" },
-  { key: "oi", label: "OI", align: "end" },
-  { key: null, label: "Funding", align: "end" },
+  { key: "volume", label: "Volume", align: "end", hideBelow: "sm" },
+  { key: "oi", label: "OI", align: "end", hideBelow: "md" },
+  { key: null, label: "Funding", align: "end", hideBelow: "md" },
 ];
 
 function loadSort(): PersistedSort {
@@ -99,7 +102,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
     const container = scrollerRef.current;
     const row = rowRefs.current.get(selected);
     if (!container || !row) return;
-    alignRowToTop(container, row, 32);
+    alignRowToTop(container, row, 24);
   }, [selected, selectedOnBoard]);
 
   const setSortMode = (key: RsSort) => {
@@ -113,23 +116,21 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
     <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-panel">
-          <TableRow className="h-8 hover:bg-transparent">
+          <TableRow className="hover:bg-transparent">
             {COLS.map((col) => {
               const sortKey = col.key;
               return (
               <TableHead
                 key={col.label}
-                className={cn(
-                  "font-mono text-xs tracking-wide uppercase",
-                  col.align === "end" ? "text-right" : "text-left"
-                )}
+                hideBelow={col.hideBelow}
+                className={col.align === "end" ? "text-right" : undefined}
               >
                 {sortKey ? (
                   <button
                     type="button"
                     onClick={() => setSortMode(sortKey)}
                     className={cn(
-                      "inline-flex items-center gap-0.5 uppercase hover:text-text",
+                      "inline-flex items-center gap-0.5 hover:text-text",
                       col.align === "end" && "ml-auto",
                       sort.key === sortKey && "text-text"
                     )}
@@ -164,21 +165,16 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
                     else rowRefs.current.delete(key);
                   }}
                   data-state={isSelected ? "selected" : undefined}
-                  className="h-9 cursor-pointer tabular-nums"
+                  className="cursor-pointer"
                   onClick={() => onSymbolChange?.(row.symbol)}
                 >
-                  <TableCell className="text-right text-muted-foreground">{i + 1}</TableCell>
+                  <TableCell hideBelow="lg" className="text-right text-muted-foreground">{i + 1}</TableCell>
                   <TableCell>
                     <div className="flex min-w-0 items-center gap-2">
-                      <TokenMark symbol={row.symbol} />
-                      <span
-                        className={cn(
-                          "font-sans text-lg",
-                          row.isNumeraire ? "text-muted-foreground" : "text-text"
-                        )}
-                      >
+                      <TokenMark symbol={row.symbol} className="size-4" />
+                      <TableName className={row.isNumeraire ? "text-muted-foreground" : "text-text"}>
                         {row.symbol}
-                      </span>
+                      </TableName>
                     </div>
                   </TableCell>
                   <TableCell className={cn("text-right", signedClass(row.change24h))}>
@@ -187,13 +183,13 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
                   <TableCell className={cn("text-right", signedClass(row.relativeStrength))}>
                     {formatPct(row.relativeStrength)}
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
+                  <TableCell hideBelow="sm" className="text-right text-muted-foreground">
                     {formatUsdCompact(row.volume24h) || "—"}
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
+                  <TableCell hideBelow="md" className="text-right text-muted-foreground">
                     {formatUsdCompact(row.openInterest) || "—"}
                   </TableCell>
-                  <TableCell className={cn("text-right", fundingClass(row.fundingRate))}>
+                  <TableCell hideBelow="md" className={cn("text-right", fundingClass(row.fundingRate))}>
                     {formatFundingPct(row.fundingRate)}
                   </TableCell>
                 </TableRow>

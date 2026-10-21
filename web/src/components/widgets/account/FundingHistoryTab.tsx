@@ -9,6 +9,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -137,11 +138,11 @@ export function FundingHistoryTab({
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Time (UTC)</TableHead>
+                <TableHead className="pl-2.5">Time (UTC)</TableHead>
                 <TableHead>Market</TableHead>
-                <TableHead>Side</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
+                <TableHead hideBelow="md">Side</TableHead>
+                <TableHead hideBelow="sm" className="text-right">Size</TableHead>
+                <TableHead hideBelow="lg" className="text-right">Rate</TableHead>
                 <TableHead className="text-right">Change</TableHead>
               </TableRow>
             </TableHeader>
@@ -160,15 +161,18 @@ export function FundingHistoryTab({
                           }
                         : undefined
                     }
+                    accent={f.side === "long" ? "bid" : "ask"}
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >
-                    <TableCell className="text-muted-foreground">{utcDateTime(f.timestamp)}</TableCell>
-                    <TableCell>{f.symbol}</TableCell>
-                    <TableCell className={f.side === "long" ? "text-bid" : "text-ask"}>
+                    <TableCell className="pl-2.5 text-muted-foreground">{utcDateTime(f.timestamp)}</TableCell>
+                    <TableCell>
+                      <TableName>{f.symbol}</TableName>
+                    </TableCell>
+                    <TableCell hideBelow="md" className={f.side === "long" ? "text-bid" : "text-ask"}>
                       {f.side}
                     </TableCell>
-                    <TableCell className="text-right">{formatSize(f.position_size)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    <TableCell hideBelow="sm" className="text-right">{formatSize(f.position_size)}</TableCell>
+                    <TableCell hideBelow="lg" className="text-right text-muted-foreground">
                       {formatFundingPct(ratePct)}
                     </TableCell>
                     <TableCell className={cn("text-right", pnlClass(change))}>

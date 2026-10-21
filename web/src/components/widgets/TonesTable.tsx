@@ -7,6 +7,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
 } from "@/components/ui/table";
 import { formatClock } from "@/lib/alertFormat";
@@ -94,12 +95,12 @@ export const TonesTable = memo(function TonesTable({ symbol, onSymbolChange }: T
       <div className="min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
-            <TableRow className="h-8 hover:bg-transparent">
-              <TableHead className="text-left font-mono text-xs tracking-wide uppercase">Market</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Market</TableHead>
               {timeframes.map((label) => (
                 <TableHead
                   key={label}
-                  className="text-right font-mono text-xs tracking-wide uppercase"
+                  className="text-right"
                   title="Tone and when its bar closed, UTC"
                 >
                   {label}
@@ -124,13 +125,13 @@ export const TonesTable = memo(function TonesTable({ symbol, onSymbolChange }: T
                 <TableRow
                   key={row.marketIndex}
                   data-state={row.symbol.toUpperCase() === selected ? "selected" : undefined}
-                  className="h-9 cursor-pointer tabular-nums"
+                  className="cursor-pointer"
                   onClick={() => onSymbolChange?.(row.symbol)}
                 >
                   <TableCell>
                     <div className="flex min-w-0 items-center gap-2">
-                      <TokenMark symbol={row.symbol} />
-                      <span className="font-sans text-lg text-text">{row.symbol}</span>
+                      <TokenMark symbol={row.symbol} className="size-4" />
+                      <TableName className="text-text">{row.symbol}</TableName>
                     </div>
                   </TableCell>
                   {timeframes.map((label) => {

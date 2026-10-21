@@ -2,8 +2,9 @@ import { memo } from "react";
 import { PanelHeader } from "@/components/desk/PanelHeader";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { logExplorerUrl } from "@/lib/explorer";
-import { formatPrice, formatSize } from "@/lib/utils";
+import { cn, formatPrice, formatSize } from "@/lib/utils";
 import { utcClock } from "@/lib/utcTime";
 import { useLiveTrades } from "@/lib/liveData";
 
@@ -23,12 +24,6 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader title="Trades" onClose={onClose} />
-      <div className="grid h-6 shrink-0 grid-cols-[1fr_1fr_auto_3.25rem] px-2 font-mono text-sm leading-6 text-muted-foreground">
-        <span>Price</span>
-        <span>Size</span>
-        <span className="text-right">Time (UTC)</span>
-        <span />
-      </div>
       <ScrollArea className="min-h-0 flex-1">
         {rows.length === 0 ? (
           <Empty className="rounded-none border-0 p-6">
@@ -38,34 +33,43 @@ export const TradesTapeWidget = memo(function TradesTapeWidget({
             </EmptyHeader>
           </Empty>
         ) : (
-          rows.map((t, i) => {
-            const logUrl = logExplorerUrl(t.tx_hash);
-            return (
-              <div
-                key={`${t.tx_hash || t.timestamp}-${t.price}-${t.size}-${i}`}
-                className="grid grid-cols-[1fr_1fr_auto_3.25rem] items-baseline px-2 py-0.5 font-mono text-base"
-              >
-                <span className={t.side === "buy" ? "text-bid" : "text-ask"}>
-                  {formatPrice(t.price, priceDecimals)}
-                </span>
-                <span className="text-muted-foreground">{formatSize(t.size)}</span>
-                <span className="text-right text-muted-foreground">{utcClock(t.timestamp)}</span>
-                {logUrl ? (
-                  <a
-                    href={logUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Open Log"
-                    className="text-right font-sans text-sm text-muted-foreground hover:text-text"
-                  >
-                    explore
-                  </a>
-                ) : (
-                  <span />
-                )}
-              </div>
-            );
-          })
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-panel">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-right">Price</TableHead>
+                <TableHead className="text-right">Size</TableHead>
+                <TableHead hideBelow="4xs" className="text-right">Time (UTC)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((t, i) => {
+                const logUrl = logExplorerUrl(t.tx_hash);
+                return (
+                  <TableRow key={`${t.tx_hash || t.timestamp}-${t.price}-${t.size}-${i}`}>
+                    <TableCell className={cn("text-right", t.side === "buy" ? "text-bid" : "text-ask")}>
+                      {formatPrice(t.price, priceDecimals)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">{formatSize(t.size)}</TableCell>
+                    <TableCell hideBelow="4xs" className="text-right text-muted-foreground">
+                      {logUrl ? (
+                        <a
+                          href={logUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open Log"
+                          className="hover:text-text hover:underline"
+                        >
+                          {utcClock(t.timestamp)}
+                        </a>
+                      ) : (
+                        utcClock(t.timestamp)
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </ScrollArea>
     </div>

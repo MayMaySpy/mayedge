@@ -7,7 +7,9 @@ import {
   TableCell,
   TableHead,
   TableHeader,
+  TableName,
   TableRow,
+  type HideBelow,
 } from "@/components/ui/table";
 import { api, type LiquidationSummaryHours, type Market } from "@/lib/api";
 import { uniqueSymbolMarkets } from "@/lib/algos";
@@ -26,16 +28,16 @@ const SORT_KEY = "mayedge-scan-liq-sort";
 
 type PersistedSort = { key: LiqHeatSort; dir: LiqHeatDir };
 
-const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end" }[] = [
+const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end"; hideBelow?: HideBelow }[] = [
   { key: null, label: "Market", align: "start" },
-  { key: "long", label: "Long", align: "end" },
-  { key: "short", label: "Short", align: "end" },
+  { key: "long", label: "Long", align: "end", hideBelow: "sm" },
+  { key: "short", label: "Short", align: "end", hideBelow: "sm" },
   { key: "total", label: "Total", align: "end" },
-  { key: null, label: "Share", align: "end" },
-  { key: "largest", label: "Largest", align: "end" },
-  { key: "share", label: "vs OI", align: "end" },
+  { key: null, label: "Share", align: "end", hideBelow: "lg" },
+  { key: "largest", label: "Largest", align: "end", hideBelow: "md" },
+  { key: "share", label: "vs OI", align: "end", hideBelow: "md" },
   { key: "net", label: "Net", align: "end" },
-  { key: null, label: "", align: "start" },
+  { key: null, label: "", align: "start", hideBelow: "lg" },
 ];
 
 function loadSort(): PersistedSort {
@@ -145,14 +147,14 @@ function LiqMetricCells({
 }) {
   return (
     <>
-      <TableCell className="text-right text-ask">{formatUsd(longUsd)}</TableCell>
-      <TableCell className="text-right text-bid">{formatUsd(shortUsd)}</TableCell>
+      <TableCell hideBelow="sm" className="text-right text-ask">{formatUsd(longUsd)}</TableCell>
+      <TableCell hideBelow="sm" className="text-right text-bid">{formatUsd(shortUsd)}</TableCell>
       <TableCell className="text-right">{formatUsd(totalUsd)}</TableCell>
-      <TableCell className="text-right text-muted-foreground">{formatSharePct(windowShare)}</TableCell>
-      <TableCell className="text-right">{formatUsd(largestUsd)}</TableCell>
-      <TableCell className="text-right text-muted-foreground">{formatSharePct(shareOfOi)}</TableCell>
+      <TableCell hideBelow="lg" className="text-right text-muted-foreground">{formatSharePct(windowShare)}</TableCell>
+      <TableCell hideBelow="md" className="text-right">{formatUsd(largestUsd)}</TableCell>
+      <TableCell hideBelow="md" className="text-right text-muted-foreground">{formatSharePct(shareOfOi)}</TableCell>
       <TableCell className={cn("text-right", netClass(netUsd))}>{formatNet(netUsd)}</TableCell>
-      <TableCell>
+      <TableCell hideBelow="lg">
         <HeatBar longUsd={longUsd} shortUsd={shortUsd} totalUsd={totalUsd} maxTotal={maxTotal} />
       </TableCell>
     </>
@@ -232,7 +234,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
     const row = rowRefs.current.get(selected);
     if (!container || !row) return;
     const head = container.querySelector("thead");
-    const stickyPx = head ? head.getBoundingClientRect().height : 32;
+    const stickyPx = head ? head.getBoundingClientRect().height : 24;
     alignRowToTop(container, row, stickyPx);
   }, [selected, selectedOnBoard]);
 
@@ -275,23 +277,21 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
-            <TableRow className="h-8 hover:bg-transparent">
+            <TableRow className="hover:bg-transparent">
               {COLS.map((col, i) => {
                 const sortKey = col.key;
                 return (
                   <TableHead
                     key={col.label || `bar-${i}`}
-                    className={cn(
-                      "font-mono text-xs tracking-wide uppercase",
-                      col.align === "end" ? "text-right" : "text-left"
-                    )}
+                    hideBelow={col.hideBelow}
+                    className={col.align === "end" ? "text-right" : undefined}
                   >
                     {sortKey ? (
                       <button
                         type="button"
                         onClick={() => setSortMode(sortKey)}
                         className={cn(
-                          "inline-flex items-center gap-0.5 uppercase hover:text-text",
+                          "inline-flex items-center gap-0.5 hover:text-text",
                           col.align === "end" && "ml-auto",
                           sort.key === sortKey && "text-text"
                         )}
@@ -308,10 +308,10 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
             </TableRow>
             {fold.totalUsd > 0 ? (
               <>
-                <TableRow className="h-9 bg-panel hover:bg-panel tabular-nums [&>td]:bg-panel">
+                <TableRow className="bg-panel hover:bg-panel [&>td]:bg-panel">
                   <TableCell>
                     <div className="flex min-w-0 items-baseline gap-2">
-                      <span className="font-sans text-lg text-text">All</span>
+                      <TableName className="text-text">All</TableName>
                       <span className="text-muted-foreground">{fold.marketCount}</span>
                     </div>
                   </TableCell>
@@ -328,14 +328,14 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                 </TableRow>
                 {topRow && fold.top ? (
                   <TableRow
-                    className="h-9 cursor-pointer bg-panel tabular-nums [&>td]:bg-panel"
+                    className="cursor-pointer bg-panel [&>td]:bg-panel"
                     data-state={topRow.symbol.toUpperCase() === selected ? "selected" : undefined}
                     onClick={() => onSymbolChange?.(topRow.symbol)}
                   >
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
-                        <TokenMark symbol={topRow.symbol} />
-                        <span className="font-sans text-lg text-text">{topRow.symbol}</span>
+                        <TokenMark symbol={topRow.symbol} className="size-4" />
+                        <TableName className="text-text">{topRow.symbol}</TableName>
                         <span className="text-muted-foreground">{formatWindowShare(fold.top.share)}</span>
                       </div>
                     </TableCell>
@@ -373,13 +373,13 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                       else rowRefs.current.delete(key);
                     }}
                     data-state={isSelected ? "selected" : undefined}
-                    className="h-9 cursor-pointer tabular-nums"
+                    className="cursor-pointer"
                     onClick={() => onSymbolChange?.(row.symbol)}
                   >
                     <TableCell>
                       <div className="flex min-w-0 items-center gap-2">
-                        <TokenMark symbol={row.symbol} />
-                        <span className="font-sans text-lg text-text">{row.symbol}</span>
+                        <TokenMark symbol={row.symbol} className="size-4" />
+                        <TableName className="text-text">{row.symbol}</TableName>
                       </div>
                     </TableCell>
                     <LiqMetricCells
