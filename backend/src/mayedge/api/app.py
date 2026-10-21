@@ -29,6 +29,8 @@ from mayedge.lighter.budget import KILL_LANE, budget
 from mayedge.lighter.errors import VenueBlocked
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
+from mayedge.loop_watch import snapshot as loop_lag_snapshot
+from mayedge.loop_watch import start_loop_watch
 from mayedge.portfolio_sync import start as start_portfolio_sync
 from mayedge.portfolio_sync import stop as stop_portfolio_sync
 from mayedge.push import TelegramPusher, boot_text
@@ -85,6 +87,7 @@ async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> Kill
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    watch = start_loop_watch()
     backup = None
     fanout = BroadcastFanout(manager.broadcast)
     fanout.start()
@@ -127,6 +130,7 @@ async def lifespan(app: FastAPI):
         await desk.stop()
         if backup is not None:
             await backup.stop()
+        await watch.stop()
         store.close_db()
 
 
@@ -157,6 +161,7 @@ def create_app() -> FastAPI:
             "network": settings.lighter_network.value,
             "trading_enabled": order_service.enabled,
             "backup": backup_health(),
+            **loop_lag_snapshot(),
             **{k: v for k, v in feed_health.snapshot().items() if k != "type"},
         }
 

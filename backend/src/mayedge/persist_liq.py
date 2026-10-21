@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from mayedge.db import _connect, _lock
+from mayedge.db import _connect, _lock, reading
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,7 @@ def list_liquidations(
         params.append(float(min_usd))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             f"""
             SELECT trade_id, market_index, symbol, kind, side, price, size, usd_amount, ts, group_id
@@ -150,8 +149,7 @@ def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
     """
     cutoff = int(since_ms)
     first_day = _first_day_index(cutoff)
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             """
             WITH fills AS (

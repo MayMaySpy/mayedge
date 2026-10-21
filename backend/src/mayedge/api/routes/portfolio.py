@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -47,7 +48,14 @@ async def get_portfolio_history(range: str = "7d") -> dict[str, Any]:
     """H4, H5: stored values per kind, hourly for 1d and 7d, daily beyond. No venue read."""
     since = _since(range, int(time.time() * 1000))
     resolution = "1h" if range in ("1d", "7d") else "1d"
-    out = history(portfolio_buckets(resolution, "values", since), portfolio_buckets(resolution, "pnl", since))
+
+    def load() -> dict[str, Any]:
+        return history(
+            portfolio_buckets(resolution, "values", since),
+            portfolio_buckets(resolution, "pnl", since),
+        )
+
+    out = await asyncio.to_thread(load)
     return {"range": range, "resolution": resolution, **out}
 
 
@@ -58,10 +66,13 @@ async def get_portfolio_days(range: str = "30d") -> dict[str, Any]:
     if range == "1d":
         raise HTTPException(400, "range must be 7d, 30d, 90d, or all")
     since = _since(range, now)
-    rows = days(
-        portfolio_buckets("1h", "pnl", now - now % DAY_MS - DAY_MS),
-        portfolio_buckets("1d", "pnl", since - DAY_MS),
-        since_ms=since,
-        now_ms=now,
-    )
-    return {"range": range, "days": rows}
+
+    def load() -> list[dict[str, Any]]:
+        return days(
+            portfolio_buckets("1h", "pnl", now - now % DAY_MS - DAY_MS),
+            portfolio_buckets("1d", "pnl", since - DAY_MS),
+            since_ms=since,
+            now_ms=now,
+        )
+
+    return {"range": range, "days": await asyncio.to_thread(load)}

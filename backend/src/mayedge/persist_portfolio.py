@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mayedge.db import _connect, _lock, _set_meta
+from mayedge.db import _connect, _lock, _set_meta, reading
 
 
 def _meta(conn: Any, key: str) -> str | None:
@@ -28,8 +28,7 @@ def portfolio_put_buckets(resolution: str, mode: str, rows: list[tuple[int, dict
 
 def portfolio_buckets(resolution: str, mode: str, since_ms: int = 0) -> list[dict[str, Any]]:
     """Stored buckets in time order, each with its timestamp in seconds as the venue gave it."""
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             "SELECT raw FROM portfolio_pnl WHERE resolution = ? AND mode = ? AND ts >= ? ORDER BY ts",
             (resolution, mode, since_ms),

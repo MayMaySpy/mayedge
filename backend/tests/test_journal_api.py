@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import tempfile
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
@@ -11,8 +13,17 @@ from httpx import ASGITransport, AsyncClient
 
 from mayedge import db as store
 from mayedge.api.app import create_app
+from mayedge.api.routes import journal as journal_routes
 from mayedge.config import settings
-from mayedge.persist_journal import journal_insert_fills, journal_insert_funding
+from mayedge.lighter.account import account_service
+from mayedge.lighter.models import AccountSummary, Position
+from mayedge.persist_journal import (
+    journal_generation,
+    journal_insert_fills,
+    journal_insert_funding,
+    journal_load_fills,
+    journal_put_note,
+)
 
 
 def _fill(trade_id: str, side: str, ts: int, pnl: str = "0") -> dict[str, object]:
@@ -96,3 +107,56 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()["started"])
         run_sync.assert_awaited()
+
+    async def test_two_reads_parse_fills_once_until_a_write(self) -> None:
+        journal_insert_fills(
+            [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]
+        )
+        journal_routes._cache = None
+        calls = {"n": 0}
+
+        def counting() -> list[dict[str, object]]:
+            calls["n"] += 1
+            return journal_load_fills()
+
+        with patch("mayedge.api.routes.journal.journal_load_fills", counting):
+            await journal_routes.get_trips()
+            await journal_routes.get_trips()
+            self.assertEqual(calls["n"], 1)
+            before = journal_generation()
+            journal_put_note("1:a", "again", [])
+            self.assertGreater(journal_generation(), before)
+            await journal_routes.get_trips()
+        self.assertEqual(calls["n"], 2)
+
+    async def test_upnl_is_fresh_on_every_request(self) -> None:
+        journal_insert_fills([_fill("a", "buy", 1_700_000_000)])
+        journal_routes._cache = None
+        seen: list[dict[int, Decimal]] = []
+        real = journal_routes.build_trips
+        previous = account_service._summary
+
+        def capture(*args: Any, **kwargs: Any) -> Any:
+            upnl = kwargs.get("upnl")
+            if isinstance(upnl, dict):
+                seen.append(upnl)
+            return real(*args, **kwargs)
+
+        def summary(pnl: str) -> AccountSummary:
+            return AccountSummary(
+                "0",
+                "0",
+                pnl,
+                positions=[Position(1, "ETH", "1", "100", "100", pnl, 1, "cross")],
+            )
+
+        account_service._summary = summary("1.5")
+        try:
+            with patch("mayedge.api.routes.journal.build_trips", capture):
+                await journal_routes.get_trips()
+                account_service._summary = summary("4")
+                await journal_routes.get_trips()
+        finally:
+            account_service._summary = previous
+        self.assertEqual(seen[0][1], Decimal("1.5"))
+        self.assertEqual(seen[1][1], Decimal("4"))

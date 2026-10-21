@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from decimal import Decimal
 from typing import Any, cast
@@ -15,6 +17,7 @@ from mayedge.journal_sync import run_sync
 from mayedge.lighter.account import account_service
 from mayedge.numbers import fmt_decimal
 from mayedge.persist_journal import (
+    journal_generation,
     journal_load_fills,
     journal_load_funding,
     journal_load_links,
@@ -28,6 +31,15 @@ router = APIRouter()
 
 _RANGES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
 _GROUPS = {"day", "market", "algo", "none"}
+_Inputs = tuple[
+    list[Fill],
+    list[FundingPayment],
+    dict[str, str],
+    dict[str, tuple[Decimal, Decimal]],
+    int | None,
+]
+_cache_lock = threading.Lock()
+_cache: tuple[int, _Inputs] | None = None
 
 
 class NoteBody(BaseModel):
@@ -43,10 +55,22 @@ async def get_trips(
     algo: str | None = None,
     limit: int = 200,
 ) -> dict[str, Any]:
+    upnl = _upnl()
+    return await asyncio.to_thread(_trip_page, upnl, since, until, market, algo, limit)
+
+
+def _trip_page(
+    upnl: dict[int, Decimal],
+    since: int | None,
+    until: int | None,
+    market: str | None,
+    algo: str | None,
+    limit: int,
+) -> dict[str, Any]:
     notes = journal_load_notes()
     trips = [
         trip
-        for trip in _trips()
+        for trip in _trips(upnl)
         if _market_ok(trip, market) and _algo_ok(trip, algo) and _span_ok(trip, since, until)
     ]
     trips.sort(key=lambda trip: trip.close_ts or trip.open_ts, reverse=True)
@@ -67,9 +91,21 @@ async def get_summary(
         raise HTTPException(400, "group must be day, market, algo, or none")
     days = _RANGES[range]
     since = None if days is None else int(time.time()) - days * 86_400
+    upnl = _upnl()
+    return await asyncio.to_thread(_summary_page, upnl, since, market, algo, range, group)
+
+
+def _summary_page(
+    upnl: dict[int, Decimal],
+    since: int | None,
+    market: str | None,
+    algo: str | None,
+    range: str,
+    group: str,
+) -> dict[str, Any]:
     chosen = [
         trip
-        for trip in _trips()
+        for trip in _trips(upnl)
         if _closed_since(trip, since) and _market_ok(trip, market) and _algo_ok(trip, algo)
     ]
     rows = summary(chosen, cast(GroupBy, group))
@@ -82,7 +118,7 @@ async def get_summary(
 
 @router.put("/api/journal/trips/{trip_key}/note")
 async def put_note(trip_key: str, body: NoteBody) -> dict[str, Any]:
-    journal_put_note(trip_key, body.note, body.tags)
+    await asyncio.to_thread(journal_put_note, trip_key, body.note, body.tags)
     return {"trip_key": trip_key, "note": body.note, "tags": body.tags}
 
 
@@ -91,18 +127,38 @@ async def post_sync() -> dict[str, Any]:
     return await run_sync()
 
 
-def _trips() -> list[RoundTrip]:
-    risk = {
-        algo_id: (Decimal(entry), Decimal(stop))
-        for algo_id, (entry, stop) in journal_load_planner_risk().items()
-    }
+def _inputs() -> _Inputs:
+    """Parsed fills and the rest, reused until a journal write bumps the generation."""
+    global _cache
+    gen = journal_generation()
+    with _cache_lock:
+        if _cache is not None and _cache[0] == gen:
+            return _cache[1]
+        risk = {
+            algo_id: (Decimal(entry), Decimal(stop))
+            for algo_id, (entry, stop) in journal_load_planner_risk().items()
+        }
+        data: _Inputs = (
+            [_fill(row) for row in journal_load_fills()],
+            [_funding(row) for row in journal_load_funding()],
+            journal_load_links(),
+            risk,
+            journal_oldest_ts(),
+        )
+        if journal_generation() == gen:
+            _cache = (gen, data)
+        return data
+
+
+def _trips(upnl: dict[int, Decimal] | None = None) -> list[RoundTrip]:
+    fills, funding, links, risk, oldest = _inputs()
     return build_trips(
-        [_fill(row) for row in journal_load_fills()],
-        [_funding(row) for row in journal_load_funding()],
-        journal_load_links(),
+        fills,
+        funding,
+        links,
         risk,
-        oldest_ts=journal_oldest_ts(),
-        upnl=_upnl(),
+        oldest_ts=oldest,
+        upnl=_upnl() if upnl is None else upnl,
     )
 
 

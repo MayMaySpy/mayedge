@@ -7,7 +7,7 @@ import math
 import time
 from typing import Any
 
-from mayedge.db import _connect, _lock
+from mayedge.db import _connect, _lock, reading
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ def flush_open_interest(rows: list[dict[str, Any]], *, minute_index: int) -> int
             payload,
         )
         conn.commit()
-    fold_open_interest_if_due()
     return len(payload)
 
 
@@ -122,8 +121,7 @@ def list_open_interest(
         raise ValueError("resolution must be 1m, 5m, 15m, 1h, 4h, or 1d")
     n = max(1, min(int(count), 3600))
     idx = int(market_index)
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         hour_rows: list[Any] = []
         if step >= OI_HOUR_S:
             hour_rows = conn.execute(
@@ -166,73 +164,88 @@ _LAST_IN_BUCKET = """
 """
 
 
+_MINUTES_PER_HOUR = OI_HOUR_S // OI_MINUTE_S
+_HOURS_PER_CHUNK = 24
+
+# Hour bucketing stays in the SELECT. The filter is a bare minute bound so
+# idx_oi_samples_minute can search it. One statement covers one day of hours.
+_FOLD_INSERT = """
+    WITH foldable AS (
+        SELECT
+            market_index,
+            symbol,
+            minute_index,
+            oi_usd,
+            (minute_index * ?) / ? AS hour_index
+        FROM oi_samples
+        WHERE minute_index >= ? AND minute_index < ?
+    ),
+    ranked AS (
+        SELECT
+            *,
+            ROW_NUMBER() OVER (
+                PARTITION BY hour_index, market_index
+                ORDER BY minute_index DESC
+            ) AS rn
+        FROM foldable
+    )
+    INSERT INTO oi_hours (hour_index, market_index, symbol, oi_high, oi_low, oi_close)
+    SELECT
+        hour_index,
+        market_index,
+        MAX(CASE WHEN rn = 1 THEN symbol END),
+        MAX(oi_usd),
+        MIN(oi_usd),
+        MAX(CASE WHEN rn = 1 THEN oi_usd END)
+    FROM ranked
+    GROUP BY hour_index, market_index
+    ON CONFLICT(hour_index, market_index) DO UPDATE SET
+        symbol = excluded.symbol,
+        oi_high = CASE
+            WHEN excluded.oi_high > oi_hours.oi_high THEN excluded.oi_high
+            ELSE oi_hours.oi_high
+        END,
+        oi_low = CASE
+            WHEN excluded.oi_low < oi_hours.oi_low THEN excluded.oi_low
+            ELSE oi_hours.oi_low
+        END,
+        oi_close = excluded.oi_close
+"""
+
+
 def fold_open_interest(*, now_ms: int) -> int:
     """Fold UTC hours fully older than 30 days into one high/low/close. Returns minutes removed."""
     fold_before_hour = (int(now_ms) - OI_DETAIL_MS) // OI_HOUR_MS
-    with _lock:
-        conn = _connect()
-        try:
-            removed = _fold_locked(conn, fold_before_hour)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-    return removed
+    cutoff = int(fold_before_hour) * _MINUTES_PER_HOUR
+    removed = 0
+    while True:
+        with _lock:
+            conn = _connect()
+            try:
+                n = _fold_locked(conn, cutoff)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        if n == 0:
+            return removed
+        removed += n
 
 
-def _fold_locked(conn: Any, fold_before_hour: int) -> int:
-    params = (OI_MINUTE_S, OI_HOUR_S, OI_MINUTE_S, OI_HOUR_S, int(fold_before_hour))
+def _fold_locked(conn: Any, cutoff: int) -> int:
+    """Fold at most one day of hours with minute_index < cutoff. Returns minutes removed."""
+    row = conn.execute(
+        "SELECT MIN(minute_index) AS minute FROM oi_samples WHERE minute_index < ?",
+        (int(cutoff),),
+    ).fetchone()
+    if row is None or row["minute"] is None:
+        return 0
+    start = (int(row["minute"]) // _MINUTES_PER_HOUR) * _MINUTES_PER_HOUR
+    end = min(int(cutoff), start + _HOURS_PER_CHUNK * _MINUTES_PER_HOUR)
+    conn.execute(_FOLD_INSERT, (OI_MINUTE_S, OI_HOUR_S, start, end))
     conn.execute(
-        """
-        WITH foldable AS (
-            SELECT
-                market_index,
-                symbol,
-                minute_index,
-                oi_usd,
-                (minute_index * ?) / ? AS hour_index
-            FROM oi_samples
-            WHERE (minute_index * ?) / ? < ?
-        ),
-        ranked AS (
-            SELECT
-                *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY hour_index, market_index
-                    ORDER BY minute_index DESC
-                ) AS rn
-            FROM foldable
-        )
-        INSERT INTO oi_hours (hour_index, market_index, symbol, oi_high, oi_low, oi_close)
-        SELECT
-            hour_index,
-            market_index,
-            MAX(CASE WHEN rn = 1 THEN symbol END),
-            MAX(oi_usd),
-            MIN(oi_usd),
-            MAX(CASE WHEN rn = 1 THEN oi_usd END)
-        FROM ranked
-        GROUP BY hour_index, market_index
-        ON CONFLICT(hour_index, market_index) DO UPDATE SET
-            symbol = excluded.symbol,
-            oi_high = CASE
-                WHEN excluded.oi_high > oi_hours.oi_high THEN excluded.oi_high
-                ELSE oi_hours.oi_high
-            END,
-            oi_low = CASE
-                WHEN excluded.oi_low < oi_hours.oi_low THEN excluded.oi_low
-                ELSE oi_hours.oi_low
-            END,
-            oi_close = excluded.oi_close
-        """,
-        params,
-    )
-    conn.execute(
-        """
-        DELETE FROM oi_samples
-        WHERE (minute_index * ?) / ? < ?
-        """,
-        (OI_MINUTE_S, OI_HOUR_S, int(fold_before_hour)),
+        "DELETE FROM oi_samples WHERE minute_index >= ? AND minute_index < ?",
+        (start, end),
     )
     removed = conn.execute("SELECT changes()").fetchone()
     return int(removed[0] if removed is not None else 0)

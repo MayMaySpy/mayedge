@@ -6,10 +6,20 @@ import json
 import time
 from typing import Any
 
-from mayedge.db import _connect, _lock, _set_meta
+from mayedge.db import _connect, _lock, _set_meta, reading
 
 _OLDEST = "journal_oldest_ts"
 _SYNCED = "journal_last_synced_at"
+_generation = 0
+
+
+def journal_generation() -> int:
+    return _generation
+
+
+def _bump() -> None:
+    global _generation
+    _generation += 1
 
 
 def _meta(conn: Any, key: str) -> str | None:
@@ -60,6 +70,7 @@ def journal_insert_fills(rows: list[dict[str, Any]]) -> None:
             ],
         )
         conn.commit()
+        _bump()
 
 
 def journal_known_funding(keys: list[tuple[int, int]]) -> set[tuple[int, int]]:
@@ -91,11 +102,11 @@ def journal_insert_funding(rows: list[dict[str, Any]]) -> None:
             [(int(row["market_index"]), int(row["ts"]), str(row["amount"])) for row in rows],
         )
         conn.commit()
+        _bump()
 
 
 def journal_oldest_ts() -> int | None:
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         raw = _meta(conn, _OLDEST)
     return None if raw is None else int(raw)
 
@@ -109,6 +120,7 @@ def journal_note_oldest(ts: int) -> None:
             return
         _set_meta(conn, _OLDEST, str(ts))
         conn.commit()
+        _bump()
 
 
 def journal_backfilled(kind: str) -> bool:
@@ -127,6 +139,7 @@ def journal_note_backfilled(kind: str) -> None:
         conn = _connect()
         _set_meta(conn, f"journal_backfilled_{kind}", "1")
         conn.commit()
+        _bump()
 
 
 def journal_last_synced_at() -> int | None:
@@ -141,18 +154,17 @@ def journal_note_synced(ts: int | None = None) -> None:
         conn = _connect()
         _set_meta(conn, _SYNCED, str(int(time.time()) if ts is None else ts))
         conn.commit()
+        _bump()
 
 
 def journal_load_fills() -> list[dict[str, Any]]:
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute("SELECT * FROM journal_fills ORDER BY ts, trade_id").fetchall()
     return [dict(row) for row in rows]
 
 
 def journal_load_funding() -> list[dict[str, Any]]:
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             "SELECT * FROM journal_funding ORDER BY ts, market_index"
         ).fetchall()
@@ -160,8 +172,7 @@ def journal_load_funding() -> list[dict[str, Any]]:
 
 
 def journal_load_links() -> dict[str, str]:
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             "SELECT trade_id, algo_id FROM algo_trade_ids ORDER BY algo_id"
         ).fetchall()
@@ -173,8 +184,7 @@ def journal_load_links() -> dict[str, str]:
 
 def journal_load_planner_risk() -> dict[str, tuple[str, str]]:
     """Entry and the stop stored when the Planner run started. Missing means R is n/a."""
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute(
             "SELECT algo_id, params_json FROM algo_runs WHERE algo_id LIKE 'PL-%'"
         ).fetchall()
@@ -209,11 +219,11 @@ def journal_put_note(trip_key: str, note: str, tags: list[str]) -> None:
             (trip_key, note, json.dumps(tags), int(time.time())),
         )
         conn.commit()
+        _bump()
 
 
 def journal_load_notes() -> dict[str, dict[str, Any]]:
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         rows = conn.execute("SELECT * FROM journal_notes").fetchall()
     out: dict[str, dict[str, Any]] = {}
     for row in rows:

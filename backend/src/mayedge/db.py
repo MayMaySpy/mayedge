@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from mayedge.config import settings
@@ -13,7 +15,9 @@ from mayedge.config import settings
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
+_read_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
+_reader: sqlite3.Connection | None = None
 
 _JOURNAL_TABLES = """
 CREATE TABLE IF NOT EXISTS journal_fills (
@@ -504,17 +508,46 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _open_reader() -> sqlite3.Connection:
+    """A read-only connection, opened only after the writer has created the file."""
+    global _reader
+    if _reader is not None:
+        return _reader
+    with _lock:
+        _connect()
+        path = Path(settings.db_path)
+    with _read_lock:
+        if _reader is None:
+            opened = sqlite3.connect(
+                f"file:{path}?mode=ro", uri=True, check_same_thread=False
+            )
+            opened.row_factory = sqlite3.Row
+            _reader = opened
+        return _reader
+
+
+@contextlib.contextmanager
+def reading() -> Iterator[sqlite3.Connection]:
+    conn = _open_reader()
+    with _read_lock:
+        yield conn
+
+
 def init_db() -> None:
     with _lock:
         _connect()
 
 
 def close_db() -> None:
-    global _conn
+    global _conn, _reader
     with _lock:
         if _conn is not None:
             _conn.close()
             _conn = None
+    with _read_lock:
+        if _reader is not None:
+            _reader.close()
+            _reader = None
 
 
 def save_counters(id_seq: int, coi_seq: int) -> None:

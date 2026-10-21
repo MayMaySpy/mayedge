@@ -415,3 +415,7 @@ _Avoid_: % OI, liq/OI
 **Backup**:
 A compressed copy of the desk database taken while the desk runs, kept on the host outside Docker.
 _Avoid_: snapshot, dump, export
+
+**Loop lag**:
+How late the desk's event loop ran a timer it set, in ms. Above 250 ms the desk is late on everything at once.
+_Avoid_: latency, lag (unqualified)

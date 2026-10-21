@@ -128,7 +128,7 @@ class LighterGateway:
         except Exception:
             logger.exception("failed to load stored funding and open interest")
         try:
-            store.fold_open_interest(now_ms=int(time.time() * 1000))
+            await asyncio.to_thread(store.fold_open_interest, now_ms=int(time.time() * 1000))
         except Exception:
             logger.exception("failed to fold open interest")
         self._ws_task = asyncio.create_task(run_ws_loop(self))
@@ -570,6 +570,7 @@ class LighterGateway:
                 delay = (int(now) // 60 + 1) * 60 - now + 0.25
                 await asyncio.sleep(max(0.25, delay))
                 self._flush_open_interest()
+                await asyncio.to_thread(store.fold_open_interest_if_due)
             except asyncio.CancelledError:
                 break
             except Exception:

@@ -11,7 +11,7 @@ import math
 import time
 from typing import Any
 
-from mayedge.db import _connect, _lock, _set_meta
+from mayedge.db import _connect, _lock, _set_meta, reading
 
 FUNDING_HOUR_S = 3600
 FUNDING_DAY_S = 86_400
@@ -216,8 +216,7 @@ def funding_averages(market_index: int, *, now: float | None = None) -> dict[str
     longest = max(days for _label, days in FUNDING_AVERAGE_WINDOWS)
     since_hour = this_hour - longest * HOURS_PER_DAY
     idx = int(market_index)
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         found = conn.execute(
             """
             SELECT hour_index, rate FROM funding_prints
@@ -337,8 +336,7 @@ def list_funding(
     clock = time.time() if now is None else float(now)
     first_bucket = (int(clock) // step - n + 1) * step
     idx = int(market_index)
-    with _lock:
-        conn = _connect()
+    with reading() as conn:
         prints = conn.execute(
             """
             SELECT hour_index, rate FROM funding_prints

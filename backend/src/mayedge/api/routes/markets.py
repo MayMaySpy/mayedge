@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -24,7 +25,9 @@ async def get_liquidations(
     ring = gateway.recent_liquidations()
     if ring and min_usd is None and market_index is None:
         return ring[:cap]
-    return store.list_liquidations(limit=limit, min_usd=min_usd, market_index=market_index)
+    return await asyncio.to_thread(
+        store.list_liquidations, limit=limit, min_usd=min_usd, market_index=market_index
+    )
 
 
 @router.get("/api/liquidations/summary")
@@ -33,12 +36,12 @@ async def get_liquidation_summary(hours: int = 24) -> dict[str, Any]:
         since = liquidation_summary_since_ms(hours)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    store.fold_liquidations_if_due()
-    return {
-        "hours": hours,
-        "since": since,
-        "rows": store.summarize_liquidations(since_ms=since),
-    }
+
+    def load() -> list[dict[str, Any]]:
+        store.fold_liquidations_if_due()
+        return store.summarize_liquidations(since_ms=since)
+
+    return {"hours": hours, "since": since, "rows": await asyncio.to_thread(load)}
 
 
 @router.get("/api/markets")
@@ -65,7 +68,9 @@ async def get_open_interest(
         return []
     n = min(max(int(count), 1), 3600)
     try:
-        return store.list_open_interest(meta.market_index, resolution=resolution, count=n)
+        return await asyncio.to_thread(
+            store.list_open_interest, meta.market_index, resolution=resolution, count=n
+        )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -77,7 +82,7 @@ async def get_funding_average(symbol: str) -> dict[str, Any]:
         raise HTTPException(404, "Market not found")
     if not meta.is_perp:
         return {"windows": [], "first_time": None}
-    return store.funding_averages(meta.market_index)
+    return await asyncio.to_thread(store.funding_averages, meta.market_index)
 
 
 @router.get("/api/funding/{symbol}")
@@ -91,7 +96,9 @@ async def get_funding_history(
         return []
     n = min(max(int(count), 1), 3600)
     try:
-        return store.list_funding(meta.market_index, resolution=resolution, count=n)
+        return await asyncio.to_thread(
+            store.list_funding, meta.market_index, resolution=resolution, count=n
+        )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
