@@ -3,7 +3,27 @@
 Chase, Grid, Ladder and TWAP keep many jobs whose Clips live in one Ledger each. A
 subclass names its algo, its id prefix and its client_order_index band, makes a
 runner, and adds its own start checks. Planner and Trail own more than Clips and keep
-their own books.
+their own books. This is the method-by-method diff the split follows.
+
+| Method | Kind | What differs |
+| --- | --- | --- |
+| ``_new_runner`` | hook | each book builds its own runner |
+| ``_restore_needs_books`` | hook | clip waits for ``is_book_synced`` and calls ``ensure_book``; TWAP, trail and planner do not |
+| ``_on_restored``, ``_on_finished`` | hook | trail and planner call ``_sync_watch``; clip does nothing |
+| ``_save_counters``, ``alloc_id``, ``alloc_coi`` | shared | id prefix and the exhausted-range label |
+| ``execution``, ``has``, ``algo_type``, ``on_gateway``, ``pause``, ``unpause``, ``flush``, ``drain_for_shutdown`` | shared | |
+| ``publish``, ``finish``, ``to_dict`` | shared | persist writes the same ledger fields |
+| ``_wait_feeds_ready`` | shared | the book-sync wait is the hook above; trail and planner wait for the account feed and hydrated orders |
+| ``restore`` | shared | clip seeds counters from its id prefix and COI band; trail and planner read their own keys. Clip archives a job that will not resume. Trail and planner leave it up, status error, and call ``_sync_watch``. Trail skips the feed wait when nothing restored; planner still waits. Clip logs and returns when no row is active; planner returns without that log |
+| ``_archive_broken`` | shared | clip keeps the ledger and remembers history. Trail and planner write a short stopped row; planner also keeps ``filled`` |
+| ``pause_for_market`` | shared | clip pauses running jobs; trail and planner stop every job on the market |
+| ``stop`` | shared | clip publishes when the id is missing; planner does not. Trail adds ``keep_stop`` |
+| ``_ensure_book``, ``_launch``, ``live_on_market_side``, ``missing_fill_grace_ms`` | clip | |
+| ``set_market_conflict``, ``set_watch_prints``, ``take_amend`` | trail and planner | the same minute budget |
+| ``_sync_watch``, ``_check_free`` | one book | the "want prints" test and the free-market rule differ |
+| ``preview_from_body``, ``start_from_body`` | one book | both books, different bodies |
+| ``edit_from_body``, ``stop_live_on_market`` | trail | |
+| ``replan_from_body``, ``finish_entry`` | planner | |
 """
 
 from __future__ import annotations
