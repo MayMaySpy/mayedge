@@ -1,7 +1,7 @@
 from decimal import Decimal
 from unittest import TestCase
 
-from mayedge.numbers import check_notional, fmt_decimal
+from mayedge.numbers import check_notional, fmt_decimal, to_decimal, to_decimal_or
 
 
 class CheckNotionalTests(TestCase):
@@ -32,3 +32,22 @@ class FmtDecimalTests(TestCase):
         self.assertIsNone(fmt_decimal(None))
         self.assertEqual(fmt_decimal(Decimal("0")), "0")
         self.assertEqual(fmt_decimal(Decimal("0.00")), "0")
+
+
+class ToDecimalTests(TestCase):
+    def test_parses_a_number(self) -> None:
+        self.assertEqual(to_decimal("1.5"), Decimal("1.5"))
+        self.assertEqual(to_decimal(Decimal("2")), Decimal("2"))
+
+    def test_none_and_garbage_raise(self) -> None:
+        for raw in (None, "", "nope", True):
+            with self.assertRaises(ValueError):
+                to_decimal(raw)
+
+    def test_or_uses_the_default(self) -> None:
+        zero = Decimal("0")
+        self.assertEqual(to_decimal_or(None, zero), zero)
+        self.assertEqual(to_decimal_or("", zero), zero)
+        self.assertEqual(to_decimal_or("nope", zero), zero)
+        self.assertEqual(to_decimal_or("4.25", zero), Decimal("4.25"))
+        self.assertIs(to_decimal_or("nope", zero), zero)

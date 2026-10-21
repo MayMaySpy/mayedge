@@ -29,6 +29,21 @@ def check_notional(qty: Decimal, price: Decimal, cap: float | None) -> None:
         raise ValueError(f"Order notional ${notional:,.0f} exceeds limit ${cap:,.0f}")
 
 
+def to_decimal(raw: object) -> Decimal:
+    """A venue or stored number. ``None`` and anything unparseable raise ``ValueError``."""
+    if raw is None:
+        raise ValueError("invalid number")
+    return parse_decimal(raw)
+
+
+def to_decimal_or(raw: object, default: Decimal) -> Decimal:
+    """``to_decimal``, or ``default`` when the value is missing or not a number."""
+    try:
+        return to_decimal(raw)
+    except (ValueError, ArithmeticError):
+        return default
+
+
 def parse_decimal(value: Any) -> Decimal:
     """Parse a trader-typed number. Comma or period may be the decimal.
 
