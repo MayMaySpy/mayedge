@@ -372,7 +372,7 @@ class RouterTests(unittest.TestCase):
         router = PushRouter(
             sink, PushSettings(daily_at="08:00"), ManualClock(_utc_stamp(8, 0)), journal=journal, portfolio=broken
         )
-        with self.assertLogs("mayedge.push", level="WARNING"):
+        with self.assertLogs("mayedge.push_router", level="WARNING"):
             router.poll()
         self.assertEqual(sink.rows[0][1], "Yesterday: Net +$380 over 9 Round trips, fees $38, funding −$6")
 
@@ -383,7 +383,7 @@ class RouterTests(unittest.TestCase):
         sink = Sink()
         clock = ManualClock(_utc_stamp(8, 0))
         router = PushRouter(sink, PushSettings(daily_at="08:00"), clock, journal=journal)
-        with self.assertLogs("mayedge.push", level="WARNING") as logs:
+        with self.assertLogs("mayedge.push_router", level="WARNING") as logs:
             router.poll()
         router.poll()
         self.assertEqual(sink.rows, [])
