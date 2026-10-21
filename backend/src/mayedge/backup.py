@@ -155,7 +155,12 @@ class BackupLoop:
 
     async def run_once(self, *, catch_up: bool = False) -> None:
         now = datetime.fromtimestamp(self._clock.now(), UTC)
-        if catch_up and (self._dest / f"mayedge-{now:%Y-%m-%d}.db.gz").is_file():
+        existing = self._dest / f"mayedge-{now:%Y-%m-%d}.db.gz"
+        if catch_up and existing.is_file():
+            stat = existing.stat()
+            self.last_backup_at = int(stat.st_mtime * 1000)
+            self.last_backup_bytes = stat.st_size
+            self.last_backup_error = None
             return
         try:
             path = await asyncio.to_thread(self._take, self._db_path, self._dest, now=now)

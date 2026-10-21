@@ -248,6 +248,22 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             await loop.stop()
             self.assertEqual(takes[0], datetime(2026, 10, 21, 3, 30, tzinfo=UTC))
 
+    async def test_a_skipped_boot_backup_still_shows_on_health(self) -> None:
+        with TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            path = dest / "mayedge-2026-10-21.db.gz"
+            path.write_bytes(b"old")
+
+            def take(*_args: object, **_kwargs: object) -> Path:
+                raise AssertionError("today's file should be kept")
+
+            clock = FakeClock(_utc(2026, 10, 21, 4, 0))
+            loop = BackupLoop(Path("db"), dest, "03:30", clock, take=take)
+            await loop.run_once(catch_up=True)
+            self.assertEqual(loop.last_backup_bytes, 3)
+            self.assertIsNone(loop.last_backup_error)
+            self.assertIsNotNone(loop.last_backup_at)
+
     async def test_a_failure_pushes_once_and_the_loop_keeps_running(self) -> None:
         with TemporaryDirectory() as tmp:
             dest = Path(tmp)
