@@ -1,3 +1,6 @@
+import { isLongPosition, type Position } from "@/lib/api";
+import type { OpenTripRealized } from "@/lib/liveData";
+
 export type PosSortKey = "size" | "notional" | "pnl" | "roe";
 export type PosSortDir = "asc" | "desc";
 export type PosSort = { key: PosSortKey; dir: PosSortDir };
@@ -172,4 +175,26 @@ export function sortPositionRows<T extends SortablePosition>(
     if (av === bv) return 0;
     return (av < bv ? -1 : 1) * sign;
   });
+}
+
+/**
+ * The open Round trip that belongs to this Position: same market and side. None while the
+ * journal has not caught up (a flip, or a Position opened since the last sync).
+ */
+export function realizedFor(
+  p: Pick<Position, "market_index" | "size" | "side">,
+  open: readonly OpenTripRealized[]
+): OpenTripRealized | null {
+  const side = isLongPosition(p) ? "long" : "short";
+  return open.find((row) => row.market_index === p.market_index && row.side === side) ?? null;
+}
+
+/** The Realized cell's tooltip: what it is made of, and Net as the Journal counts it. */
+export function realizedTitle(row: OpenTripRealized, fmt: (n: number) => string): string {
+  const lines = [
+    `Realized ${fmt(parseFloat(row.realized))}: closes ${fmt(parseFloat(row.pnl))}, fees ${fmt(-parseFloat(row.fees))}`,
+    `With funding ${fmt(parseFloat(row.funding))}: Net ${fmt(parseFloat(row.net))}, as the Journal counts it`,
+  ];
+  if (row.partial) lines.push("Closes before the journal began are not in it");
+  return lines.join("\n");
 }

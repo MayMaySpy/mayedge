@@ -32,7 +32,7 @@ import { useTradingReady } from "@/hooks/useTradingReady";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api, isLongPosition, type Market, type OpenOrder, type Position } from "@/lib/api";
 import { algoBlotter, algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
-import { setAlgo, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
+import { setAlgo, useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   nextPosSort,
   positionNotional,
@@ -43,6 +43,8 @@ import {
   type CloseFilter,
   type PosSort,
   type PosSortKey,
+  realizedFor,
+  realizedTitle,
 } from "@/lib/positionsTable";
 import { cn, formatPctAbs, formatSigned, formatSize, formatUsd } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
@@ -231,6 +233,7 @@ export function PositionsPanel({
 }: PositionsPanelProps) {
   const account = useLiveAccount();
   const algoBook = useLiveAlgos();
+  const journalOpen = useJournalOpen();
   const { working: workingAlgos } = algoBlotter(algoBook);
   const bbo = useLiveBbo();
   const feed = useTradingReady({ connected });
@@ -594,6 +597,13 @@ export function PositionsPanel({
                       sort={posSort}
                       onSort={(key) => setPosSort((s) => nextPosSort(s, key))}
                     />
+                    <TableHead
+                      hideBelow="lg"
+                      className="text-right"
+                      title="What this Position has closed since it opened, less fees. From the Journal, a few seconds behind a fill."
+                    >
+                      Realized
+                    </TableHead>
                     <TableHead hideBelow="2xl" className="text-right">Funding</TableHead>
                     <TableHead hideBelow="sm" className="text-right">TP/SL</TableHead>
                     <TableHead className="text-right" />
@@ -603,6 +613,8 @@ export function PositionsPanel({
                   {sortedRows.map(({ p, mark, pnl, notional, roe }) => {
                     const long = isLongPosition(p);
                     const fund = n(p.funding_paid);
+                    const realized = realizedFor(p, journalOpen);
+                    const realizedNum = realized ? n(realized.realized) : 0;
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
                     const m = markets.find((x) => x.market_index === p.market_index) ?? market;
@@ -666,6 +678,20 @@ export function PositionsPanel({
                           {formatSigned(pnl)}
                           {roe != null && (
                             <span className="ml-1 text-xs font-normal">({formatPctAbs(roe)})</span>
+                          )}
+                        </TableCell>
+                        <TableCell
+                          hideBelow="lg"
+                          className={cn("text-right", realized ? pnlClass(realizedNum) : "text-muted-foreground")}
+                          title={realized ? realizedTitle(realized, (x) => formatSigned(x)) : "Not in the Journal yet"}
+                        >
+                          {realized ? (
+                            <>
+                              {realized.partial ? <span className="text-muted-foreground">~</span> : null}
+                              {formatSigned(realizedNum)}
+                            </>
+                          ) : (
+                            "—"
                           )}
                         </TableCell>
                         <TableCell hideBelow="2xl" className={cn("text-right", pnlClass(fund))}>

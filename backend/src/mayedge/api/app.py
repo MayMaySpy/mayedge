@@ -16,6 +16,7 @@ from mayedge import desk, feed_health
 from mayedge.alive import last_down, mark_clean, note_boot, start_alive
 from mayedge.api.guard import BrowserGuard
 from mayedge.api.routes import include_api
+from mayedge.api.routes.journal import last_open, set_open_emitter
 from mayedge.api.spa import mount_spa
 from mayedge.api.turn import LoopTurn, breathe
 from mayedge.api.ws import BroadcastFanout, manager, send_json
@@ -149,6 +150,7 @@ async def lifespan(app: FastAPI):
     try:
         from mayedge.api.routes.journal import warm as warm_journal
 
+        set_open_emitter(publish)
         await warm_journal()
     except Exception:
         logger.exception("journal warm failed")
@@ -163,6 +165,7 @@ async def lifespan(app: FastAPI):
     finally:
         set_fill_listener(None)
         await stop_journal()
+        set_open_emitter(None)
         await stop_portfolio_sync()
         gateway.unsubscribe(auto_kill.on_gateway)
         auto_kill.stop()
@@ -250,6 +253,9 @@ def create_app() -> FastAPI:
             await send_json(ws, auto_kill.view())
             await send_json(ws, feed_health.snapshot())
             await send_json(ws, budget.snapshot())
+            journal_open = last_open()
+            if journal_open is not None:
+                await send_json(ws, journal_open)
             alerts = gateway.recent_alerts()
             if alerts:
                 await send_json(ws, {"type": "alerts", "events": alerts})

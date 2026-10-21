@@ -25,6 +25,7 @@ import {
   setToneBoard,
   setAutoKill,
   setFeedHealth,
+  setJournalOpen,
   setSendBudget,
   setMinuteCandles,
   upsertMinuteCandle,
@@ -246,6 +247,9 @@ export function useMarketWs(symbol: string) {
             break;
           case "budget":
             setSendBudget(msg);
+            break;
+          case "journal_open":
+            setJournalOpen((msg.positions as import("@/lib/liveData").OpenTripRealized[]) ?? []);
             break;
           case "desk_freeze":
             notifyDesk({

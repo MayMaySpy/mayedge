@@ -172,6 +172,45 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         self.assertEqual(Decimal(first["trips"][0]["upnl"]), Decimal("1.5"))
         self.assertEqual(Decimal(second["trips"][0]["upnl"]), Decimal("4"))
 
+    async def test_an_open_trip_carries_what_it_has_realized(self) -> None:
+        # Long 2 at 100 (fee 1), then 1 sold at 110 for +10 (fee 1): still open, 8 realized.
+        journal_insert_fills(
+            [
+                {**_fill("a", "buy", 1_700_000_000), "size": "2"},
+                {**_fill("b", "sell", 1_700_000_100, "10"), "size": "1", "usd": "110"},
+                # A closed trip on another market stays out.
+                {**_fill("c", "buy", 1_700_000_000), "market_index": 2, "symbol": "BTC"},
+                {**_fill("d", "sell", 1_700_000_050, "20"), "market_index": 2, "symbol": "BTC"},
+            ]
+        )
+        journal_insert_funding([{"market_index": 1, "ts": 1_700_000_050, "amount": "-0.5"}])
+        journal_routes._cache = None
+        journal_routes._ready = None
+        sent: list[dict[str, Any]] = []
+        journal_routes.set_open_emitter(sent.append)
+        self.addCleanup(journal_routes.set_open_emitter, None)
+
+        await journal_routes.warm()
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["type"], "journal_open")
+        self.assertIs(journal_routes.last_open(), sent[0])
+        (row,) = sent[0]["positions"]
+        self.assertEqual(row["market_index"], 1)
+        self.assertEqual(row["side"], "long")
+        self.assertEqual(Decimal(row["realized"]), Decimal("8"))
+        self.assertEqual(Decimal(row["fees"]), Decimal("2"))
+        self.assertEqual(Decimal(row["funding"]), Decimal("-0.5"))
+        self.assertEqual(Decimal(row["net"]), Decimal("7.5"))
+        self.assertFalse(row["partial"])
+
+        app = create_app()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            res = await client.get("/api/journal/open")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["positions"], sent[0]["positions"])
+
     async def test_warm_covers_the_next_read(self) -> None:
         journal_insert_fills(
             [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]

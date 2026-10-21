@@ -9,6 +9,8 @@ import {
   protectOrderLabel,
   protectTriggersFromOrders,
   protectTriggersLabel,
+  realizedFor,
+  realizedTitle,
   roeFromPnl,
   sortPositionRows,
   chartOrderPrice,
@@ -219,5 +221,40 @@ describe("nextPosSort", () => {
       key: "roe",
       dir: "asc",
     });
+  });
+});
+
+describe("realizedFor", () => {
+  const row = {
+    market_index: 1,
+    symbol: "ETH",
+    side: "long" as const,
+    trip_key: "1:a",
+    open_ts: 1_700_000_000,
+    realized: "8",
+    pnl: "10",
+    fees: "2",
+    funding: "-0.5",
+    net: "7.5",
+    partial: false,
+  };
+
+  it("finds the open Round trip on the same market and side", () => {
+    expect(realizedFor({ market_index: 1, size: "1" }, [row])).toBe(row);
+  });
+
+  it("finds nothing while the journal has not caught up with a flip or a new market", () => {
+    expect(realizedFor({ market_index: 1, size: "-1" }, [row])).toBeNull();
+    expect(realizedFor({ market_index: 2, size: "1" }, [row])).toBeNull();
+  });
+
+  it("explains the number, and says when closes before the journal are missing", () => {
+    const fmt = (n: number) => n.toFixed(2);
+    expect(realizedTitle(row, fmt)).toBe(
+      "Realized 8.00: closes 10.00, fees -2.00\nWith funding -0.50: Net 7.50, as the Journal counts it"
+    );
+    expect(realizedTitle({ ...row, partial: true }, fmt)).toContain(
+      "Closes before the journal began are not in it"
+    );
   });
 });

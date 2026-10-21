@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any, cast
@@ -155,9 +156,56 @@ def _stamp(trips: list[RoundTrip], upnl: dict[int, Decimal]) -> list[RoundTrip]:
     ]
 
 
+_open_emit: Callable[[dict[str, Any]], None] | None = None
+_last_open: dict[str, Any] | None = None
+
+
+def set_open_emitter(fn: Callable[[dict[str, Any]], None] | None) -> None:
+    global _open_emit
+    _open_emit = fn
+
+
+def last_open() -> dict[str, Any] | None:
+    """The last `journal_open` sent, for a tab that connects later."""
+    return _last_open
+
+
+def open_payload(trips: list[RoundTrip]) -> dict[str, Any]:
+    """Each open Round trip's Realized: venue PnL on its closes less its fees (journal-rules, On a Position)."""
+    return {
+        "type": "journal_open",
+        "positions": [
+            {
+                "market_index": trip.market_index,
+                "symbol": trip.symbol,
+                "side": trip.side,
+                "trip_key": trip.trip_key,
+                "open_ts": trip.open_ts,
+                "realized": _num(trip.pnl - trip.fees),
+                "pnl": _num(trip.pnl),
+                "fees": _num(trip.fees),
+                "funding": _num(trip.funding),
+                "net": _num(trip.net),
+                "partial": trip.partial,
+            }
+            for trip in trips
+            if trip.open
+        ],
+    }
+
+
 async def warm() -> None:
-    """One rebuild before the first page, so that open reads the cache."""
-    await _shared_trips(_upnl())
+    """One rebuild before the first page, so that open reads the cache. Sends `journal_open`."""
+    global _last_open
+    payload = open_payload(await _shared_trips(_upnl()))
+    _last_open = payload
+    if _open_emit is not None:
+        _open_emit(payload)
+
+
+@router.get("/api/journal/open")
+async def get_open() -> dict[str, Any]:
+    return open_payload(await _shared_trips(_upnl()))
 
 
 async def _shared_trips(upnl: dict[int, Decimal]) -> list[RoundTrip]:

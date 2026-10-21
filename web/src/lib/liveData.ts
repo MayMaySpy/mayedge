@@ -1180,6 +1180,44 @@ export function useSendBudget() {
   return useSyncExternalStore(subscribeSendBudget, getSendBudget, getSendBudget);
 }
 
+/** An open Round trip's Realized, from the journal (journal-rules, On a Position). */
+export type OpenTripRealized = {
+  market_index: number;
+  symbol: string;
+  side: "long" | "short";
+  trip_key: string;
+  open_ts: number;
+  realized: string;
+  pnl: string;
+  fees: string;
+  funding: string;
+  net: string;
+  partial: boolean;
+};
+
+let journalOpen: OpenTripRealized[] = [];
+const journalOpenListeners = new Set<() => void>();
+
+export function subscribeJournalOpen(onChange: () => void) {
+  journalOpenListeners.add(onChange);
+  return () => {
+    journalOpenListeners.delete(onChange);
+  };
+}
+
+export function getJournalOpen() {
+  return journalOpen;
+}
+
+export function setJournalOpen(rows: OpenTripRealized[]) {
+  journalOpen = rows;
+  journalOpenListeners.forEach((fn) => fn());
+}
+
+export function useJournalOpen() {
+  return useSyncExternalStore(subscribeJournalOpen, getJournalOpen, getJournalOpen);
+}
+
 export interface LiveAutoKill {
   armed: boolean;
   loss_usd: number | null;

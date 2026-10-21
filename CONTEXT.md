@@ -266,6 +266,10 @@ _Avoid_: holding, balance, inventory (for the perp)
 A Position in one Market from flat to flat. A flip ends one Round trip and starts the next at the same fill.
 _Avoid_: trade (a Lighter trade is one fill), position (that is the live thing)
 
+**Realized**:
+What a live Position's open Round trip has closed so far: the venue's PnL on its closing fills, less its fees. Funding is apart.
+_Avoid_: closed PnL, banked, the venue's per-position `realized_pnl`
+
 **Net**:
 Realized PnL less fees, plus funding received (or less funding paid).
 _Avoid_: PnL (unqualified), equity, a limit for Auto kill
