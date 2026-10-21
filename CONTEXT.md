@@ -419,3 +419,7 @@ _Avoid_: snapshot, dump, export
 **Loop lag**:
 How late the desk's event loop ran a timer it set, in ms. Above 250 ms the desk is late on everything at once.
 _Avoid_: latency, lag (unqualified)
+
+**Send budget**:
+The desk's share of Lighter's per-minute limits: requests and transactions in the last 60 seconds, against the desk's own caps.
+_Avoid_: rate limit (for the desk's share), quota

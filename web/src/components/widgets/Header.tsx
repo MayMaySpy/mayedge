@@ -40,12 +40,14 @@ import {
   useLiveQuotes,
   overlayQuote,
   setAlgo,
+  useSendBudget,
 } from "@/lib/liveData";
 import { AutoKillSection } from "@/components/widgets/AutoKillSection";
 import { cn, formatApr, formatPct, formatPrice, formatUsdCompact } from "@/lib/utils";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { averageReading, headlineAverage } from "@/lib/funding";
 import { formatClock } from "@/lib/alertFormat";
+import { utcClock } from "@/lib/utcTime";
 import { JOURNAL_PATH, PORTFOLIO_PATH } from "@/lib/deskRoute";
 
 /** Prints settle hourly; a slow refresh keeps the average current. */
@@ -235,6 +237,7 @@ export function Header({
   const account = useLiveAccount();
   const bbo = useLiveBbo();
   const health = useFeedHealth();
+  const budget = useSendBudget();
   const algoBook = useLiveAlgos();
   const autoKill = useAutoKill();
   const { working: workingAlgos } = algoBlotter(algoBook);
@@ -358,6 +361,12 @@ export function Header({
   });
   const flattenNotional = flattenLegs.reduce((s, l) => s + l.notional, 0);
 
+  const cooling = budget.cooling_until > Date.now();
+  let budgetTone: string | undefined;
+  if (cooling) budgetTone = "text-ask";
+  else if (budget.tx >= budget.algo_tx_cap) budgetTone = "text-warn";
+  const budgetLine = `Sends ${budget.tx}/${budget.tx_cap} · Requests ${budget.requests}/${budget.requests_cap} · last 60s`;
+
   let healthBadge: ReactNode = (
     <Badge variant={statusVariant} title={venueDownTitle}>
       <span
@@ -410,31 +419,46 @@ export function Header({
             />
           ) : null}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                {healthBadge}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Feeds</DropdownMenuLabel>
-                {venueDown && (
-                  <DropdownMenuItem disabled className="text-ask">
-                    Lighter down since {formatClock(health.venue_down_since)} UTC
-                    {health.venue_down_reason ? ` · ${health.venue_down_reason}` : ""}
+          <Tooltip>
+            <DropdownMenu>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded-lg outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    {healthBadge}
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Feeds</DropdownMenuLabel>
+                  {venueDown && (
+                    <DropdownMenuItem disabled className="text-ask">
+                      Lighter down since {formatClock(health.venue_down_since)} UTC
+                      {health.venue_down_reason ? ` · ${health.venue_down_reason}` : ""}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem disabled>
+                    Market {health.market_ws}
+                    {health.trade_subs_target
+                      ? ` · trades ${health.trade_subs}/${health.trade_subs_target}`
+                      : ""}
                   </DropdownMenuItem>
-                )}
-                <DropdownMenuItem disabled>
-                  Market {health.market_ws}
-                  {health.trade_subs_target
-                    ? ` · trades ${health.trade_subs}/${health.trade_subs_target}`
-                    : ""}
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled>Account {health.account_ws}</DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <DropdownMenuItem disabled>Account {health.account_ws}</DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <TooltipContent className="flex-col items-start">
+              <span className={budgetTone}>{budgetLine}</span>
+              {cooling ? (
+                <span className="text-ask">
+                  Lighter cooldown until {utcClock(budget.cooling_until)} UTC
+                </span>
+              ) : null}
+            </TooltipContent>
+          </Tooltip>
 
           {algosRunning > 0 && (
             <Badge variant="warn">

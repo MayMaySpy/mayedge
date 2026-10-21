@@ -1129,6 +1129,57 @@ export function useFeedHealth() {
   return useSyncExternalStore(subscribeFeedHealth, getFeedHealth, getFeedHealth);
 }
 
+export type SendBudget = {
+  requests: number;
+  requests_cap: number;
+  tx: number;
+  tx_cap: number;
+  algo_tx_cap: number;
+  cooling_until: number;
+  refused_60s: number;
+};
+
+const emptyBudget: SendBudget = {
+  requests: 0,
+  requests_cap: 54,
+  tx: 0,
+  tx_cap: 38,
+  algo_tx_cap: 30,
+  cooling_until: 0,
+  refused_60s: 0,
+};
+
+let sendBudget: SendBudget = emptyBudget;
+const budgetListeners = new Set<() => void>();
+
+export function subscribeSendBudget(onChange: () => void) {
+  budgetListeners.add(onChange);
+  return () => {
+    budgetListeners.delete(onChange);
+  };
+}
+
+export function getSendBudget() {
+  return sendBudget;
+}
+
+export function setSendBudget(next: Partial<SendBudget> & { type?: string }) {
+  sendBudget = {
+    requests: next.requests ?? sendBudget.requests,
+    requests_cap: next.requests_cap ?? sendBudget.requests_cap,
+    tx: next.tx ?? sendBudget.tx,
+    tx_cap: next.tx_cap ?? sendBudget.tx_cap,
+    algo_tx_cap: next.algo_tx_cap ?? sendBudget.algo_tx_cap,
+    cooling_until: next.cooling_until ?? sendBudget.cooling_until,
+    refused_60s: next.refused_60s ?? sendBudget.refused_60s,
+  };
+  budgetListeners.forEach((fn) => fn());
+}
+
+export function useSendBudget() {
+  return useSyncExternalStore(subscribeSendBudget, getSendBudget, getSendBudget);
+}
+
 export interface LiveAutoKill {
   armed: boolean;
   loss_usd: number | null;

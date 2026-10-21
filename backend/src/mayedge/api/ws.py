@@ -16,7 +16,7 @@ BroadcastFn = Callable[[dict[str, Any]], Awaitable[None]]
 
 # Unbounded Queue + a slow browser tab was filling RAM (multi-GB compressed).
 _FANOUT_MAX = 512
-_REPLACE_TYPES = frozenset({"account", "feed_health", "book_sync", "algo"})
+_REPLACE_TYPES = frozenset({"account", "feed_health", "book_sync", "algo", "budget"})
 _FLUSH_STATS = "_flush_stats"
 _FLUSH_REPLACE = "_flush_replace"
 _INTERNAL = frozenset({_FLUSH_STATS, _FLUSH_REPLACE})

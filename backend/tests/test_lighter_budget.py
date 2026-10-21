@@ -64,6 +64,56 @@ class BudgetTests(IsolatedAsyncioTestCase):
         self.assertLessEqual(CAP, 54)
         self.assertLessEqual(TX_CAP, 38)
 
+    def test_snapshot_counts_the_window_and_rolls_it_off(self) -> None:
+        now = time.monotonic()
+        budget._hits = [(now, True), (now, False), (now - 61, True)]
+        snap = budget.snapshot()
+        self.assertEqual(snap["requests"], 2)
+        self.assertEqual(snap["tx"], 1)
+        self.assertEqual(snap["requests_cap"], CAP)
+        self.assertEqual(snap["tx_cap"], TX_CAP)
+        self.assertEqual(snap["algo_tx_cap"], TX_CEILING["algo"])
+        budget._hits = [(now - 61, True), (now - 61, False)]
+        rolled = budget.snapshot()
+        self.assertEqual(rolled["requests"], 0)
+        self.assertEqual(rolled["tx"], 0)
+
+    async def test_a_local_refusal_counts_for_a_minute(self) -> None:
+        for _ in range(CAP):
+            self.assertTrue(budget.try_acquire(lane="critical"))
+        with self.assertRaises(BudgetRefused):
+            await budget.take("critical")
+        self.assertEqual(budget.snapshot()["refused_60s"], 1)
+        budget._refusals = [time.monotonic() - 61]
+        self.assertEqual(budget.snapshot()["refused_60s"], 0)
+
+    def test_a_venue_block_sets_cooling_until(self) -> None:
+        before = int(time.time() * 1000)
+        budget.note_blocked()
+        until = budget.snapshot()["cooling_until"]
+        self.assertGreater(until, before)
+        self.assertLess(until, before + 70_000)
+        budget._cool_until = time.monotonic() - 1
+        self.assertEqual(budget.snapshot()["cooling_until"], 0)
+
+    async def test_the_publisher_sends_nothing_when_nothing_changed(self) -> None:
+        from mayedge.lighter.budget import publish_changes
+
+        sent: list[dict[str, object]] = []
+        ticks = 0
+
+        async def sleep(_seconds: float) -> None:
+            nonlocal ticks
+            ticks += 1
+            if ticks == 2:
+                self.assertTrue(budget.try_acquire(tx=True))
+            if ticks > 3:
+                raise asyncio.CancelledError
+
+        with self.assertRaises(asyncio.CancelledError):
+            await publish_changes(sent.append, sleep=sleep)
+        self.assertEqual([row["tx"] for row in sent], [0, 1])
+
 
 class NonceAndOrderTests(IsolatedAsyncioTestCase):
     def tearDown(self) -> None:

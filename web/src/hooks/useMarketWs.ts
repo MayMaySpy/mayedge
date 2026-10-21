@@ -25,6 +25,7 @@ import {
   setToneBoard,
   setAutoKill,
   setFeedHealth,
+  setSendBudget,
   setMinuteCandles,
   upsertMinuteCandle,
   type MarketQuote,
@@ -242,6 +243,9 @@ export function useMarketWs(symbol: string) {
             break;
           case "feed_health":
             setFeedHealth(msg);
+            break;
+          case "budget":
+            setSendBudget(msg);
             break;
           case "market_stats":
             applyMarketQuotes((msg.markets as MarketQuote[]) ?? []);

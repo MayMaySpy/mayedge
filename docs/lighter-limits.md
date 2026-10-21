@@ -10,6 +10,8 @@ Last reviewed: 2026-10-21.
 
 Mayedge stays on **Standard** (0 fees). The send budget in `lighter/budget.py` is built for that tier. Nothing in the desk assumes Premium.
 
+The header's feed status shows that budget for the last 60 seconds: sends against 38, requests against 54. The line turns amber when sends reach the algo cap of 30, so a manual order still fits. It turns red while Lighter's cooldown is running, and names the UTC time the cooldown ends.
+
 ## Active orders (on book)
 
 Limit orders resting in the book count as **active**.

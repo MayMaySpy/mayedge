@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
+from typing import Any
 
 from mayedge.lighter.errors import RATE_MSG, VenueBlocked
 
@@ -32,6 +34,7 @@ CEILING = {
 TX_CEILING = {
     "algo": 30,
 }
+PUBLISH_S = 2.0
 
 _lane: ContextVar[str] = ContextVar("lighter_budget_lane", default="critical")
 
@@ -43,17 +46,22 @@ class BudgetRefused(VenueBlocked):
 class RestBudget:
     def __init__(self) -> None:
         self._hits: list[tuple[float, bool]] = []
+        self._refusals: list[float] = []
         self._cool_until = 0.0
+        self._cool_until_wall_ms = 0
 
     def reset(self) -> None:
         self._hits.clear()
+        self._refusals.clear()
         self._cool_until = 0.0
+        self._cool_until_wall_ms = 0
 
     def cooling(self) -> bool:
         return time.monotonic() < self._cool_until
 
     def note_blocked(self) -> None:
         self._cool_until = time.monotonic() + COOLDOWN_S
+        self._cool_until_wall_ms = int((time.time() + COOLDOWN_S) * 1000)
         logger.warning("lighter rate limit — cooling %.0fs", COOLDOWN_S)
 
     def enter_lane(self, name: str) -> Token[str]:
@@ -64,6 +72,27 @@ class RestBudget:
 
     def _prune(self, now: float) -> None:
         self._hits = [hit for hit in self._hits if now - hit[0] < WINDOW_S]
+        self._refusals = [at for at in self._refusals if now - at < WINDOW_S]
+
+    def _note_refused(self, now: float) -> None:
+        self._prune(now)
+        self._refusals.append(now)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Requests and transactions in the last minute, against the desk's caps."""
+        now = time.monotonic()
+        self._prune(now)
+        cooling = self._cool_until_wall_ms if now < self._cool_until else 0
+        return {
+            "type": "budget",
+            "requests": len(self._hits),
+            "requests_cap": CAP,
+            "tx": sum(1 for _at, is_tx in self._hits if is_tx),
+            "tx_cap": TX_CAP,
+            "algo_tx_cap": TX_CEILING["algo"],
+            "cooling_until": cooling,
+            "refused_60s": len(self._refusals),
+        }
 
     def _retry_after(self, now: float) -> int:
         if now < self._cool_until:
@@ -125,8 +154,32 @@ class RestBudget:
             if self._grant(name, n, tx=tx):
                 return
             if not wait:
-                raise BudgetRefused(429, f"{RATE_MSG} ({self._retry_after(time.monotonic())}s)")
+                now = time.monotonic()
+                self._note_refused(now)
+                raise BudgetRefused(429, f"{RATE_MSG} ({self._retry_after(now)}s)")
             await asyncio.sleep(0.25)
 
 
 budget = RestBudget()
+
+
+async def publish_changes(
+    publish: Callable[[dict[str, Any]], None],
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Publish the budget at most every two seconds, and only when it changed."""
+    last: dict[str, Any] | None = None
+    while True:
+        await sleep(PUBLISH_S)
+        snap = budget.snapshot()
+        if snap == last:
+            continue
+        last = dict(snap)
+        try:
+            publish(snap)
+        except Exception:
+            logger.exception("budget publish failed")
+
+
+def start_budget_publish(publish: Callable[[dict[str, Any]], None]) -> asyncio.Task[None]:
+    return asyncio.create_task(publish_changes(publish), name="budget")

@@ -25,7 +25,7 @@ from mayedge.journal_sync import start as start_journal
 from mayedge.journal_sync import stop as stop_journal
 from mayedge.kill import FLATTEN_SLIPPAGE, KillResult, kill
 from mayedge.lighter.account import account_service, set_fill_listener
-from mayedge.lighter.budget import KILL_LANE, budget
+from mayedge.lighter.budget import KILL_LANE, budget, start_budget_publish
 from mayedge.lighter.errors import VenueBlocked
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
@@ -89,6 +89,7 @@ async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> Kill
 async def lifespan(app: FastAPI):
     watch = start_loop_watch()
     backup = None
+    budget_watch = None
     fanout = BroadcastFanout(manager.broadcast)
     fanout.start()
     pusher = TelegramPusher.from_settings()
@@ -101,6 +102,7 @@ async def lifespan(app: FastAPI):
 
     desk.set_broadcast(publish)
     feed_health.set_emitter(publish)
+    budget_watch = start_budget_publish(publish)
     auto_kill.start(run_kill=run_kill, emit=publish, positions=_cached_positions)
     gateway.subscribe(auto_kill.on_gateway)
     set_fill_listener(note_fill)
@@ -131,6 +133,12 @@ async def lifespan(app: FastAPI):
         if backup is not None:
             await backup.stop()
         await watch.stop()
+        if budget_watch is not None:
+            budget_watch.cancel()
+            try:
+                await budget_watch
+            except asyncio.CancelledError:
+                pass
         store.close_db()
 
 
@@ -161,6 +169,7 @@ def create_app() -> FastAPI:
             "network": settings.lighter_network.value,
             "trading_enabled": order_service.enabled,
             "backup": backup_health(),
+            "budget": {k: v for k, v in budget.snapshot().items() if k != "type"},
             **loop_lag_snapshot(),
             **{k: v for k, v in feed_health.snapshot().items() if k != "type"},
         }
@@ -188,6 +197,7 @@ def create_app() -> FastAPI:
             await send_json(ws, desk.algo_book())
             await send_json(ws, auto_kill.view())
             await send_json(ws, feed_health.snapshot())
+            await send_json(ws, budget.snapshot())
             alerts = gateway.recent_alerts()
             if alerts:
                 await send_json(ws, {"type": "alerts", "events": alerts})
