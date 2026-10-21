@@ -29,6 +29,7 @@ import { MarketPicker } from "@/components/widgets/MarketPicker";
 import type { FundingAverage, Market } from "@/lib/api";
 import { preferPerpMarket, algoBlotter, algoIsWorking } from "@/lib/algos";
 import { api } from "@/lib/api";
+import { useBefore } from "@/hooks/useBefore";
 import { useFavorites } from "@/lib/favorites";
 import { pushRecent } from "@/lib/recents";
 import {
@@ -368,7 +369,7 @@ export function Header({
   });
   const flattenNotional = flattenLegs.reduce((s, l) => s + l.notional, 0);
 
-  const cooling = budget.cooling_until > Date.now();
+  const cooling = useBefore(budget.cooling_until);
   let budgetTone: string | undefined;
   if (cooling) budgetTone = "text-ask";
   else if (budget.tx >= budget.algo_tx_cap) budgetTone = "text-warn";
