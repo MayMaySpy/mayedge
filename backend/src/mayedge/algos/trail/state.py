@@ -11,17 +11,11 @@ from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.ledger import Ledger
 from mayedge.algos.trail.engine import Point, Side
 from mayedge.algos.trail.plan import TrailParams
-from mayedge.numbers import fmt_decimal
+from mayedge.numbers import fmt_decimal, parse_decimal
 from mayedge.rows import is_obj, obj
 
 if TYPE_CHECKING:
     from mayedge.algos.trail.job import TrailRunner
-
-
-def _dec(raw: object) -> Decimal | None:
-    if raw in (None, ""):
-        return None
-    return Decimal(str(raw))
 
 
 @dataclass
@@ -74,20 +68,29 @@ class TrailState:
 
     def load_runtime(self, raw: dict[str, Any]) -> None:
         self.side = "buy" if raw.get("side") == "buy" else "sell"
-        self.qty = _dec(raw.get("qty")) or Decimal("0")
-        self.floor = _dec(raw.get("floor"))
+        qty = raw.get("qty")
+        self.qty = parse_decimal(qty) if qty not in (None, "") else Decimal("0")
+        floor = raw.get("floor")
+        self.floor = parse_decimal(floor) if floor not in (None, "") else None
+        best = raw.get("best")
+        trigger = raw.get("trigger")
         self.point = Point(
             active=bool(raw.get("active")),
-            best=_dec(raw.get("best")),
-            trigger=_dec(raw.get("trigger")),
+            best=parse_decimal(best) if best not in (None, "") else None,
+            trigger=parse_decimal(trigger) if trigger not in (None, "") else None,
         )
-        self.venue_trigger = _dec(raw.get("venue_trigger"))
+        venue_trigger = raw.get("venue_trigger")
+        self.venue_trigger = (
+            parse_decimal(venue_trigger) if venue_trigger not in (None, "") else None
+        )
         last = raw.get("last_move_ms")
         self.last_move_ms = int(last) if last else None
-        self.held_before = _dec(raw.get("held_before")) or Decimal("0")
+        held = raw.get("held_before")
+        self.held_before = parse_decimal(held) if held not in (None, "") else Decimal("0")
         fired = raw.get("fired_at")
         self.fired_at = int(fired) if fired else None
-        self.fired_price = _dec(raw.get("fired_price"))
+        fired_price = raw.get("fired_price")
+        self.fired_price = parse_decimal(fired_price) if fired_price not in (None, "") else None
         deadline = raw.get("deadline_ms")
         self.deadline_ms = int(deadline) if deadline else None
         roles = obj(raw.get("roles"))

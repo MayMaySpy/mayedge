@@ -11,7 +11,6 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from mayedge import db as store
-from mayedge.algos.chase import util
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.planner import venue as planner_venue
 from mayedge.algos.trail.book import TrailBook
@@ -78,7 +77,7 @@ class TrailJobTests(IsolatedAsyncioTestCase):
         self.addCleanup(store.close_db)
         store.close_db()
         self.clock = FakeClock()
-        p = patch.object(util, "now_ms", self.clock)
+        p = patch("mayedge.algos.common.now_ms", self.clock)
         p.start()
         self.addCleanup(p.stop)
         self.venue = FakeVenue()

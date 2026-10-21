@@ -14,10 +14,9 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from mayedge.algos.chase import util
+from mayedge.algos import common
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import _is_invalid_nonce, _is_order_not_found, _is_rate_limit
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.algos.planner import venue
 from mayedge.algos.trail import engine
@@ -43,16 +42,13 @@ from mayedge.algos.trail.state import TrailBookView, TrailState
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.coi import next_manual_client_order_index
+from mayedge.lighter.errors import is_blocked, is_invalid_nonce, is_order_not_found
 from mayedge.numbers import check_notional, fmt_decimal
 from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0")
-
-
-def _fmt(d: Decimal | None) -> str | None:
-    return fmt_decimal(d)
 
 
 def _wrong_side(e: Exception) -> bool:
@@ -101,16 +97,16 @@ class TrailRunner:
             "symbol": st.symbol,
             "reduce_only": bool(p and p.kind != "entry"),
             "side": st.side,
-            "qty": _fmt(st.qty),
+            "qty": fmt_decimal(st.qty),
             "display_qty": None,
             "offset_bps": None,
             "price_floor": None,
             "price_ceiling": None,
             "remaining": None,
-            "filled": _fmt(fire.filled) if fire else "0",
+            "filled": fmt_decimal(fire.filled) if fire else "0",
             "quote_action": "rest" if st.status == ChaseStatus.RUNNING else "pause",
             "reason": st.reason,
-            "rest_price": _fmt(st.venue_trigger),
+            "rest_price": fmt_decimal(st.venue_trigger),
             "rest_qty": None,
             "working_coi": None,
             "working_order_index": None,
@@ -121,9 +117,9 @@ class TrailRunner:
                 **runtime,
                 "kind": p.kind if p else None,
                 "reference": p.reference if p else None,
-                "distance": _fmt(p.distance) if p else None,
+                "distance": fmt_decimal(p.distance) if p else None,
                 "distance_kind": p.distance_kind if p else None,
-                "activation": _fmt(p.activation) if p else None,
+                "activation": fmt_decimal(p.activation) if p else None,
                 "backstop": bool(p and p.kind != "entry" and p.reference == "last"),
                 "clip_roles": {
                     str(c.client_order_index): st.roles.get(c.seq, "") for c in st.ledger.clips
@@ -239,7 +235,7 @@ class TrailRunner:
             client_order_index=self._book.alloc_coi(),
             price=price,
             qty=qty,
-            now=util.now_ms(),
+            now=common.now_ms(),
             side=st.side,
         )
         st.roles[clip.seq] = role
@@ -249,7 +245,7 @@ class TrailRunner:
         for _ in range(CANCEL_WAIT_TRIES):
             if clip.order_index or clip.status != "live":
                 return
-            self._sync_open(util.now_ms())
+            self._sync_open(common.now_ms())
             if clip.order_index or clip.status != "live":
                 return
             self._exec().kick_refresh()
@@ -266,10 +262,10 @@ class TrailRunner:
         try:
             await self._exec().cancel_order(self._state.market_index, clip.order_index)
         except Exception as e:
-            if not _is_order_not_found(e):
+            if not is_order_not_found(e):
                 raise
         clip.status = "cancelled"
-        clip.closed_at = util.now_ms()
+        clip.closed_at = common.now_ms()
         return True
 
     async def _cancel_all(self) -> bool:
@@ -297,21 +293,21 @@ class TrailRunner:
             await ex.create_trigger_leg(
                 st.market_index,
                 st.side,
-                _fmt(st.qty) or "0",
+                fmt_decimal(st.qty) or "0",
                 role="sl",
                 kind="market",
-                trigger=_fmt(trigger) or "0",
+                trigger=fmt_decimal(trigger) or "0",
                 slippage=p.slippage,
                 client_order_index=clip.client_order_index,
             )
         except Exception as e:
             clip.status = "cancelled"
-            clip.closed_at = util.now_ms()
+            clip.closed_at = common.now_ms()
             if isinstance(e, ValueError) and _wrong_side(e):
                 return False
             raise
         st.venue_trigger = trigger
-        st.last_move_ms = util.now_ms()
+        st.last_move_ms = common.now_ms()
         if self.kind == "tp":
             st.held_before = self._held()
         return True
@@ -334,7 +330,7 @@ class TrailRunner:
                 st.side,
                 role="sl",
                 kind="market",
-                trigger=_fmt(trigger) or "0",
+                trigger=fmt_decimal(trigger) or "0",
                 slippage=p.slippage,
             )
         except ValueError as e:
@@ -343,7 +339,7 @@ class TrailRunner:
             raise
         clip.price = trigger
         st.venue_trigger = trigger
-        st.last_move_ms = util.now_ms()
+        st.last_move_ms = common.now_ms()
         return True
 
     async def _fire(self, price: Decimal, *, why: str) -> None:
@@ -364,20 +360,20 @@ class TrailRunner:
             check_notional(qty, price, settings.max_order_notional)
         clip = self._place("fire", price=price, qty=qty)
         st.held_before = held
-        st.fired_at = util.now_ms()
+        st.fired_at = common.now_ms()
         st.fired_price = price
         try:
             await self._exec().create_market_order(
                 market_index=st.market_index,
                 side=st.side,
-                size=_fmt(qty),
+                size=fmt_decimal(qty),
                 slippage=p.slippage,
                 reduce_only=p.kind != "entry",
                 client_order_index=clip.client_order_index,
             )
         except Exception:
             clip.status = "cancelled"
-            clip.closed_at = util.now_ms()
+            clip.closed_at = common.now_ms()
             st.fired_at = None
             raise
         st.reason = why
@@ -481,7 +477,7 @@ class TrailRunner:
         resolved: Resolved,
         replaced: list[dict[str, Any]] | None = None,
     ) -> None:
-        now = util.now_ms()
+        now = common.now_ms()
         self._state = TrailState(
             status=ChaseStatus.RUNNING,
             params=params,
@@ -523,7 +519,7 @@ class TrailRunner:
                     int(o.get("market_index") or 0), int(o.get("order_index") or 0)
                 )
             except Exception as e:
-                if not _is_order_not_found(e):
+                if not is_order_not_found(e):
                     logger.warning("trail: replaced order %s not cancelled: %s", o, e)
                     left += 1
         return left
@@ -546,13 +542,13 @@ class TrailRunner:
                 self._wake.clear()
                 if self._stop.is_set():
                     break
-                if util.now_ms() < self._backoff_until:
+                if common.now_ms() < self._backoff_until:
                     continue
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
-                        self._backoff_until = util.now_ms() + RATE_LIMIT_COOLDOWN_MS
+                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
+                        self._backoff_until = common.now_ms() + RATE_LIMIT_COOLDOWN_MS
                         continue
                     # A venue Stop stays where it is. The Trail stops moving it.
                     logger.exception("trail error on %s", self._state.algo_id)
@@ -574,7 +570,7 @@ class TrailRunner:
             ex = self._exec()
             if not ex.orders_hydrated():
                 return
-            now = util.now_ms()
+            now = common.now_ms()
             if not self._feed_live():
                 # F10: no price to follow. What is on the venue stays.
                 self._prints.clear()
@@ -610,7 +606,7 @@ class TrailRunner:
                 fire.filled = max(fire.filled, filled)
                 fire.status = "filled" if filled > 0 else "cancelled"
                 fire.closed_at = now
-                self._done(f"filled {_fmt(filled)}" if filled > 0 else "entry did not fill")
+                self._done(f"filled {fmt_decimal(filled)}" if filled > 0 else "entry did not fill")
             return
         if st.deadline_ms and now >= st.deadline_ms:
             self._done("entry expired")  # TE2
@@ -620,7 +616,7 @@ class TrailRunner:
             st.point = engine.follow(f, st.point, px)
             trigger = st.point.trigger
             if st.point.active and trigger is not None and engine.crossed(f, trigger, px):
-                await self._fire(px, why=f"fired at {_fmt(px)}")  # TE1
+                await self._fire(px, why=f"fired at {fmt_decimal(px)}")  # TE1
                 return
         if st.point.active:
             st.reason = "following"
@@ -684,7 +680,7 @@ class TrailRunner:
             st.point = engine.follow(f, st.point, px)
             trigger = st.point.trigger
             if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
-                await self._fire(px, why=f"fired at {_fmt(px)}")  # L1
+                await self._fire(px, why=f"fired at {fmt_decimal(px)}")  # L1
                 return
         point = st.point
         if point.trigger is None:
@@ -810,7 +806,7 @@ class TrailRunner:
                 "0",
                 role="sl",
                 kind="market",
-                trigger=_fmt(trigger) or "0",
+                trigger=fmt_decimal(trigger) or "0",
                 slippage=p.slippage,
                 client_order_index=next_manual_client_order_index(),
             )

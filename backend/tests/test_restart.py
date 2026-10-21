@@ -16,7 +16,6 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from mayedge import db as store
-from mayedge.algos.chase import util
 from mayedge.algos.chase.config import CHASE_COI_BASE, CHASE_COI_END, MIN_REQUOTE_MS
 from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
@@ -447,7 +446,7 @@ class RestartTests(IsolatedAsyncioTestCase):
         venue.entry = D("100")
         book = TrailBook(execution=lambda: venue.execution(), broadcast=lambda _p: None)
         again: object | None = None
-        with patch.object(util, "now_ms", clock):
+        with patch("mayedge.algos.common.now_ms", clock):
             await book.start_from_body(
                 {"market_index": MI, "kind": "stop", "distance": "1", "distance_kind": "price"}
             )
