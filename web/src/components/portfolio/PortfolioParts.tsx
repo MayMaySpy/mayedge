@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   type AutoscaleInfoProvider,
   ColorType,
@@ -170,7 +170,7 @@ function FlowLane({ events }: { events: (FlowEvent & { x: number })[] }) {
   );
 }
 
-/** W4: each kind's value over time, the total, and where money moved in or out. */
+/** W4: each kind's value over time, the total, and where money moved in or out. `height="fill"` takes its flex parent's height. */
 export function ValueChart({
   history,
   kinds,
@@ -178,8 +178,9 @@ export function ValueChart({
 }: {
   history: PortfolioHistory;
   kinds: PortfolioKind[];
-  height?: number;
+  height?: number | "fill";
 }) {
+  const fill = height === "fill";
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   const points = history.points;
@@ -192,7 +193,7 @@ export function ValueChart({
     const el = ref.current;
     if (!el || points.length === 0) return;
     const chart = createChart(el, {
-      height,
+      ...(fill ? {} : { height }),
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
@@ -260,7 +261,7 @@ export function ValueChart({
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
     };
-  }, [events, height, hourly, index, kinds, points]);
+  }, [events, fill, height, hourly, index, kinds, points]);
 
   if (points.length === 0) {
     return <div className="px-2 py-6 text-muted-foreground">No history stored yet. The desk fills it within a few minutes.</div>;
@@ -269,7 +270,7 @@ export function ValueChart({
   const point = points[at];
   const moment = events.find((e) => e.ts === point.ts);
   return (
-    <div className="flex flex-col gap-1">
+    <div className={cn("flex flex-col gap-1", fill && "min-h-0 flex-1")}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-2 font-mono text-sm tabular-nums" aria-live="polite">
         <span className="text-muted-foreground">{when(point.ts, hourly)}</span>
         <span className="inline-flex items-center gap-1.5">
@@ -286,14 +287,14 @@ export function ValueChart({
         ))}
         {moment ? <span className="text-muted-foreground">{moment.label}</span> : null}
       </div>
-      <div className="relative">
-        <div ref={ref} className="w-full" style={{ height }} />
+      <div className={cn("relative", fill && "min-h-0 flex-1")}>
+        <div ref={ref} className="h-full w-full" style={fill ? undefined : { height }} />
         {placed.map((e) => (
           <div
             key={`guide-${e.ts}`}
             aria-hidden
-            className="pointer-events-none absolute top-0 border-l border-dashed border-muted-foreground/35"
-            style={{ left: e.x, height }}
+            className="pointer-events-none absolute inset-y-0 border-l border-dashed border-muted-foreground/35"
+            style={{ left: e.x }}
           />
         ))}
       </div>
@@ -302,50 +303,79 @@ export function ValueChart({
   );
 }
 
-/** W5: one day per row, each kind's Day change. The table behind the daily chart. */
+/** W7: a page before the table can measure itself, and the fewest rows a page ever holds. */
 const DAYS_PER_PAGE = 20;
+const MIN_DAYS_PER_PAGE = 5;
+
+/**
+ * W7: as many rows as fit the table's height, measured from its header and a row, and
+ * measured again whenever the table resizes.
+ */
+function useRowsThatFit(box: React.RefObject<HTMLDivElement | null>, hasRows: boolean): number {
+  const [fit, setFit] = useState(DAYS_PER_PAGE);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !hasRows) return;
+    const measure = () => {
+      const head = el.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+      const row = el.querySelector("tbody tr")?.getBoundingClientRect().height ?? 0;
+      if (row > 0 && el.clientHeight > 0) {
+        setFit(Math.max(MIN_DAYS_PER_PAGE, Math.floor((el.clientHeight - head) / row)));
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [box, hasRows]);
+  return fit;
+}
 
 /** W5, W7: the days newest first, a page at a time. */
 export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: PortfolioKind[] }) {
-  const [want, setWant] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  // The newest day shown, not a page number, so a resize keeps that day in view.
+  const [first, setFirst] = useState(0);
   const all = useMemo(() => [...days].reverse(), [days]);
-  const { rows, page, pages } = pageOf(all, want, DAYS_PER_PAGE);
+  const perPage = useRowsThatFit(box, all.length > 0);
+  const { rows, page, pages } = pageOf(all, Math.floor(first / perPage), perPage);
   return (
-    <div className="flex flex-col gap-1">
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Day (UTC)</TableHead>
-            {kinds.map((k) => (
-              <TableHead key={k} className="text-right">
-                {PORTFOLIO_KIND_LABELS[k]}
-              </TableHead>
-            ))}
-            <TableHead className="text-right">Total</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((day) => (
-            <TableRow key={day.day}>
-              <TableCell className="font-mono">{day.day}</TableCell>
+    <div className="flex min-h-0 flex-1 flex-col gap-1">
+      <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
+        <Table>
+          <TableHeader className="sticky top-0 z-10 bg-panel">
+            <TableRow>
+              <TableHead>Day (UTC)</TableHead>
               {kinds.map((k) => (
-                <TableCell key={k} className={cn("text-right font-mono tabular-nums", pnlClass(day.kinds[k]))}>
-                  {money(day.kinds[k])}
-                </TableCell>
+                <TableHead key={k} className="text-right">
+                  {PORTFOLIO_KIND_LABELS[k]}
+                </TableHead>
               ))}
-              <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(day.total))}>{money(day.total)}</TableCell>
+              <TableHead className="text-right">Total</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {rows.map((day) => (
+              <TableRow key={day.day}>
+                <TableCell className="font-mono">{day.day}</TableCell>
+                {kinds.map((k) => (
+                  <TableCell key={k} className={cn("text-right font-mono tabular-nums", pnlClass(day.kinds[k]))}>
+                    {money(day.kinds[k])}
+                  </TableCell>
+                ))}
+                <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(day.total))}>{money(day.total)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       {pages > 1 ? (
         <div className="flex items-center justify-end gap-2 px-2 text-muted-foreground">
           <span className="font-mono tabular-nums">
-            {page * DAYS_PER_PAGE + 1}–{page * DAYS_PER_PAGE + rows.length} of {all.length}
+            {page * perPage + 1}–{page * perPage + rows.length} of {all.length}
           </span>
-          <Button type="button" variant="ghost" size="sm" className="h-6 px-2" disabled={page === 0} onClick={() => setWant(page - 1)}>
+          <Button type="button" variant="ghost" size="sm" className="h-6 px-2" disabled={page === 0} onClick={() => setFirst((page - 1) * perPage)}>
             Newer
           </Button>
           <Button
@@ -354,7 +384,7 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
             size="sm"
             className="h-6 px-2"
             disabled={page >= pages - 1}
-            onClick={() => setWant(page + 1)}
+            onClick={() => setFirst((page + 1) * perPage)}
           >
             Older
           </Button>
@@ -364,171 +394,160 @@ export function DaysTable({ days, kinds }: { days: PortfolioDay[]; kinds: Portfo
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/** W6: one Holding, its header the kind's key, value, share of the total and change since the open. */
+function HoldingCard({ kind, now, children }: { kind: PortfolioKind; now: PortfolioNow; children: React.ReactNode }) {
+  const held = now.kinds[kind];
+  const total = num(now.total.value);
+  const share = total > 0 ? (num(held.value) / total) * 100 : 0;
   return (
-    <section className="flex min-w-0 flex-col gap-1 overflow-x-auto">
-      <h2 className="px-2 text-muted-foreground">{title}</h2>
-      {children}
+    <section className="panel flex min-w-0 shrink-0 flex-col gap-1 p-1">
+      <header className="flex items-center gap-2 px-2 pt-1">
+        <LineKey kind={kind} />
+        <h2>{PORTFOLIO_KIND_LABELS[kind]}</h2>
+        <span className="ml-auto font-mono tabular-nums">{usd(held.value)}</span>
+        <span className="w-9 text-right font-mono tabular-nums text-muted-foreground">{share.toFixed(0)}%</span>
+        <span
+          className={cn("w-20 text-right font-mono tabular-nums", pnlClass(held.change))}
+          title="Change since the open"
+        >
+          {money(held.change)}
+        </span>
+      </header>
+      <div className="overflow-x-auto">{children}</div>
     </section>
   );
 }
 
-/** W6: what each Holding is made of. */
-export function Holdings({ now }: { now: PortfolioNow }) {
-  const perps = now.kinds.perps;
+function Empty({ cols, children }: { cols: number; children: React.ReactNode }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={cols} className="text-muted-foreground">
+        {children}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** W6: what each Holding is made of, in the Allocation's order. */
+export function Holdings({ now, className }: { now: PortfolioNow; className?: string }) {
   const staking = now.pools.filter((p) => p.kind === "staking");
   const llp = now.pools.filter((p) => p.kind === "llp");
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <div className="panel p-1">
-        <Section title="Perps">
-          <Table>
-            <TableBody>
-              <TableRow>
-                <TableCell>Value (collateral and open uPnL)</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">{usd(perps.value)}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Change</TableCell>
-                <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(perps.change))}>
-                  {money(perps.change)}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell colSpan={2}>
-                  <a href="/journal" target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground">
-                    Trades are in the Journal
-                  </a>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </Section>
-      </div>
-      <div className="panel p-1">
-        <Section title="Spot">
+    <div className={cn("flex min-h-0 flex-col gap-3", className)}>
+      <HoldingCard kind="perps" now={now}>
+        <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground">
+          <span>Collateral and open uPnL</span>
+          <a href="/journal" target="_blank" rel="noopener" className="ml-auto hover:text-foreground">
+            Trades are in the Journal
+          </a>
+        </div>
+      </HoldingCard>
+      <HoldingCard kind="spot" now={now}>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Asset</TableHead>
+              <TableHead className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Price</TableHead>
+              <TableHead className="text-right">Value</TableHead>
+              <TableHead className="text-right">uPnL</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {now.spot.length === 0 ? (
+              <Empty cols={5}>No spot holdings</Empty>
+            ) : (
+              now.spot.map((row) => (
+                <TableRow key={row.symbol}>
+                  <TableCell className="font-mono">{row.symbol}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{size(row.qty)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{price(row.price)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
+                  <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.upnl))}>
+                    {row.upnl == null ? "—" : money(row.upnl)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </HoldingCard>
+      <HoldingCard kind="llp" now={now}>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Shares</TableHead>
+              <TableHead className="text-right">Put in</TableHead>
+              <TableHead className="text-right">Value</TableHead>
+              <TableHead className="text-right">APY</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {llp.length === 0 ? (
+              <Empty cols={4}>Not in LLP</Empty>
+            ) : (
+              llp.map((row) => (
+                <TableRow key={row.pool}>
+                  <TableCell className="font-mono tabular-nums">{size(row.shares)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{usd(row.principal)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </HoldingCard>
+      <HoldingCard kind="staking" now={now}>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Staked</TableHead>
+              <TableHead className="text-right">Put in</TableHead>
+              <TableHead className="text-right">Value</TableHead>
+              <TableHead className="text-right">APY</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {staking.length === 0 ? (
+              <Empty cols={4}>Nothing staked</Empty>
+            ) : (
+              staking.map((row) => (
+                <TableRow key={row.pool}>
+                  <TableCell className="font-mono tabular-nums">
+                    {units(row.units)} {row.unit}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {row.principal ? `${units(row.principal)} ${row.unit}` : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        {now.unlocks.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Asset</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Price</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead className="text-right">uPnL</TableHead>
+                <TableHead>Unlocking</TableHead>
+                <TableHead className="text-right">Frees up</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {now.spot.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
-                    No spot holdings
+              {now.unlocks.map((u) => (
+                <TableRow key={`${u.asset_index}-${u.unlock_ms}`}>
+                  <TableCell className="font-mono tabular-nums">
+                    {size(u.amount)} {ASSET_NAMES[u.asset_index] ?? `asset ${u.asset_index}`}
                   </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{when(u.unlock_ms, true)}</TableCell>
                 </TableRow>
-              ) : (
-                now.spot.map((row) => (
-                  <TableRow key={row.symbol}>
-                    <TableCell className="font-mono">{row.symbol}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{size(row.qty)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{price(row.price)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                    <TableCell className={cn("text-right font-mono tabular-nums", pnlClass(row.upnl))}>
-                      {row.upnl == null ? "—" : money(row.upnl)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
-        </Section>
-      </div>
-      <div className="panel p-1">
-        <Section title="Staking">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Staked</TableHead>
-                <TableHead className="text-right">Put in</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead className="text-right">APY</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {staking.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-muted-foreground">
-                    Nothing staked
-                  </TableCell>
-                </TableRow>
-              ) : (
-                staking.map((row) => (
-                  <TableRow key={row.pool}>
-                    <TableCell className="font-mono tabular-nums">
-                      {units(row.units)} {row.unit}
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
-                      {row.principal ? `${units(row.principal)} ${row.unit}` : "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          {now.unlocks.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Unlocking</TableHead>
-                  <TableHead className="text-right">Frees up</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {now.unlocks.map((u) => (
-                  <TableRow key={`${u.asset_index}-${u.unlock_ms}`}>
-                    <TableCell className="font-mono tabular-nums">
-                      {size(u.amount)} {ASSET_NAMES[u.asset_index] ?? `asset ${u.asset_index}`}
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{when(u.unlock_ms, true)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : null}
-        </Section>
-      </div>
-      <div className="panel p-1">
-        <Section title="LLP">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Shares</TableHead>
-                <TableHead className="text-right">Put in</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead className="text-right">APY</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {llp.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-muted-foreground">
-                    Not in LLP
-                  </TableCell>
-                </TableRow>
-              ) : (
-                llp.map((row) => (
-                  <TableRow key={row.pool}>
-                    <TableCell className="font-mono tabular-nums">{size(row.shares)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{usd(row.principal)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{usd(row.value)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{apy(row.apy)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Section>
-      </div>
+        ) : null}
+      </HoldingCard>
     </div>
   );
 }

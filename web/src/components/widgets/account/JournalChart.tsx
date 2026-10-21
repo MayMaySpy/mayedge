@@ -19,7 +19,8 @@ function dayLabel(time: number): string {
 
 /**
  * Daily bars and the running total. `time` is the day's start, seconds. Hovering a day
- * reads out its value and the running total; with no hover, the last day.
+ * reads out its value and the running total; with no hover, the last day. `height="fill"`
+ * takes whatever height its flex parent gives it.
  */
 export function JournalChart({
   days,
@@ -27,9 +28,10 @@ export function JournalChart({
   label = "Net",
 }: {
   days: Day[];
-  height?: number;
+  height?: number | "fill";
   label?: string;
 }) {
+  const fill = height === "fill";
   const ref = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   const running = useMemo(
@@ -41,7 +43,7 @@ export function JournalChart({
     const el = ref.current;
     if (!el || days.length === 0) return;
     const chart = createChart(el, {
-      height,
+      ...(fill ? {} : { height }),
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
@@ -89,12 +91,12 @@ export function JournalChart({
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
     };
-  }, [days, height]);
+  }, [days, fill, height]);
 
   const at = hover != null && hover >= 0 ? hover : days.length - 1;
   const day = days[at];
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className={cn("flex flex-col gap-0.5", fill && "min-h-0 flex-1")}>
       {day ? (
         <div className="flex items-baseline gap-3 px-2 font-mono text-sm tabular-nums" aria-live="polite">
           <span className="text-muted-foreground">{dayLabel(day.time)}</span>
@@ -108,7 +110,7 @@ export function JournalChart({
           </span>
         </div>
       ) : null}
-      <div ref={ref} className="w-full" style={{ height }} />
+      <div ref={ref} className={cn("w-full", fill && "min-h-0 flex-1")} style={fill ? undefined : { height }} />
     </div>
   );
 }

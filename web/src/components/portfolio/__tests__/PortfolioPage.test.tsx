@@ -146,9 +146,14 @@ describe("PortfolioPage", () => {
     expect(screen.getByText("1,018.21 LIT")).toBeTruthy();
     expect(screen.getByText("27.59%")).toBeTruthy();
     expect(screen.getByText("Not in LLP")).toBeTruthy();
-    // Holdings come straight after the total, above the charts.
-    const value = screen.getByRole("heading", { name: "Value" });
-    expect(screen.getByText("ETH").compareDocumentPosition(value) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // One card per kind, in the Allocation's order, each headed by its value, share and change.
+    const cards = ["Perps", "Spot", "LLP", "Staking"].map((name) => screen.getByRole("heading", { name }));
+    for (const [a, b] of cards.slice(1).map((card, i) => [cards[i], card])) {
+      expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    const staking = cards[3].closest("header") as HTMLElement;
+    expect(within(staking).getByText("57%")).toBeTruthy();
+    expect(within(staking).getByText("+143.04")).toBeTruthy();
   });
 
   it("says so when value and PnL disagree", async () => {
@@ -198,6 +203,18 @@ describe("PortfolioPage days, calendar and card", () => {
     const csv = await saved[0].text();
     expect(csv.split("\n")[0]).toBe("day_utc,perps,spot,llp,staking,total");
     expect(csv.trim().split("\n")).toHaveLength(26);
+  });
+
+  it("fills a page with as many days as the table's height holds", async () => {
+    vi.mocked(api.portfolioDays).mockResolvedValue({ range: "30d", days: many });
+    // Header and rows 30px each in a 330px box: room for ten rows under the header.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ height: 30 } as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(330);
+    render(<PortfolioPage />);
+    await screen.findByText("$5,681.19");
+    expect(await screen.findByText("1–10 of 25")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Older" }));
+    expect(screen.getByText("11–20 of 25")).toBeTruthy();
   });
 
   it("opens the calendar in a modal, loading every day only then", async () => {
