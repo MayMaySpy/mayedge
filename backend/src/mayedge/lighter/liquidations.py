@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from mayedge import db as store
 from mayedge.lighter.models import MarketMeta
-from mayedge.numbers import fmt_decimal
+from mayedge.numbers import fmt_decimal, to_decimal_or
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,6 @@ def _int_id(raw: Any) -> int:
         return int(raw or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _dec(raw: Any) -> Decimal:
-    try:
-        d = Decimal(str(raw if raw is not None else "0"))
-    except (InvalidOperation, ValueError, TypeError):
-        return Decimal("0")
-    return d if d.is_finite() else Decimal("0")
 
 
 def taker_side(raw: dict[str, Any]) -> str:
@@ -177,9 +169,9 @@ class LiquidationFeed:
                 kind = "liquidation"
             side = taker_side(t)
             ts = self._ts_ms(t.get("timestamp", t.get("time", 0)))
-            size = _dec(t.get("size") or t.get("amount"))
-            price = _dec(t.get("price"))
-            usd = _dec(t.get("usd_amount"))
+            size = to_decimal_or(t.get("size") or t.get("amount"), Decimal("0"))
+            price = to_decimal_or(t.get("price"), Decimal("0"))
+            usd = to_decimal_or(t.get("usd_amount"), Decimal("0"))
             if usd <= 0:
                 usd = price * size
             mi = market_index
@@ -254,9 +246,9 @@ class LiquidationFeed:
             kind = "liquidation"
         mi = _int_id(row.get("market_index"))
         gid = str(row.get("group_id") or "") or f"{mi}:{kind}:t{trade_id}"
-        size = _dec(row.get("size"))
-        price = _dec(row.get("price"))
-        usd = _dec(row.get("usd_amount"))
+        size = to_decimal_or(row.get("size"), Decimal("0"))
+        price = to_decimal_or(row.get("price"), Decimal("0"))
+        usd = to_decimal_or(row.get("usd_amount"), Decimal("0"))
         if usd <= 0:
             usd = price * size
         ts = _int_id(row.get("timestamp", row.get("ts")))

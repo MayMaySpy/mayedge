@@ -9,9 +9,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from itertools import pairwise
 from typing import Any, Literal, cast
+
+from mayedge.numbers import to_decimal_or
 
 Kind = Literal["perps", "spot", "llp", "staking"]
 KINDS: tuple[Kind, ...] = ("perps", "spot", "llp", "staking")
@@ -40,18 +42,9 @@ class OpenRefused(ValueError):
     """N1: a Day open in the future, or too far back."""
 
 
-def _dec(raw: Any) -> Decimal:
-    if raw is None or raw == "":
-        return ZERO
-    try:
-        return Decimal(str(raw))
-    except (InvalidOperation, ValueError):
-        return ZERO
-
-
 def to_ms(ts: Any) -> int:
     """V5, A4: the venue answers seconds; a value above 10^12 is already ms."""
-    n = int(_dec(ts))
+    n = int(to_decimal_or(ts, ZERO))
     return n if n > 10**12 else n * 1000
 
 
@@ -67,7 +60,8 @@ class Bucket:
 def buckets(rows: list[dict[str, Any]]) -> list[Bucket]:
     out = [
         Bucket(
-            to_ms(row.get("timestamp")), {k: _dec(v) for k, v in row.items() if k != "timestamp"}
+            to_ms(row.get("timestamp")),
+            {k: to_decimal_or(v, ZERO) for k, v in row.items() if k != "timestamp"},
         )
         for row in rows
         if isinstance(row, dict)
@@ -180,13 +174,13 @@ def pool_row(
     share: dict[str, Any], pool_account: dict[str, Any] | None, lit_price: Decimal
 ) -> PoolRow:
     """N6, P4, P5: what one pool share holds."""
-    index = int(_dec(share.get("public_pool_index")))
-    shares = _dec(share.get("shares_amount"))
-    principal = _dec(share.get("principal_amount")) or None
+    index = int(to_decimal_or(share.get("public_pool_index"), ZERO))
+    shares = to_decimal_or(share.get("shares_amount"), ZERO)
+    principal = to_decimal_or(share.get("principal_amount"), ZERO) or None
     info = (pool_account or {}).get("pool_info") or {}
-    total_shares = _dec(info.get("total_shares"))
+    total_shares = to_decimal_or(info.get("total_shares"), ZERO)
     apy = (
-        _dec(info.get("annual_percentage_yield"))
+        to_decimal_or(info.get("annual_percentage_yield"), ZERO)
         if info.get("annual_percentage_yield") is not None
         else None
     )
@@ -194,11 +188,11 @@ def pool_row(
         lit = ZERO
         for asset in (pool_account or {}).get("assets") or []:
             if str(asset.get("symbol")).upper() == "LIT":
-                lit = _dec(asset.get("balance"))
+                lit = to_decimal_or(asset.get("balance"), ZERO)
         units = shares * lit / total_shares if total_shares > 0 else ZERO
         value = units * lit_price if lit_price > 0 else None
         return PoolRow(index, "staking", shares, units, "LIT", value, apy, principal)
-    tav = _dec((pool_account or {}).get("total_asset_value"))
+    tav = to_decimal_or((pool_account or {}).get("total_asset_value"), ZERO)
     value = shares * tav / total_shares if total_shares > 0 else None
     return PoolRow(index, "llp", shares, value or ZERO, "USD", value, apy, principal)
 
@@ -235,10 +229,10 @@ def spot_rows(assets: list[Any]) -> list[SpotRow]:
         out.append(
             SpotRow(
                 symbol=symbol,
-                qty=_dec(get("balance")),
-                price=_dec(get("index_price")),
-                value=_dec(get("usd")),
-                upnl=_dec(upnl) if upnl not in (None, "") else None,
+                qty=to_decimal_or(get("balance"), ZERO),
+                price=to_decimal_or(get("index_price"), ZERO),
+                value=to_decimal_or(get("usd"), ZERO),
+                upnl=to_decimal_or(upnl, ZERO) if upnl not in (None, "") else None,
             )
         )
     out.sort(key=lambda row: -row.value)
@@ -261,10 +255,10 @@ def collateral_rows(assets: list[Any]) -> list[CollateralRow]:
         symbol = str(get("symbol") or "").upper()
         if symbol not in _QUOTE:
             continue
-        qty = _dec(get("margin_balance"))
+        qty = to_decimal_or(get("margin_balance"), ZERO)
         if qty <= 0:
             continue
-        price = _dec(get("index_price")) or Decimal(1)
+        price = to_decimal_or(get("index_price"), ZERO) or Decimal(1)
         out.append(CollateralRow(symbol=symbol, qty=qty, price=price, value=qty * price))
     return out
 
@@ -327,7 +321,9 @@ class Unlock:
 def unlocks(account: dict[str, Any]) -> list[Unlock]:
     rows = [
         Unlock(
-            int(_dec(u.get("asset_index"))), _dec(u.get("amount")), to_ms(u.get("unlock_timestamp"))
+            int(to_decimal_or(u.get("asset_index"), ZERO)),
+            to_decimal_or(u.get("amount"), ZERO),
+            to_ms(u.get("unlock_timestamp")),
         )
         for u in account.get("pending_unlocks") or []
         if isinstance(u, dict)
@@ -450,7 +446,11 @@ def portfolio_now(
         mismatch=mismatches(pnl, values),
         spot=spot_rows(live_assets),
         pools=[
-            pool_row(share, pool_accounts.get(int(_dec(share.get("public_pool_index")))), lit_price)
+            pool_row(
+                share,
+                pool_accounts.get(int(to_decimal_or(share.get("public_pool_index"), ZERO))),
+                lit_price,
+            )
             for share in account.get("shares") or []
             if isinstance(share, dict)
         ],

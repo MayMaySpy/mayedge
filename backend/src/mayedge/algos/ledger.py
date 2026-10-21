@@ -11,10 +11,6 @@ ClipStatus = Literal["live", "filled", "cancelled"]
 ClipSide = Literal["buy", "sell"]
 
 
-def _fmt(d: Decimal | None) -> str | None:
-    return fmt_decimal(d)
-
-
 @dataclass
 class Clip:
     seq: int
@@ -42,10 +38,10 @@ class Clip:
             "client_order_index": str(self.client_order_index),
             "order_index": str(self.order_index) if self.order_index is not None else None,
             "side": self.side,
-            "price": _fmt(self.price),
-            "qty": _fmt(self.qty),
-            "filled": _fmt(self.filled),
-            "remaining": _fmt(self.remaining),
+            "price": fmt_decimal(self.price),
+            "qty": fmt_decimal(self.qty),
+            "filled": fmt_decimal(self.filled),
+            "remaining": fmt_decimal(self.remaining),
             "status": self.status,
             "seen_on_book": self.seen_on_book,
             "placed_at": self.placed_at,
@@ -59,9 +55,9 @@ class Clip:
             "client_order_index": self.client_order_index,
             "order_index": self.order_index,
             "side": self.side,
-            "price": _fmt(self.price) or "0",
-            "qty": _fmt(self.qty) or "0",
-            "filled": _fmt(self.filled) or "0",
+            "price": fmt_decimal(self.price) or "0",
+            "qty": fmt_decimal(self.qty) or "0",
+            "filled": fmt_decimal(self.filled) or "0",
             "status": self.status,
             "seen_on_book": self.seen_on_book,
             "placed_at": self.placed_at,
@@ -106,8 +102,8 @@ class Fill:
         return {
             "seq": self.seq,
             "clip_seq": self.clip_seq,
-            "price": _fmt(self.price),
-            "qty": _fmt(self.qty),
+            "price": fmt_decimal(self.price),
+            "qty": fmt_decimal(self.qty),
             "ts": self.ts,
             "order_index": str(self.order_index) if self.order_index is not None else None,
             "client_order_index": (
@@ -119,8 +115,8 @@ class Fill:
         return {
             "seq": self.seq,
             "clip_seq": self.clip_seq,
-            "price": _fmt(self.price) or "0",
-            "qty": _fmt(self.qty) or "0",
+            "price": fmt_decimal(self.price) or "0",
+            "qty": fmt_decimal(self.qty) or "0",
             "ts": self.ts,
             "order_index": self.order_index,
             "client_order_index": self.client_order_index,
@@ -357,7 +353,7 @@ class Ledger:
             "next_fill": self.next_fill,
             "trade_ids": set(self.trade_ids),
             "trade_qty_by_clip": {
-                seq: (_fmt(qty) or "0") for seq, qty in self.trade_qty_by_clip.items()
+                seq: (fmt_decimal(qty) or "0") for seq, qty in self.trade_qty_by_clip.items()
             },
             "clips": [c.to_persist() for c in self.clips],
             "fills": [f.to_persist() for f in self.fills],

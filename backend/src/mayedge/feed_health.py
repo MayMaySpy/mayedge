@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any, Literal
+
+from mayedge.algos import common
 
 FeedStatus = Literal["live", "reconnecting", "stale", "down"]
 
@@ -24,16 +25,12 @@ def set_emitter(fn: Callable[[dict[str, Any]], None] | None) -> None:
     _emitter = fn
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 def note_venue_down(reason: str) -> None:
     """Lighter refused us as a whole (503, service restart). Cleared by the next live message."""
     global _venue_down_since, _venue_down_reason
     changed = _venue_down_reason != reason or not _venue_down_since
     if not _venue_down_since:
-        _venue_down_since = _now_ms()
+        _venue_down_since = common.now_ms()
     _venue_down_reason = reason
     if changed:
         _emit()
@@ -72,7 +69,7 @@ def set_market_ws(
 
 def touch_market_msg() -> None:
     global _market_last_msg_at, _market_ws
-    _market_last_msg_at = _now_ms()
+    _market_last_msg_at = common.now_ms()
     cleared = _clear_venue_down()
     if _market_ws != "live" or cleared:
         _market_ws = "live"
@@ -94,7 +91,7 @@ def set_account_ws(
 
 def touch_account_msg() -> None:
     global _account_last_msg_at, _account_ws
-    _account_last_msg_at = _now_ms()
+    _account_last_msg_at = common.now_ms()
     cleared = _clear_venue_down()
     if _account_ws != "live" or cleared:
         _account_ws = "live"
@@ -112,7 +109,7 @@ def snapshot() -> dict[str, Any]:
         "trade_subs_target": _trade_subs_target,
         "venue_down_since": _venue_down_since,
         "venue_down_reason": _venue_down_reason,
-        "ts": _now_ms(),
+        "ts": common.now_ms(),
     }
 
 

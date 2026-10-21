@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from expect_logs import expects_logs
 
-from mayedge.algos.chase.util import _is_would_cross
 from mayedge.config import settings
 from mayedge.lighter.account import AccountService
 from mayedge.lighter.errors import (
@@ -15,6 +14,7 @@ from mayedge.lighter.errors import (
     VenueBlocked,
     has_code,
     http_block,
+    is_would_cross,
     venue_client_error,
 )
 from mayedge.lighter.models import MarketMeta, parse_to_int
@@ -102,9 +102,9 @@ class VenueClientErrorTests(TestCase):
     def test_code_checks_ignore_longer_numbers(self) -> None:
         self.assertTrue(has_code("code=21706 invalid order base or quote amount", "21706"))
         self.assertFalse(has_code("order 8000021706 rejected", "21706"))
-        self.assertFalse(_is_would_cross(RuntimeError("order 82170 rejected at 121705.5")))
-        self.assertTrue(_is_would_cross(RuntimeError("code=21702 would cross")))
-        self.assertTrue(_is_would_cross(RuntimeError("rejected (21702)")))
+        self.assertFalse(is_would_cross(RuntimeError("order 82170 rejected at 121705.5")))
+        self.assertTrue(is_would_cross(RuntimeError("code=21702 would cross")))
+        self.assertTrue(is_would_cross(RuntimeError("rejected (21702)")))
 
 
 class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
