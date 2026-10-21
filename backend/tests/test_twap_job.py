@@ -21,11 +21,13 @@ from chase_harness import FakeGateway, FakeOrderService, make_execution  # noqa:
 
 def isolated_twap():
     return patch.multiple(
-        "mayedge.algos.twap.book.store",
+        "mayedge.algos.clip_book.store",
         upsert_run=lambda *a, **k: None,
         load_history=lambda *a, **k: [],
         load_active_runs=lambda *a, **k: [],
         init_db=lambda: None,
+        save_book_counters=lambda *a, **k: None,
+        load_book_counters=lambda *a, **k: {"id_seq": 0, "coi_seq": 0},
     )
 
 

@@ -5,7 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from expect_logs import expects_logs
 
 from mayedge import db as store
 from mayedge.algos.chase.book import ChaseBook
@@ -14,6 +16,8 @@ from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE
+from mayedge.algos.twap.book import AdvancedTwapBook
+from mayedge.algos.twap.plan import TWAP_COI_BASE
 from mayedge.config import settings
 
 # (book class, algo_type, id prefix, coi base)
@@ -21,6 +25,7 @@ BOOKS: list[tuple[Callable[..., Any], str, str, int]] = [
     (ChaseBook, "chase-iceberg", "CH-", CHASE_COI_BASE),
     (LadderBook, "ladder", "LD-", LADDER_COI_BASE),
     (ChaseGridBook, "chase-grid", "CG-", GRID_COI_BASE),
+    (AdvancedTwapBook, "advanced-twap", "TW-", TWAP_COI_BASE),
 ]
 
 
@@ -159,3 +164,32 @@ class BookCounterRestartTests(IsolatedAsyncioTestCase):
         await self._restart(ChaseBook)
         self.assertEqual(store.load_book_counters("chase-iceberg")["id_seq"], 21)
         self.assertEqual(store.load_counters()["id_seq"], 99)
+
+
+class BrokenResumeTests(BookCounterRestartTests):
+    @expects_logs()
+    async def test_a_job_that_will_not_resume_is_kept_as_stopped_history(self) -> None:
+        for cls, algo_type, prefix, coi_base in BOOKS:
+            with self.subTest(algo_type=algo_type):
+                algo_id = f"{prefix}0001"
+                _archive_run(algo_id, algo_type, coi_base + 1)
+                with store._lock:
+                    conn = store._connect()
+                    conn.execute(
+                        "UPDATE algo_runs SET archived = 0, status = 'running' WHERE algo_id = ?",
+                        (algo_id,),
+                    )
+                    conn.commit()
+                runner = MagicMock()
+                runner.resume = AsyncMock(side_effect=RuntimeError("venue down"))
+                with (
+                    patch.object(cls, "_new_runner", return_value=runner),
+                    patch.object(cls, "RESTORE_WAITS_FOR_FEEDS", False),
+                ):
+                    book = await self._restart(cls)
+                runner.resume.assert_awaited_once()
+                self.assertFalse(book.has(algo_id))
+                self.assertEqual(store.load_active_runs(algo_type=algo_type), [])
+                history = store.load_history(5, algo_type=algo_type)
+                self.assertEqual(history[0]["algo_id"], algo_id)
+                self.assertEqual(book.to_dict()["history"][0]["algo_id"], algo_id)

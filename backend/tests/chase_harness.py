@@ -430,13 +430,13 @@ def isolated_db() -> Iterator[None]:
     with (
         patch("mayedge.db.save_counters"),
         patch("mayedge.db.upsert_run"),
-        patch("mayedge.algos.chase.book.store.save_counters"),
+        patch("mayedge.algos.clip_book.store.save_counters"),
         patch("mayedge.db.save_book_counters"),
-        patch("mayedge.algos.chase.book.store.upsert_run"),
-        patch("mayedge.algos.chase.book.store.load_history", return_value=[]),
-        patch("mayedge.algos.chase.book.store.load_active_runs", return_value=[]),
+        patch("mayedge.algos.clip_book.store.upsert_run"),
+        patch("mayedge.algos.clip_book.store.load_history", return_value=[]),
+        patch("mayedge.algos.clip_book.store.load_active_runs", return_value=[]),
         patch(
-            "mayedge.algos.chase.book.store.load_counters", return_value={"id_seq": 0, "coi_seq": 0}
+            "mayedge.algos.clip_book.store.load_counters", return_value={"id_seq": 0, "coi_seq": 0}
         ),
         patch("mayedge.db.load_book_counters", return_value={"id_seq": 0, "coi_seq": 0}),
     ):
