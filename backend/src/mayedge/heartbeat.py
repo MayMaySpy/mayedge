@@ -39,7 +39,7 @@ class Heartbeat:
         self._client = client
         self._sleep = sleep
         self._now = now
-        self._feeds = feeds or (lambda: {})
+        self._feeds = feeds or dict
         self._lag_ms = lag_ms or (lambda: 0.0)
         self._trading = trading or (lambda: False)
         self._last_ok_at = 0

@@ -275,6 +275,9 @@ def _account_index(raw: Any) -> int:
     return n if n > 0 else 0
 
 
+def _print_ts(t: dict[str, Any]) -> int:
+    return int(t.get("timestamp", t.get("time", 0)) or 0)
+
 async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bool = False) -> None:
     market_index = message_market_index(msg, "trade")
     if market_index is None:
@@ -306,7 +309,7 @@ async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bo
             for t in trades_raw
             if isinstance(t, dict) and str(t.get("type") or "trade") not in liq_kinds
         ]
-        prints.sort(key=lambda t: int(t.get("timestamp", t.get("time", 0)) or 0))
+        prints.sort(key=_print_ts)
         prices = [str(t.get("price")) for t in prints if t.get("price") not in (None, "")]
         if prices:
             # Trail F9: every print, for the desk only; the web has its own tape.

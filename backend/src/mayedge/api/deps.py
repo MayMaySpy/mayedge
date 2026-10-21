@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import HTTPException
@@ -33,7 +34,7 @@ def _require_trading() -> None:
         raise HTTPException(503, "Trading not configured. Set API credentials in .env")
 
 
-async def _trade(fn):
+async def _trade[T](fn: Callable[[], Awaitable[T]]) -> T:
     _require_trading()
     try:
         result = await fn()
@@ -51,7 +52,7 @@ async def _trade(fn):
     return result
 
 
-async def _account_history(fn):
+async def _account_history[T](fn: Callable[[], Awaitable[T]]) -> T:
     token = budget.enter_lane("read")
     try:
         return await fn()

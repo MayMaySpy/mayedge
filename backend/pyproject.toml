@@ -36,12 +36,18 @@ dev = [
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
-extraPaths = ["src", "tests"]
+extraPaths = ["src", "tests", "."]
 typeCheckingMode = "standard"
 reportMissingImports = true
 reportUndefinedVariable = true
 # lighter-sdk exposes ApiClient/SignerClient/etc. but omits them from __all__.
 reportPrivateImportUsage = false
+# Strict-mode checks that hold everywhere: every parameter and generic typed.
+reportMissingParameterType = "error"
+reportUnknownParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+reportDeprecated = "error"
 
 [tool.ruff]
 target-version = "py312"
@@ -81,3 +87,13 @@ known-first-party = ["mayedge"]
 quote-style = "double"
 docstring-code-format = true
 
+
+# Tests build loose fixtures; they keep standard mode.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["src", "tests", "."]
+reportMissingParameterType = "none"
+reportUnknownParameterType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeArgument = "none"
+reportDeprecated = "none"

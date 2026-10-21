@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 from mayedge import migrations
@@ -302,7 +302,7 @@ def _open_reader() -> sqlite3.Connection:
 
 
 @contextlib.contextmanager
-def reading() -> Iterator[sqlite3.Connection]:
+def reading() -> Generator[sqlite3.Connection]:
     conn = _open_reader()
     with _read_lock:
         yield conn

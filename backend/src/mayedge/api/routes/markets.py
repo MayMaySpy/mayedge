@@ -104,7 +104,9 @@ async def get_funding_history(
 
 
 @router.get("/api/candles/{symbol}")
-async def get_candles(symbol: str, resolution: str = "1m", count: int = 500) -> list[dict]:
+async def get_candles(
+    symbol: str, resolution: str = "1m", count: int = 500
+) -> list[dict[str, Any]]:
     idx = _market_index(symbol)
     cap = 3600 if resolution == "1s" else 500
     n = min(max(int(count), 1), cap)

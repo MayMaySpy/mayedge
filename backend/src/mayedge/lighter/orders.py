@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +20,8 @@ from mayedge.lighter.coi import (
 from mayedge.lighter.errors import VenueBlocked, has_code, venue_client_error
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.models import (
+    MarketMeta,
+    OpenOrder,
     from_scaled,
     leverage_to_imf,
     maker_min_base,
@@ -89,7 +92,7 @@ class OrderService:
             raise RuntimeError("Trading not configured")
         return self._signer
 
-    def _market_meta(self, market_index: int):
+    def _market_meta(self, market_index: int) -> MarketMeta:
         meta = gateway.get_market_by_index(market_index)
         if not meta:
             raise ValueError(f"Unknown market index {market_index}")
@@ -107,7 +110,7 @@ class OrderService:
             raise ValueError("Enter a price")
         return amount
 
-    def _check_maker_size(self, meta, size_int: int, price_int: int | None) -> None:
+    def _check_maker_size(self, meta: MarketMeta, size_int: int, price_int: int | None) -> None:
         qty = from_scaled(size_int, meta.size_decimals)
         px = from_scaled(price_int, meta.price_decimals) if price_int else None
         step = Decimal(10) ** -int(meta.size_decimals)
@@ -130,7 +133,7 @@ class OrderService:
 
     def _check_notional(
         self,
-        meta,
+        meta: MarketMeta,
         size_int: int,
         price_int: int | None = None,
         *,
@@ -147,7 +150,7 @@ class OrderService:
             px = ref
         check_notional(qty, px, settings.max_order_notional)
 
-    def _raise_order_err(self, err: Any, meta) -> None:
+    def _raise_order_err(self, err: Any, meta: MarketMeta) -> None:
         text = str(err)
         if has_code(text, "21706") or "invalid order base or quote amount" in text.lower():
             raise ValueError(
@@ -169,7 +172,7 @@ class OrderService:
             raise VenueBlocked(*mapped)
         raise ValueError(err)
 
-    def _market_worst_price(self, meta, *, is_ask: bool, slippage: float) -> int:
+    def _market_worst_price(self, meta: MarketMeta, *, is_ask: bool, slippage: float) -> int:
         """IOC cap from a synced book, else the market_stats quote. No REST book fetch."""
         bid_s, ask_s = gateway.best_bid_ask(meta.market_index)
         touch = 0.0
@@ -191,7 +194,7 @@ class OrderService:
 
     def _trigger_exec_price(
         self,
-        meta,
+        meta: MarketMeta,
         *,
         is_ask: bool,
         kind: str,
@@ -217,7 +220,7 @@ class OrderService:
             raise ValueError("Invalid stop price")
         return self._scale_price(fmt_decimal(worst) or "0", meta.price_decimals)
 
-    def _check_trigger_side(self, meta, *, is_ask: bool, role: str, trigger: str) -> None:
+    def _check_trigger_side(self, meta: MarketMeta, *, is_ask: bool, role: str, trigger: str) -> None:
         mark = float(meta.mark_price or meta.last_trade_price or 0)
         try:
             trig = float(parse_decimal(trigger))
@@ -248,7 +251,9 @@ class OrderService:
             getattr(ret, "message", None)
         )
 
-    async def _retry_nonce(self, send):
+    async def _retry_nonce(
+        self, send: Callable[[], Awaitable[tuple[Any, Any, Any]]]
+    ) -> tuple[Any, Any, Any]:
         await budget.take(tx=True)
         created, ret, err = await send()
         if not self._nonce_stale(ret, err):
@@ -280,7 +285,7 @@ class OrderService:
         tx_hash = getattr(resp, "tx_hash", None)
         return str(tx_hash) if tx_hash else str(resp)
 
-    def _created_tx_hash(self, resp: Any, err: Any, meta, *, action: str) -> str:
+    def _created_tx_hash(self, resp: Any, err: Any, meta: MarketMeta, *, action: str) -> str:
         if err:
             self._raise_order_err(err, meta)
         try:
@@ -452,7 +457,7 @@ class OrderService:
 
     def _conditional_leg(
         self,
-        meta,
+        meta: MarketMeta,
         *,
         market_index: int,
         is_ask: bool,
@@ -511,7 +516,7 @@ class OrderService:
         )
         return req, coi
 
-    async def _send_sl_tp_leg(self, role: str, kind: str, req: CreateOrderTxReq, meta):
+    async def _send_sl_tp_leg(self, role: str, kind: str, req: CreateOrderTxReq, meta: MarketMeta):
         kwargs = {
             "market_index": req.MarketIndex,
             "client_order_index": req.ClientOrderIndex,
@@ -762,7 +767,7 @@ class OrderService:
 
     async def _amend_protect_trigger(
         self,
-        live,
+        live: OpenOrder,
         *,
         role: str,
         kind: str,

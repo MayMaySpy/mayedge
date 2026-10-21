@@ -29,7 +29,7 @@ class ChaseExecution:
     get_account_trades: Callable[..., Any] | None = None
     order_book_payload: Callable[..., Any] | None = None
     trades_payload: Callable[..., Any] | None = None
-    recent_liquidations: Callable[[], list] | None = None
+    recent_liquidations: Callable[[], list[dict[str, Any]]] | None = None
     feed_health: Callable[[], dict[str, Any]] | None = None
     create_trigger_leg: Callable[..., Any] | None = None
     amend_trigger_leg: Callable[..., Any] | None = None

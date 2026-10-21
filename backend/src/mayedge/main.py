@@ -1,5 +1,6 @@
 import copy
 import logging
+from typing import Any
 
 import uvicorn
 from uvicorn.config import LOGGING_CONFIG
@@ -11,7 +12,7 @@ _LOG_DATE = "%H:%M:%S"
 _LOG_FMT = "%(asctime)s.%(msecs)03d %(levelname)s [%(name)s] %(message)s"
 
 
-def _log_config() -> dict:
+def _log_config() -> dict[str, Any]:
     cfg = copy.deepcopy(LOGGING_CONFIG)
     cfg["formatters"]["default"]["fmt"] = "%(asctime)s.%(msecs)03d %(levelprefix)s %(message)s"
     cfg["formatters"]["default"]["datefmt"] = _LOG_DATE

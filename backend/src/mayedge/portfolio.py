@@ -7,10 +7,11 @@ holding detail only adds quantities to them (N6).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 Kind = Literal["perps", "spot", "llp", "staking"]
 KINDS: tuple[Kind, ...] = ("perps", "spot", "llp", "staking")
@@ -203,11 +204,22 @@ class SpotRow:
     upnl: Decimal | None
 
 
+def _getter(asset: Any) -> Callable[[str], Any]:
+    """Read a field off a dict row or an SDK model alike."""
+    if isinstance(asset, dict):
+        return cast(dict[str, Any], asset).get
+
+    def get(key: str) -> Any:
+        return getattr(asset, key, None)
+
+    return get
+
+
 def spot_rows(assets: list[Any]) -> list[SpotRow]:
     """N6, A1: the desk's live asset rows, quote left out."""
     out: list[SpotRow] = []
     for asset in assets:
-        get = asset.get if isinstance(asset, dict) else lambda k, a=asset: getattr(a, k, None)
+        get = _getter(asset)
         symbol = str(get("symbol") or "").upper()
         if not symbol or symbol in _QUOTE:
             continue

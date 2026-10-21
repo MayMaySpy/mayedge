@@ -25,7 +25,7 @@ from mayedge.lighter.equity import (
 from mayedge.lighter.errors import VenueBlocked, http_block, venue_client_error, venue_down_reason
 from mayedge.lighter.fees import ticks_to_bps
 from mayedge.lighter.gateway import gateway
-from mayedge.lighter.models import AccountSummary, OpenOrder, to_float
+from mayedge.lighter.models import AccountSummary, OpenOrder, Position, to_float
 from mayedge.lighter.parse import (
     apply_orders,
     asset_holding_qty,
@@ -633,7 +633,7 @@ class AccountService:
                 portfolio_value=self._summary.portfolio_value,
             )
 
-        positions: list = []
+        positions: list[Position] = []
         for p in getattr(account, "positions", []) or []:
             pos = parse_position(p)
             if pos:
