@@ -437,8 +437,34 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
   return (
     <div className={cn("flex min-h-0 flex-col gap-3", className)}>
       <HoldingCard kind="perps" now={now}>
-        <div className="flex items-center gap-2 px-2 pb-1.5 text-muted-foreground">
-          <span>Collateral and open uPnL</span>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Asset</TableHead>
+              <TableHead hideBelow="xs" className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Value</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {now.perps.collateral.map((row) => (
+              <TableRow key={row.symbol}>
+                <TableCell>
+                  <TableName>{row.symbol}</TableName>
+                  <span className="ml-1.5 text-muted-foreground">collateral</span>
+                </TableCell>
+                <TableCell hideBelow="xs" className="text-right">{size(row.qty)}</TableCell>
+                <TableCell className="text-right">{usd(row.value)}</TableCell>
+              </TableRow>
+            ))}
+            {now.perps.collateral.length === 0 ? <Empty cols={3}>No USDC collateral</Empty> : null}
+            <TableRow>
+              <TableCell>Open uPnL</TableCell>
+              <TableCell hideBelow="xs" />
+              <TableCell className={cn("text-right", pnlClass(now.perps.upnl))}>{money(now.perps.upnl)}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground">
           <a href="/journal" target="_blank" rel="noopener" className="ml-auto hover:text-foreground">
             Trades are in the Journal
           </a>
@@ -475,6 +501,11 @@ export function Holdings({ now, className }: { now: PortfolioNow; className?: st
             )}
           </TableBody>
         </Table>
+        {now.spot_gap != null ? (
+          <div className="px-2 py-1.5 text-warn" role="status">
+            {usd(now.spot_gap)} of Spot is in no row above: the venue counts an asset the desk does not list.
+          </div>
+        ) : null}
       </HoldingCard>
       <HoldingCard kind="llp" now={now}>
         <Table>

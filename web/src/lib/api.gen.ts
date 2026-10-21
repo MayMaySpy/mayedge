@@ -209,6 +209,13 @@ export interface OpenTripRealized {
   partial: boolean;
 }
 
+export interface PortfolioCollateral {
+  symbol: string;
+  qty: string | null;
+  price: string | null;
+  value: string | null;
+}
+
 export interface PortfolioDay {
   day: string;
   start: number;
@@ -269,7 +276,14 @@ export interface PortfolioNow {
   mismatch: PortfolioMismatch[];
   spot: PortfolioSpot[];
   pools: PortfolioPool[];
+  perps: PortfolioPerps;
+  spot_gap: string | null;
   unlocks: PortfolioUnlock[];
+}
+
+export interface PortfolioPerps {
+  collateral: PortfolioCollateral[];
+  upnl: string | null;
 }
 
 export interface PortfolioPoint {

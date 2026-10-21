@@ -27,6 +27,8 @@ const NOW: PortfolioNow = {
   mismatch: [],
   spot: [],
   pools: [],
+  perps: { collateral: [], upnl: null },
+  spot_gap: null,
   unlocks: [],
 };
 

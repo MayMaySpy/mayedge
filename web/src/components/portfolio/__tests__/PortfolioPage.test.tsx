@@ -60,6 +60,11 @@ const NOW: PortfolioNow = {
       principal: "998.9623",
     },
   ],
+  perps: {
+    collateral: [{ symbol: "USDC", qty: "1221.01", price: "1", value: "1221.01" }],
+    upnl: "0",
+  },
+  spot_gap: null,
   unlocks: [],
 };
 
@@ -143,6 +148,13 @@ describe("PortfolioPage", () => {
     render(<PortfolioPage />);
     await screen.findByText("$5,681.19");
     expect(screen.getByText("ETH")).toBeTruthy();
+    // USDC is the Perps collateral, never a Spot row (portfolio-rules A1, N6).
+    const perps = screen.getByRole("heading", { name: "Perps" }).closest("section") as HTMLElement;
+    expect(within(perps).getByText("USDC")).toBeTruthy();
+    expect(within(perps).getByText("$1,221.01")).toBeTruthy();
+    expect(within(perps).getByText("Open uPnL")).toBeTruthy();
+    const spotCard = screen.getByRole("heading", { name: "Spot" }).closest("section") as HTMLElement;
+    expect(within(spotCard).queryByText("USDC")).toBeNull();
     expect(screen.getByText("1,018.21 LIT")).toBeTruthy();
     expect(screen.getByText("27.59%")).toBeTruthy();
     expect(screen.getByText("Not in LLP")).toBeTruthy();
@@ -154,6 +166,12 @@ describe("PortfolioPage", () => {
     const staking = cards[3].closest("header") as HTMLElement;
     expect(within(staking).getByText("57%")).toBeTruthy();
     expect(within(staking).getByText("+143.04")).toBeTruthy();
+  });
+
+  it("names Spot value that no row lists", async () => {
+    vi.mocked(api.portfolio).mockResolvedValue({ ...NOW, spot_gap: "500" });
+    render(<PortfolioPage />);
+    expect((await screen.findByRole("status")).textContent).toContain("$500.00 of Spot is in no row above");
   });
 
   it("says so when value and PnL disagree", async () => {

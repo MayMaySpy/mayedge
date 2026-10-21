@@ -238,6 +238,43 @@ def spot_rows(assets: list[Any]) -> list[SpotRow]:
 
 
 @dataclass(frozen=True)
+class CollateralRow:
+    symbol: str
+    qty: Decimal
+    price: Decimal
+    value: Decimal
+
+
+def collateral_rows(assets: list[Any]) -> list[CollateralRow]:
+    """N6, A1: the quote the Perps value is made of: USDC's margin_balance at its index price."""
+    out: list[CollateralRow] = []
+    for asset in assets:
+        get = _getter(asset)
+        symbol = str(get("symbol") or "").upper()
+        if symbol not in _QUOTE:
+            continue
+        qty = _dec(get("margin_balance"))
+        if qty <= 0:
+            continue
+        price = _dec(get("index_price")) or Decimal(1)
+        out.append(CollateralRow(symbol=symbol, qty=qty, price=price, value=qty * price))
+    return out
+
+
+# N6: Spot value its rows leave out, shown when it is over both of these.
+SPOT_GAP_USD = Decimal("1")
+SPOT_GAP_SHARE = Decimal("0.01")
+
+
+def spot_gap(spot_value: Decimal, rows: list[SpotRow]) -> Decimal | None:
+    """The Spot value no row accounts for, when it is more than a rounding or a price tick."""
+    gap = spot_value - sum((r.value for r in rows), ZERO)
+    if abs(gap) <= max(SPOT_GAP_USD, abs(spot_value) * SPOT_GAP_SHARE):
+        return None
+    return gap
+
+
+@dataclass(frozen=True)
 class Unlock:
     asset_index: int
     amount: Decimal
@@ -263,6 +300,9 @@ class PortfolioNow:
     spot: list[SpotRow] = field(default_factory=list)
     pools: list[PoolRow] = field(default_factory=list)
     pending: list[Unlock] = field(default_factory=list)
+    collateral: list[CollateralRow] = field(default_factory=list)
+    upnl: Decimal | None = None
+    detail: bool = True
 
     def total(self) -> KindNow:
         return KindNow(
@@ -306,6 +346,14 @@ class PortfolioNow:
                 }
                 for r in self.pools
             ],
+            "perps": {
+                "collateral": [
+                    {"symbol": r.symbol, "qty": _s(r.qty), "price": _s(r.price), "value": _s(r.value)}
+                    for r in self.collateral
+                ],
+                "upnl": _s(self.upnl),
+            },
+            "spot_gap": _s(spot_gap(self.kinds["spot"].value, self.spot)) if self.detail else None,
             "unlocks": [
                 {"asset_index": u.asset_index, "amount": _s(u.amount), "unlock_ms": u.unlock_ms} for u in self.pending
             ],
@@ -329,6 +377,8 @@ def portfolio_now(
     pool_accounts: dict[int, dict[str, Any]],
     live_assets: list[Any],
     lit_price: Decimal,
+    upnl: Decimal | None = None,
+    detail: bool = True,
 ) -> PortfolioNow:
     pnl, values = buckets(pnl_rows), buckets(value_rows)
     return PortfolioNow(
@@ -343,6 +393,9 @@ def portfolio_now(
             if isinstance(share, dict)
         ],
         pending=unlocks(account),
+        collateral=collateral_rows(live_assets),
+        upnl=upnl,
+        detail=detail,
     )
 
 

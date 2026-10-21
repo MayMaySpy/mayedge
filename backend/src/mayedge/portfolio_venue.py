@@ -88,6 +88,8 @@ async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: boo
         pool_accounts=raw["pools"],
         live_assets=list(account_service._summary.assets),  # pyright: ignore[reportPrivateUsage]
         lit_price=Decimal(str(lit)),
+        upnl=_upnl(account_service._summary.unrealized_pnl),  # pyright: ignore[reportPrivateUsage]
+        detail=detail,
     )
     _cache[(open_ms, detail)] = (now, result)
     for key in [k for k, (at, _r) in _cache.items() if now - at >= REUSE_S]:
@@ -97,3 +99,12 @@ async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: boo
 
 def clear_cache() -> None:
     _cache.clear()
+
+
+def _upnl(raw: object) -> Decimal | None:
+    if raw in (None, ""):
+        return None
+    try:
+        return Decimal(str(raw))
+    except ArithmeticError:
+        return None

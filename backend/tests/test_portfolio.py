@@ -22,11 +22,13 @@ from mayedge.portfolio import (
     OpenRefused,
     buckets,
     change_pct,
+    collateral_rows,
     day_open,
     kinds_now,
     mismatches,
     pool_row,
     portfolio_now,
+    spot_gap,
     spot_rows,
 )
 
@@ -38,7 +40,15 @@ OPEN_MS = PNL[-2]["timestamp"] * 1000
 NOW_MS = PNL[-1]["timestamp"] * 1000
 
 LIVE_ASSETS = [
-    {"symbol": "USDC", "balance": "610.5", "index_price": "1", "usd": "610.5", "unrealized_pnl": ""},
+    # As the venue answered on 2026-10-21: USDC's balance and margin_balance are the same money.
+    {
+        "symbol": "USDC",
+        "balance": "610.5",
+        "margin_balance": "610.5",
+        "index_price": "1",
+        "usd": "610.5",
+        "unrealized_pnl": "",
+    },
     {"symbol": "ETH", "balance": "0.25", "index_price": "2437", "usd": "609.25", "unrealized_pnl": "12.5"},
 ]
 
@@ -123,6 +133,31 @@ class HoldingTests(TestCase):
         rows = spot_rows(LIVE_ASSETS)
         self.assertEqual([r.symbol for r in rows], ["ETH"])
         self.assertEqual(rows[0].upnl, D("12.5"))
+
+    def test_usdc_is_the_perps_collateral(self) -> None:
+        rows = collateral_rows(LIVE_ASSETS)
+        self.assertEqual([(r.symbol, r.qty, r.value) for r in rows], [("USDC", D("610.5"), D("610.5"))])
+        self.assertEqual(collateral_rows([{**LIVE_ASSETS[0], "margin_balance": "0"}]), [])
+
+    def test_perps_detail_names_the_collateral_and_the_open_upnl(self) -> None:
+        now = portfolio_now(
+            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
+            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"),
+            upnl=D("-12.25"),
+        ).to_json()
+        responses.PortfolioNow.model_validate(now)
+        self.assertEqual(
+            now["perps"],
+            {"collateral": [{"symbol": "USDC", "qty": "610.5", "price": "1", "value": "610.5"}], "upnl": "-12.25"},
+        )
+
+    def test_spot_value_its_rows_leave_out_is_named(self) -> None:
+        rows = spot_rows(LIVE_ASSETS)
+        self.assertIsNone(spot_gap(D("609.25"), rows))
+        # A price tick between the two reads is not a gap.
+        self.assertIsNone(spot_gap(D("613"), rows))
+        self.assertEqual(spot_gap(D("1219.75"), rows), D("610.5"))
+        self.assertEqual(spot_gap(D("0"), []), None)
 
     def test_holding_detail_does_not_change_the_totals(self) -> None:
         bare = portfolio_now(

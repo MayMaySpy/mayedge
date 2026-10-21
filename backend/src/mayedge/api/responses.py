@@ -212,6 +212,18 @@ class PortfolioUnlock(_Shape):
     unlock_ms: int
 
 
+class PortfolioCollateral(_Shape):
+    symbol: str
+    qty: str | None
+    price: str | None
+    value: str | None
+
+
+class PortfolioPerps(_Shape):
+    collateral: list[PortfolioCollateral]
+    upnl: str | None
+
+
 class PortfolioNow(_Shape):
     ts: int
     open: int
@@ -220,6 +232,8 @@ class PortfolioNow(_Shape):
     mismatch: list[PortfolioMismatch]
     spot: list[PortfolioSpot]
     pools: list[PortfolioPool]
+    perps: PortfolioPerps
+    spot_gap: str | None
     unlocks: list[PortfolioUnlock]
 
 
