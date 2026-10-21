@@ -48,7 +48,7 @@ async def get_alert_whatif(
 
 @router.get("/api/alerts/funding")
 async def get_funding_extremes() -> list[dict[str, Any]]:
-    return gateway.funding_extremes()
+    return await gateway.paced_funding_extremes()
 
 
 @router.post("/api/alerts/{alert_id}/opened")

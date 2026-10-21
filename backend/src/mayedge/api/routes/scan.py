@@ -12,12 +12,12 @@ router = APIRouter()
 
 @router.get("/api/scan/activity")
 async def get_scan_activity() -> list[dict[str, Any]]:
-    return gateway.scan_activity()
+    return await gateway.paced_scan_activity()
 
 
 @router.get("/api/scan/tones")
 async def get_scan_tones() -> list[dict[str, Any]]:
-    return gateway.tone_board()
+    return await gateway.paced_tone_board()
 
 
 @router.get("/api/scan/tones/timeframes")

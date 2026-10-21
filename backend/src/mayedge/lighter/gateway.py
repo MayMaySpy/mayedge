@@ -310,101 +310,121 @@ class LighterGateway:
             except Exception:
                 logger.exception("market refresh failed")
 
-    def _apply_market_stats(self, msg: dict[str, Any]) -> None:
+    def _stat_rows(self, msg: dict[str, Any]) -> list[dict[str, Any]] | None:
         stats_blob = msg.get("market_stats")
-        if not stats_blob:
-            return
-        rows: list[Any]
-        if isinstance(stats_blob, dict):
-            if "market_id" in stats_blob or "symbol" in stats_blob:
-                rows = [stats_blob]
-            else:
-                rows = list(stats_blob.values())
-        else:
-            return
-        dirty: list[MarketMeta] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            mi = row.get("market_id")
-            if mi is None:
-                continue
+        if not isinstance(stats_blob, dict) or not stats_blob:
+            return None
+        if "market_id" in stats_blob or "symbol" in stats_blob:
+            return [stats_blob]
+        return [row for row in stats_blob.values() if isinstance(row, dict)]
+
+    def _apply_stat_row(self, row: dict[str, Any]) -> MarketMeta | None:
+        mi = row.get("market_id")
+        if mi is None:
+            return None
+        try:
+            idx = int(mi)
+        except (TypeError, ValueError):
+            return None
+        meta = self._markets.get(idx)
+        if not meta:
+            return None
+        before = meta.quote_key()
+        mark = to_float(row.get("mark_price"))
+        last = to_float(row.get("last_trade_price"))
+        if mark:
+            meta.mark_price = mark
+        if last:
+            meta.last_trade_price = last
+        vol = row.get("daily_quote_token_volume")
+        if vol is not None:
+            meta.volume_24h = to_float(vol)
+        change = row.get("daily_price_change")
+        if change is not None:
+            meta.change_24h = to_float(change)
+        idx_px = to_float(row.get("index_price"))
+        if idx_px:
+            meta.index_price = idx_px
+        # Wire units are percent (0.0012 = 0.0012%/hr). Prefer the upcoming
+        # estimate; funding_rate is the last settled print.
+        settled = row.get("funding_rate")
+        if settled is not None:
+            meta.settled_funding_rate = to_float(settled)
+        fr = row.get("current_funding_rate")
+        if fr is None:
+            fr = settled
+        if fr is not None:
+            meta.funding_rate = to_float(fr)
+        oi = row.get("open_interest")
+        if oi is not None:
+            # WS OI is already one-sided quote notional.
+            meta.open_interest = open_interest_usd(to_float(oi))
+        oi_lim = row.get("open_interest_limit")
+        if oi_lim is not None:
+            meta.open_interest_limit = to_float(oi_lim)
+        bid = to_float(row.get("best_bid_price"))
+        if bid:
+            meta.best_bid_price = bid
+        ask = to_float(row.get("best_ask_price"))
+        if ask:
+            meta.best_ask_price = ask
+        mid = to_float(row.get("mid_price"))
+        if mid:
+            meta.mid_price = mid
+        prem = row.get("premium")
+        if prem is not None:
+            meta.premium = to_float(prem)
+        fts = row.get("funding_timestamp")
+        if fts is not None:
             try:
-                idx = int(mi)
+                meta.funding_timestamp = int(fts)
             except (TypeError, ValueError):
-                continue
-            meta = self._markets.get(idx)
-            if not meta:
-                continue
-            before = meta.quote_key()
-            mark = to_float(row.get("mark_price"))
-            last = to_float(row.get("last_trade_price"))
-            if mark:
-                meta.mark_price = mark
-            if last:
-                meta.last_trade_price = last
-            vol = row.get("daily_quote_token_volume")
-            if vol is not None:
-                meta.volume_24h = to_float(vol)
-            change = row.get("daily_price_change")
-            if change is not None:
-                meta.change_24h = to_float(change)
-            idx_px = to_float(row.get("index_price"))
-            if idx_px:
-                meta.index_price = idx_px
-            # Wire units are percent (0.0012 = 0.0012%/hr). Prefer the upcoming
-            # estimate; funding_rate is the last settled print.
-            settled = row.get("funding_rate")
-            if settled is not None:
-                meta.settled_funding_rate = to_float(settled)
-            fr = row.get("current_funding_rate")
-            if fr is None:
-                fr = settled
-            if fr is not None:
-                meta.funding_rate = to_float(fr)
-            oi = row.get("open_interest")
-            if oi is not None:
-                # WS OI is already one-sided quote notional.
-                meta.open_interest = open_interest_usd(to_float(oi))
-            oi_lim = row.get("open_interest_limit")
-            if oi_lim is not None:
-                meta.open_interest_limit = to_float(oi_lim)
-            bid = to_float(row.get("best_bid_price"))
-            if bid:
-                meta.best_bid_price = bid
-            ask = to_float(row.get("best_ask_price"))
-            if ask:
-                meta.best_ask_price = ask
-            mid = to_float(row.get("mid_price"))
-            if mid:
-                meta.mid_price = mid
-            prem = row.get("premium")
-            if prem is not None:
-                meta.premium = to_float(prem)
-            fts = row.get("funding_timestamp")
-            if fts is not None:
-                try:
-                    meta.funding_timestamp = int(fts)
-                except (TypeError, ValueError):
-                    pass
-            hi = row.get("daily_price_high")
-            if hi is not None:
-                meta.daily_price_high = to_float(hi)
-            lo = row.get("daily_price_low")
-            if lo is not None:
-                meta.daily_price_low = to_float(lo)
-            base_vol = row.get("daily_base_token_volume")
-            if base_vol is not None:
-                meta.volume_base_24h = to_float(base_vol)
-            if meta.quote_key() != before:
-                dirty.append(meta)
-            self._alerts.on_market_stats(meta)
+                pass
+        hi = row.get("daily_price_high")
+        if hi is not None:
+            meta.daily_price_high = to_float(hi)
+        lo = row.get("daily_price_low")
+        if lo is not None:
+            meta.daily_price_low = to_float(lo)
+        base_vol = row.get("daily_base_token_volume")
+        if base_vol is not None:
+            meta.volume_base_24h = to_float(base_vol)
+        self._alerts.on_market_stats(meta)
+        if meta.quote_key() != before:
+            return meta
+        return None
+
+    def _finish_market_stats(self, dirty: list[MarketMeta]) -> None:
         if dirty:
             self.broadcast({"type": "market_stats", "markets": [m.as_quote_dict() for m in dirty]})
         self._alerts.flush()
         from mayedge.lighter.account import account_service
 
         account_service.touch_marks()
+
+    def _apply_market_stats(self, msg: dict[str, Any]) -> None:
+        rows = self._stat_rows(msg)
+        if rows is None:
+            return
+        dirty: list[MarketMeta] = []
+        for row in rows:
+            meta = self._apply_stat_row(row)
+            if meta is not None:
+                dirty.append(meta)
+        self._finish_market_stats(dirty)
+
+    async def apply_market_stats(self, msg: dict[str, Any]) -> None:
+        """One market, then the loop. A full stats wave must not be one callback."""
+        rows = self._stat_rows(msg)
+        if rows is None:
+            return
+        dirty: list[MarketMeta] = []
+        for row in rows:
+            meta = self._apply_stat_row(row)
+            if meta is not None:
+                dirty.append(meta)
+            await self._breathe()
+        self._finish_market_stats(dirty)
 
     def list_markets(self) -> list[MarketMeta]:
         return list(self._markets.values())
@@ -986,17 +1006,26 @@ class LighterGateway:
             await self._breathe()
         return built
 
+    async def paced_scan_activity(self) -> list[dict[str, Any]]:
+        rows = await self._pace(self._alerts.iter_activity())
+        rows.sort(key=lambda row: str(row["symbol"]))
+        return rows
+
+    async def paced_tone_board(self) -> list[dict[str, Any]]:
+        rows = await self._pace(self._iter_tone())
+        rows.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
+        return rows
+
+    async def paced_funding_extremes(self) -> list[dict[str, Any]]:
+        rows = await self._pace(self._alerts.iter_funding_extremes())
+        rows.sort(key=lambda row: (-abs(float(row["z"])), str(row["symbol"])))
+        return rows
+
     async def _publish_scan_boards(self) -> None:
-        activity = await self._pace(self._alerts.iter_activity())
-        activity.sort(key=lambda row: str(row["symbol"]))
-        tones = await self._pace(self._iter_tone())
-        tones.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
-        extremes = await self._pace(self._alerts.iter_funding_extremes())
-        extremes.sort(key=lambda row: (-abs(float(row["z"])), str(row["symbol"])))
         for kind, rows in (
-            ("scan_activity", activity),
-            ("tone_board", tones),
-            ("funding_extremes", extremes),
+            ("scan_activity", await self.paced_scan_activity()),
+            ("tone_board", await self.paced_tone_board()),
+            ("funding_extremes", await self.paced_funding_extremes()),
         ):
             sig = json.dumps(rows, sort_keys=True, default=str)
             if sig == self._last_scan.get(kind):

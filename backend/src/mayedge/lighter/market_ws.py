@@ -264,7 +264,7 @@ async def handle_ws_message(gw: LighterGateway, msg: dict[str, Any]) -> None:
     elif kind == "candle":
         await handle_candle(gw, msg)
     elif kind == "market_stats":
-        gw._apply_market_stats(msg)
+        await gw.apply_market_stats(msg)
 
 
 def _account_index(raw: Any) -> int:
