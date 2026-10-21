@@ -9,7 +9,7 @@ import logging
 import statistics
 import time
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -658,36 +658,45 @@ class AlertDetector:
 
     def funding_extremes(self) -> list[dict[str, Any]]:
         """F2: every liquid or Held market whose funding is extreme now, furthest first."""
-        now = time.time()
-        held = self._held_book(now)
-        rows: list[dict[str, Any]] = []
-        for mi, series in self._snapshots.items():
-            snap = series[-1]
-            if now - snap.ts > _STALE_S or not (mi in held or self._liquidity_ok(snap)):
-                continue
-            z = self._funding_z(mi, snap)
-            if z is None:
-                continue
-            rows.append(
-                {
-                    "market_index": mi,
-                    "symbol": self._symbols.get(mi, f"M{mi}"),
-                    "funding": snap.funding,
-                    "z": round(z, 2),
-                    "held": mi in held,
-                }
-            )
+        rows = [row for row in self.iter_funding_extremes() if row is not None]
         rows.sort(key=lambda row: (-abs(float(row["z"])), str(row["symbol"])))
         return rows
 
-    def activity(self) -> list[dict[str, Any]]:
-        """A1, A2: every liquid perp and what its tape shows now."""
+    def iter_funding_extremes(self) -> Iterator[dict[str, Any] | None]:
+        """One market at a time, so the Scan loop can breathe between them."""
         now = time.time()
         held = self._held_book(now)
-        rows: list[dict[str, Any]] = []
+        for mi, series in self._snapshots.items():
+            snap = series[-1]
+            if now - snap.ts > _STALE_S or not (mi in held or self._liquidity_ok(snap)):
+                yield None
+                continue
+            z = self._funding_z(mi, snap)
+            if z is None:
+                yield None
+                continue
+            yield {
+                "market_index": mi,
+                "symbol": self._symbols.get(mi, f"M{mi}"),
+                "funding": snap.funding,
+                "z": round(z, 2),
+                "held": mi in held,
+            }
+
+    def activity(self) -> list[dict[str, Any]]:
+        """A1, A2: every liquid perp and what its tape shows now."""
+        rows = [row for row in self.iter_activity() if row is not None]
+        rows.sort(key=lambda row: str(row["symbol"]))
+        return rows
+
+    def iter_activity(self) -> Iterator[dict[str, Any] | None]:
+        """One market at a time, so the Scan loop can breathe between them."""
+        now = time.time()
+        held = self._held_book(now)
         for mi, series in self._snapshots.items():
             snap = series[-1]
             if now - snap.ts > _STALE_S or not self._liquidity_ok(snap):
+                yield None
                 continue
             day = self._day_range(snap)
             base = self._find_baseline(series, 300.0)
@@ -695,28 +704,24 @@ class AlertDetector:
             metrics = self._minute.metrics(mi, volume_floor=snap.vol_quote / _MINUTES_PER_DAY)
             oi_pct = _pct_change(snap.oi, base.oi) if base else None
             premium = self._premium(snap)
-            rows.append(
-                {
-                    "market_index": mi,
-                    "symbol": self._symbols.get(mi, f"M{mi}"),
-                    "move_5m": move,
-                    "share": None if move is None else abs(move) / day,
-                    "day_range": day,
-                    "vol_x": metrics.rvol_5m if metrics else None,
-                    "vol_usd_5m": metrics.vol_quote_5m if metrics else None,
-                    "oi_5m": oi_pct,
-                    "oi_usd_5m": None if oi_pct is None or base is None else snap.oi - base.oi,
-                    "funding": snap.funding,
-                    "funding_z": self._level.z(
-                        mi, "funding", snap.funding, floor=self._thr.funding_sigma_floor
-                    ),
-                    "premium": premium,
-                    "premium_z": self._level.z(mi, "premium", premium, floor=_PREMIUM_FLOOR_PCT),
-                    "held": mi in held,
-                }
-            )
-        rows.sort(key=lambda row: str(row["symbol"]))
-        return rows
+            yield {
+                "market_index": mi,
+                "symbol": self._symbols.get(mi, f"M{mi}"),
+                "move_5m": move,
+                "share": None if move is None else abs(move) / day,
+                "day_range": day,
+                "vol_x": metrics.rvol_5m if metrics else None,
+                "vol_usd_5m": metrics.vol_quote_5m if metrics else None,
+                "oi_5m": oi_pct,
+                "oi_usd_5m": None if oi_pct is None or base is None else snap.oi - base.oi,
+                "funding": snap.funding,
+                "funding_z": self._level.z(
+                    mi, "funding", snap.funding, floor=self._thr.funding_sigma_floor
+                ),
+                "premium": premium,
+                "premium_z": self._level.z(mi, "premium", premium, floor=_PREMIUM_FLOOR_PCT),
+                "held": mi in held,
+            }
 
     def _snapshot_from_meta(self, meta: MarketMeta) -> MarketSnapshot | None:
         mark = to_float(meta.mark_price)

@@ -5,7 +5,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 import lighter
@@ -757,24 +757,25 @@ class LighterGateway:
 
     def tone_board(self) -> list[dict[str, Any]]:
         """Liquid perps whose last closed bar on a Tone timeframe is blue or orange."""
-        rows: list[dict[str, Any]] = []
+        rows = [row for row in self._iter_tone() if row is not None]
+        rows.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
+        return rows
+
+    def _iter_tone(self) -> Iterator[dict[str, Any] | None]:
         for hit in self._tone_book.board():
             if not self._alerts.liquid(hit.market_index):
+                yield None
                 continue
             meta = self._markets.get(hit.market_index)
             step = TONE_TIMEFRAME_SECONDS[hit.resolution]
-            rows.append(
-                {
-                    "market_index": hit.market_index,
-                    "symbol": meta.symbol if meta is not None else f"M{hit.market_index}",
-                    "timeframe": hit.resolution,
-                    "tone": hit.label.lower(),
-                    "closed_at": (hit.bar_time + step) * 1000,
-                    "close": hit.close,
-                }
-            )
-        rows.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
-        return rows
+            yield {
+                "market_index": hit.market_index,
+                "symbol": meta.symbol if meta is not None else f"M{hit.market_index}",
+                "timeframe": hit.resolution,
+                "tone": hit.label.lower(),
+                "closed_at": (hit.bar_time + step) * 1000,
+                "close": hit.close,
+            }
 
     def _held_markets(self) -> dict[int, Held]:
         """Markets with a Position or a working order, for the alert rules."""
@@ -957,25 +958,54 @@ class LighterGateway:
                 continue
             self._alerts.seed_minute_bars(meta.market_index, candles)
 
-    def _scan_payloads(self) -> list[tuple[str, list[dict[str, Any]], str]]:
-        built = (
-            ("scan_activity", self.scan_activity()),
-            ("tone_board", self.tone_board()),
-            ("funding_extremes", self.funding_extremes()),
-        )
-        return [
-            (kind, rows, json.dumps(rows, sort_keys=True, default=str)) for kind, rows in built
-        ]
+    async def _breathe(self) -> None:
+        """Let a due timer run before the next market.
+
+        ponytail: the ceiling is one market, two z-scores. asyncio.sleep(0) is a
+        call_soon, so the next market jumps ahead of a timer that is already due
+        and the timer's wakeup waits behind that market too. A zero-delay timer
+        waits behind the overdue one. Split the two scores if one market is ever
+        over the lag budget.
+        """
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        handle = loop.call_later(0, future.set_result, None)
+        try:
+            await future
+        except asyncio.CancelledError:
+            handle.cancel()
+            future.cancel()
+            raise
+
+    async def _pace(self, rows: Iterator[dict[str, Any] | None]) -> list[dict[str, Any]]:
+        """Run one market, then let the loop handle everything else."""
+        built: list[dict[str, Any]] = []
+        for row in rows:
+            if row is not None:
+                built.append(row)
+            await self._breathe()
+        return built
 
     async def _publish_scan_boards(self) -> None:
-        for kind, rows, sig in await asyncio.to_thread(self._scan_payloads):
+        activity = await self._pace(self._alerts.iter_activity())
+        activity.sort(key=lambda row: str(row["symbol"]))
+        tones = await self._pace(self._iter_tone())
+        tones.sort(key=lambda row: (-int(row["closed_at"]), str(row["symbol"])))
+        extremes = await self._pace(self._alerts.iter_funding_extremes())
+        extremes.sort(key=lambda row: (-abs(float(row["z"])), str(row["symbol"])))
+        for kind, rows in (
+            ("scan_activity", activity),
+            ("tone_board", tones),
+            ("funding_extremes", extremes),
+        ):
+            sig = json.dumps(rows, sort_keys=True, default=str)
             if sig == self._last_scan.get(kind):
                 continue
             self._last_scan[kind] = sig
             self.broadcast({"type": kind, "rows": rows})
 
     async def _scan_loop(self) -> None:
-        """Push each Scan board when it has changed. The build stays off the loop."""
+        """Push each Scan board when it has changed. One market, then the loop."""
         while True:
             try:
                 await asyncio.sleep(_SCAN_BROADCAST_S)
