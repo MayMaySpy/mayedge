@@ -26,7 +26,8 @@ help:
 ci: ci-backend ci-web
 
 ci-backend:
-	cd backend && uv run ruff check src tests
+	cd backend && uv run ruff check src tests scripts
+	cd backend && uv run ruff format --check src tests scripts
 	cd backend && uv run basedpyright src tests
 	cd backend && uv run python -m unittest discover -s tests -v
 

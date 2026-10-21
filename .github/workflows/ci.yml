@@ -17,7 +17,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --group dev
-      - run: uv run ruff check src tests
+      - run: uv run ruff check src tests scripts
+      - run: uv run ruff format --check src tests scripts
       - run: uv run basedpyright src tests
       - run: uv run python -m unittest discover -s tests -v
 
