@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { preferPerpMarket, sameMarketIndex } from "@/lib/algos";
 import { api, type AccountTrade, type Candle, type Market } from "@/lib/api";
+import {
+  AUTO_KILL_NOTICE_UNSEEN,
+  autoKillNotice,
+  type AutoKillNoticeSeen,
+} from "@/lib/autoKillNotice";
 import { armFillToasts, consumeLiveFills } from "@/lib/fillNotice";
 import { notifyDesk, notifyOrder, notifyWarn } from "@/lib/notify";
 import {
@@ -71,7 +76,7 @@ export function useMarketWs(symbol: string) {
   const marketsRef = useRef(state.markets);
   const marketIndexRef = useRef<number | null>(null);
   const resyncAtRef = useRef(0);
-  const autoKillNoticeRef = useRef<string | null>(null);
+  const autoKillNoticeRef = useRef<AutoKillNoticeSeen>(AUTO_KILL_NOTICE_UNSEEN);
 
   useEffect(() => {
     marketsRef.current = state.markets;
@@ -318,23 +323,20 @@ export function useMarketWs(symbol: string) {
               last_kill_status:
                 msg.last_kill_status != null ? String(msg.last_kill_status) : null,
             });
-            // A flatten that is retried reports again when its outcome changes.
-            const status = String(msg.last_kill_status ?? "unknown");
-            const noticeKey = `${firedAt}:${status}`;
-            if (
-              firedAt != null &&
-              !Number.isNaN(firedAt) &&
-              noticeKey !== autoKillNoticeRef.current
-            ) {
-              autoKillNoticeRef.current = noticeKey;
+            const { seen, notice } = autoKillNotice(
+              autoKillNoticeRef.current,
+              firedAt != null && !Number.isNaN(firedAt) ? firedAt : null,
+              msg.last_kill_status != null ? String(msg.last_kill_status) : null
+            );
+            autoKillNoticeRef.current = seen;
+            if (notice === "fired") {
               const reason = String(msg.fired_reason ?? "threshold");
               const upnl = msg.fired_upnl != null ? Number(msg.fired_upnl) : null;
               const upnlText =
-                upnl != null && !Number.isNaN(upnl) ? ` uPnL ${upnl.toFixed(2)}` : "";
-              notifyWarn(
-                `Auto kill (${reason})`,
-                `Flatten ${status}${upnlText}`
-              );
+                upnl != null && !Number.isNaN(upnl) ? `uPnL ${upnl.toFixed(2)}, ` : "";
+              notifyWarn(`Auto kill (${reason})`, `${upnlText}flattening`);
+            } else if (notice === "partial") {
+              notifyWarn("Auto kill could not flatten", "A Position is still open");
             }
             break;
           }
