@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  nextFunding,
   nextPosSort,
   pnlAtTrigger,
   pnlFromRoe,
@@ -256,5 +257,24 @@ describe("realizedFor", () => {
     expect(realizedTitle({ ...row, partial: true }, fmt)).toContain(
       "Closes before the journal began are not in it"
     );
+  });
+});
+
+describe("nextFunding", () => {
+  it("has a long pay and a short receive when funding is positive", () => {
+    // 2 ETH at 3,000 is 6,000 notional; 0.01%/h of it is 0.6.
+    expect(nextFunding(2, 3000, 0.01)).toBeCloseTo(-0.6);
+    expect(nextFunding(-2, 3000, 0.01)).toBeCloseTo(0.6);
+  });
+
+  it("has a long receive when funding is negative", () => {
+    expect(nextFunding(1, 100, -0.05)).toBeCloseTo(0.05);
+  });
+
+  it("is unknown without a rate, a mark or a size", () => {
+    expect(nextFunding(1, 100, null)).toBeNull();
+    expect(nextFunding(1, 100, Number.NaN)).toBeNull();
+    expect(nextFunding(1, 0, 0.01)).toBeNull();
+    expect(nextFunding(0, 100, 0.01)).toBeNull();
   });
 });

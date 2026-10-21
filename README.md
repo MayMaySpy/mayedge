@@ -72,7 +72,7 @@ Market and limit Tickets from the Order panel, typed in the asset or in USD (**N
 
 **Kill** stops all algos then cancels working orders; flatten is optional, not implied. **Auto kill**, armed from the Kill menu, does the same plus a flatten when total uPnL crosses a loss floor or a profit target. The flatten is retried at wider slippage while a Position stays open. While armed, its header badge shows total uPnL as Auto kill measures it, (mark − entry) × size, with a meter toward the floor and the target; it turns red once 75% of the floor is used.
 
-The Positions panel has Positions, Assets, Orders, Algos and History tabs; History shows your trades and the funding each Position paid. Each Position shows its **Realized**: what it has closed since it opened, less fees, from the Journal ([journal-rules.md](docs/journal-rules.md#on-a-position)). uPnL, Realized and Funding add up to the whole Position.
+The Positions panel has Positions, Assets, Orders, Algos and History tabs; History shows your trades and the funding each Position paid. Each Position shows its **Next funding**, what it receives or pays when the hour settles, and its **Realized**: what it has closed since it opened, less fees, from the Journal ([journal-rules.md](docs/journal-rules.md#on-a-position)). uPnL, Realized and Funding add up to the whole Position.
 
 ### Algos
 

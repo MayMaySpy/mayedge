@@ -220,3 +220,13 @@ export function pnlClass(value: number) {
   if (value < 0) return "text-ask";
   return "text-muted-foreground";
 }
+
+/**
+ * Next funding: what a Position receives (+) or pays (−) when the hour in progress settles,
+ * at its notional at mark times the Funding estimate. Positive funding is longs paying.
+ * `hourlyPct` is the venue's 1h percent (0.0012 means 0.0012%). Unknown without a rate or a mark.
+ */
+export function nextFunding(size: number, mark: number, hourlyPct: number | null | undefined): number | null {
+  if (hourlyPct == null || !Number.isFinite(hourlyPct) || !(mark > 0) || !size) return null;
+  return (-size * mark * hourlyPct) / 100;
+}

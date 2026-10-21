@@ -16,8 +16,12 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, isLongPosition, type AlgoBook, type Market, type OpenOrder, type Position } from "@/lib/api";
-import { setAlgo, type OpenTripRealized } from "@/lib/liveData";
+import { useNextHour } from "@/hooks/useNextHour";
+import { setAlgo, useLiveQuotes, type OpenTripRealized } from "@/lib/liveData";
+import { formatFundingPct } from "@/lib/marketPicker";
+import { utcClock } from "@/lib/utcTime";
 import {
+  nextFunding,
   nextPosSort,
   pnlClass,
   realizedFor,
@@ -121,6 +125,8 @@ export function PositionsTable({
   onClosePosition: closePosition,
   onSymbolChange,
 }: PositionsTableProps) {
+  const quotes = useLiveQuotes();
+  const settleAt = useNextHour();
   return (
               <Table>
                 <TableHeader>
@@ -155,6 +161,13 @@ export function PositionsTable({
                       Realized
                     </TableHead>
                     <TableHead hideBelow="2xl" className="text-right">Funding</TableHead>
+                    <TableHead
+                      hideBelow="xl"
+                      className="text-right"
+                      title={`Next funding: what each Position receives or pays when the hour settles at ${utcClock(settleAt, false)} UTC, at the Funding estimate. It moves until then.`}
+                    >
+                      Next
+                    </TableHead>
                     <TableHead hideBelow="sm" className="text-right">TP/SL</TableHead>
                     <TableHead className="text-right" />
                   </TableRow>
@@ -168,6 +181,8 @@ export function PositionsTable({
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
                     const m = markets.find((x) => x.market_index === p.market_index) ?? market;
+                    const rate = quotes[p.market_index]?.funding_rate ?? m?.funding_rate ?? null;
+                    const next = nextFunding(n(p.size), mark, rate);
                     const planner = livePlannerFor(algoBook, p.market_index);
                     const trails = liveTrailsFor(algoBook, p.market_index);
                     return (
@@ -246,6 +261,17 @@ export function PositionsTable({
                         </TableCell>
                         <TableCell hideBelow="2xl" className={cn("text-right", pnlClass(fund))}>
                           {formatSigned(p.funding_paid)}
+                        </TableCell>
+                        <TableCell
+                          hideBelow="xl"
+                          className={cn("text-right", next != null ? pnlClass(next) : "text-muted-foreground")}
+                          title={
+                            next != null
+                              ? `${formatFundingPct(rate)}/h at ${utcClock(settleAt, false)} UTC`
+                              : "No funding estimate for this Market yet"
+                          }
+                        >
+                          {next != null ? formatSigned(next) : "—"}
                         </TableCell>
                         <TableCell
                           hideBelow="sm"

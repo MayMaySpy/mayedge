@@ -366,6 +366,10 @@ _Avoid_: import, sync
 A perp's mean 1h funding rate for one finished UTC day, from the venue's daily history. Used only for a day without all 24 Funding prints. Kept for the life of the desk. Never fills an hourly or 4h bucket.
 _Avoid_: daily print, day sum
 
+**Next funding**:
+What a Position receives or pays when the hour in progress settles: its notional at mark times the Funding estimate. Positive funding is longs paying. It moves until the hour settles.
+_Avoid_: funding due, predicted funding, Funding (that column is what the Position has paid so far)
+
 **Funding average**:
 The mean of a perp's Funding prints over 7 days, 30 days, or a year, in APR. A Funding day counts as 24 hours. A window named by its length holds at least 95% of its hours; a shorter history is named by the span it holds.
 _Avoid_: average estimate, mean funding (unqualified)
