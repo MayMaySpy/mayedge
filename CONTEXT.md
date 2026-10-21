@@ -423,3 +423,15 @@ _Avoid_: latency, lag (unqualified)
 **Send budget**:
 The desk's share of Lighter's per-minute limits: requests and transactions in the last 60 seconds, against the desk's own caps.
 _Avoid_: rate limit (for the desk's share), quota
+
+**Down gap**:
+The time between the desk's last alive mark and its next boot.
+_Avoid_: downtime, outage (for the desk; outage is the venue's)
+
+**Freeze**:
+A stretch when the desk process was paused and resumed without restarting.
+_Avoid_: sleep, hang, stall (a stall is Loop lag)
+
+**Heartbeat**:
+A ping the desk sends a dead-man's-switch service while it is healthy.
+_Avoid_: health check, keepalive

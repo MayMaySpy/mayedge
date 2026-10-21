@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { preferPerpMarket, sameMarketIndex } from "@/lib/algos";
 import { api, type AccountTrade, type Candle, type Market } from "@/lib/api";
 import { armFillToasts, consumeLiveFills } from "@/lib/fillNotice";
-import { notifyOrder, notifyWarn } from "@/lib/notify";
+import { notifyDesk, notifyOrder, notifyWarn } from "@/lib/notify";
 import {
   applyBookDelta,
   applyBookSnapshot,
@@ -246,6 +246,12 @@ export function useMarketWs(symbol: string) {
             break;
           case "budget":
             setSendBudget(msg);
+            break;
+          case "desk_freeze":
+            notifyDesk({
+              title: String(msg.text ?? "Desk was frozen"),
+              tone: "warn",
+            });
             break;
           case "market_stats":
             applyMarketQuotes((msg.markets as MarketQuote[]) ?? []);

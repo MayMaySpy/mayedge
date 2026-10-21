@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from mayedge import db as store
 from mayedge import desk, feed_health
+from mayedge.alive import last_down, mark_clean, note_boot, start_alive
 from mayedge.api.guard import BrowserGuard
 from mayedge.api.routes import include_api
 from mayedge.api.spa import mount_spa
@@ -20,6 +22,7 @@ from mayedge.auto_kill import auto_kill
 from mayedge.backup import health as backup_health
 from mayedge.backup import start_backup
 from mayedge.config import settings
+from mayedge.heartbeat import heartbeat_view, start_heartbeat
 from mayedge.journal_sync import note_fill
 from mayedge.journal_sync import start as start_journal
 from mayedge.journal_sync import stop as stop_journal
@@ -29,11 +32,11 @@ from mayedge.lighter.budget import KILL_LANE, budget, start_budget_publish
 from mayedge.lighter.errors import VenueBlocked
 from mayedge.lighter.gateway import gateway
 from mayedge.lighter.orders import order_service
+from mayedge.loop_watch import set_freeze_emitter, start_loop_watch
 from mayedge.loop_watch import snapshot as loop_lag_snapshot
-from mayedge.loop_watch import start_loop_watch
 from mayedge.portfolio_sync import start as start_portfolio_sync
 from mayedge.portfolio_sync import stop as stop_portfolio_sync
-from mayedge.push import TelegramPusher, boot_text
+from mayedge.push import TelegramPusher, boot_text, freeze_text, load_push_settings
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,17 @@ def _open_position_count() -> int:
     return n
 
 
+def _cached_upnl() -> float | None:
+    cached = account_service.cached_account_payload()
+    if not isinstance(cached, dict):
+        return None
+    raw: Any = cached.get("unrealized_pnl")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> KillResult:
     # Kill is sent even when the local budget is full or cooling.
     token = budget.enter_lane(KILL_LANE)
@@ -87,9 +101,13 @@ async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> Kill
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    boot_ms = int(time.time() * 1000)
+    down = await asyncio.to_thread(note_boot, boot_ms, load_push_settings().down_after_s)
     watch = start_loop_watch()
     backup = None
     budget_watch = None
+    alive = None
+    heart = None
     fanout = BroadcastFanout(manager.broadcast)
     fanout.start()
     pusher = TelegramPusher.from_settings()
@@ -100,9 +118,23 @@ async def lifespan(app: FastAPI):
         fanout.push(msg)
         pusher.on_desk_msg(msg)
 
+    def emit_freeze(event: dict[str, Any]) -> None:
+        live = feed_health.snapshot().get("account_ws") == "live"
+        text = freeze_text(
+            int(event["from"]),
+            int(event["to"]),
+            positions=_open_position_count() if live else 0,
+            upnl=_cached_upnl(),
+            account_live=live,
+        )
+        publish({**event, "text": text})
+
     desk.set_broadcast(publish)
     feed_health.set_emitter(publish)
+    set_freeze_emitter(emit_freeze)
     budget_watch = start_budget_publish(publish)
+    alive = start_alive()
+    heart = start_heartbeat()
     auto_kill.start(run_kill=run_kill, emit=publish, positions=_cached_positions)
     gateway.subscribe(auto_kill.on_gateway)
     set_fill_listener(note_fill)
@@ -115,7 +147,8 @@ async def lifespan(app: FastAPI):
     n_algos = len(desk.algo_book().get("working") or [])
     pusher.push(
         "boot",
-        boot_text(settings.lighter_network.value, n_algos, _open_position_count()),
+        boot_text(settings.lighter_network.value, n_algos, _open_position_count(), down),
+        urgent=down is not None,
     )
     try:
         yield
@@ -133,12 +166,15 @@ async def lifespan(app: FastAPI):
         if backup is not None:
             await backup.stop()
         await watch.stop()
-        if budget_watch is not None:
-            budget_watch.cancel()
-            try:
-                await budget_watch
-            except asyncio.CancelledError:
-                pass
+        set_freeze_emitter(None)
+        for task in (budget_watch, alive, heart):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        await asyncio.to_thread(mark_clean, int(time.time() * 1000))
         store.close_db()
 
 
@@ -170,6 +206,8 @@ def create_app() -> FastAPI:
             "trading_enabled": order_service.enabled,
             "backup": backup_health(),
             "budget": {k: v for k, v in budget.snapshot().items() if k != "type"},
+            "last_down": last_down(),
+            "heartbeat": heartbeat_view(),
             **loop_lag_snapshot(),
             **{k: v for k, v in feed_health.snapshot().items() if k != "type"},
         }

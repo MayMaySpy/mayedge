@@ -62,6 +62,10 @@ A **Push** repeats a fact to Telegram when no tab is open. It raises nothing and
 3. Put `TELEGRAM_BOT_TOKEN=` and `TELEGRAM_CHAT_ID=` in `backend/.env`, then `make push-env && make deploy`.
 4. Use **Send test** in the Alerts panel. The line is there only once pushes are on.
 
+#### When the desk was not watching
+
+A boot after more than `down_after_s` (60 seconds) says how long the desk was down, whether it stopped cleanly, and that Trails, Planner trailing parts and Auto kill were not watching. Venue stops held. A pause that does not restart the process sends a Freeze push when the loop wakes. An optional Heartbeat pings a dead-man's-switch URL while the desk is healthy, and stays off until `HEARTBEAT_URL` is set in `backend/.env`. Any service that takes a GET ping works (Healthchecks.io, Cronitor, Better Stack). A period of 2 minutes and a grace of 3 minutes, with that service's own Telegram pointed at the same chat, is a reasonable start. The desk skips a ping when a feed is down, the loop is late, or the venue is down, so the service's grace period does the alerting. The URL is a secret: it is not logged and it is not in `/api/health`. The same URL works when the desk moves to the VPS.
+
 ### Execution
 
 Market and limit Tickets from the Order panel, typed in the asset or in USD (**Notional**). Floating Buy/Sell are market at **Quick size** (the same size Axis rest uses). From a Positions row: **Stop** and **Take Profit** Tickets (Market or Limit), a Trail Stop or Trail Take Profit, or a Planner. On the Orders tab, **Bids** and **Asks** cancel Tickets of that side in the current All/Market scope; Clips stay with the algo. Size on a working order can be edited in place (**Amend**).

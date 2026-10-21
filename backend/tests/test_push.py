@@ -9,6 +9,7 @@ import logging
 import tempfile
 import time
 import unittest
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -182,6 +183,56 @@ class RouterTests(unittest.TestCase):
             boot_text("testnet", 1, 1),
             "Desk up (testnet) — 1 algo restored, 1 Position open",
         )
+
+    def test_a_long_gap_names_the_down_and_is_the_urgent_line(self) -> None:
+        start = int(datetime(2026, 10, 21, 2, 10, tzinfo=UTC).timestamp() * 1000)
+        end = int(datetime(2026, 10, 21, 4, 24, tzinfo=UTC).timestamp() * 1000)
+        text = boot_text("mainnet", 3, 2, {"from": start, "to": end, "clean": False})
+        self.assertEqual(
+            text,
+            "Desk up (mainnet) after 2h 14m down (02:10–04:24 UTC, not a clean stop). "
+            "Trails, Planner trailing parts and Auto kill were not watching; venue stops held. "
+            "3 algos restored, 2 Positions open.",
+        )
+        clean = boot_text("mainnet", 3, 2, {"from": start, "to": end, "clean": True})
+        self.assertIn("clean stop", clean)
+        self.assertNotIn("not a clean stop", clean)
+
+    def test_desk_freeze_pushes_once_and_urgent(self) -> None:
+        router, sink, _clock = self._router()
+        start = int(datetime(2026, 10, 21, 2, 10, tzinfo=UTC).timestamp() * 1000)
+        end = start + 14 * 60 * 1000
+        router.on_message({"type": "desk_freeze", "from": start, "to": end})
+        self.assertEqual(len(sink.rows), 1)
+        key, text, urgent = sink.rows[0]
+        self.assertEqual(key, f"freeze:{end}")
+        self.assertTrue(urgent)
+        self.assertIn("Desk was frozen 14m (02:10–02:24 UTC)", text)
+        self.assertIn("Positions unknown until the account feed is back", text)
+        router.on_message(
+            {
+                "type": "feed_health",
+                "account_ws": "live",
+                "market_ws": "live",
+                "venue_down_since": 0,
+            }
+        )
+        router.on_message(
+            {
+                "type": "account",
+                "unrealized_pnl": "-120",
+                "positions": [
+                    {"symbol": "ETH", "size": "1"},
+                    {"symbol": "BTC", "size": "-2"},
+                ],
+            }
+        )
+        later = end + 14 * 60 * 1000
+        router.on_message({"type": "desk_freeze", "from": end, "to": later})
+        key, text, urgent = sink.rows[-1]
+        self.assertEqual(key, f"freeze:{later}")
+        self.assertTrue(urgent)
+        self.assertIn("2 Positions open, uPnL −$120", text)
 
     def test_bad_push_block_falls_back(self) -> None:
         cfg = push_settings_from_dict(

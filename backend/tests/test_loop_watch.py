@@ -12,6 +12,7 @@ class _Clock:
         self.mono_s = 0.0
         self.wall = 0.0
         self.late = 0.0
+        self.wall_extra = 0.0
 
     def now(self) -> float:
         return self.wall
@@ -21,7 +22,7 @@ class _Clock:
 
     async def sleep(self, seconds: float) -> None:
         self.mono_s += seconds + self.late
-        self.wall += seconds + self.late
+        self.wall += seconds + self.late + self.wall_extra
 
 
 class LoopWatchTests(unittest.IsolatedAsyncioTestCase):
@@ -58,3 +59,51 @@ class LoopWatchTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("mayedge.loop_watch", level="WARNING") as second:
             await watch._tick()
         self.assertEqual(len(second.output), 1)
+
+
+class FreezeTests(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        from mayedge.loop_watch import set_freeze_emitter
+
+        set_freeze_emitter(None)
+
+    async def test_a_wall_jump_the_loop_missed_is_one_freeze(self) -> None:
+        from mayedge.loop_watch import set_freeze_emitter
+
+        clock = _Clock()
+        clock.wall = 1_000.0
+        clock.wall_extra = 2 * 3600
+        events: list[dict[str, object]] = []
+        set_freeze_emitter(events.append)
+        watch = LoopWatch(clock)
+        await watch._tick()
+        freeze = watch.snapshot()["last_freeze"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(freeze["from"], 1_000_000)
+        self.assertEqual(freeze["to"], events[0]["to"])
+        self.assertGreater(int(freeze["to"]) - int(freeze["from"]), 30_000)
+
+    async def test_both_clocks_jumping_is_a_freeze_and_a_stall_is_not(self) -> None:
+        clock = _Clock()
+        clock.late = 3
+        watch = LoopWatch(clock)
+        await watch._tick()
+        self.assertIsNone(watch.snapshot()["last_freeze"])
+        clock.late = 2 * 3600
+        await watch._tick()
+        self.assertIsNotNone(watch.snapshot()["last_freeze"])
+
+    async def test_two_freezes_are_two_events(self) -> None:
+        from mayedge.loop_watch import set_freeze_emitter
+
+        clock = _Clock()
+        events: list[dict[str, object]] = []
+        set_freeze_emitter(events.append)
+        watch = LoopWatch(clock)
+        clock.wall_extra = 120
+        await watch._tick()
+        clock.wall_extra = 0
+        await watch._tick()
+        clock.wall_extra = 120
+        await watch._tick()
+        self.assertEqual(len(events), 2)

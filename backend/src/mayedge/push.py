@@ -107,6 +107,7 @@ class PushSettings:
     algos: str = "lifecycle"
     venue_down_after_s: float = 60
     account_stale_after_s: float = 120
+    down_after_s: float = 60
     repeat_s: float = 600
     max_per_min: int = 12
     # HH:MM UTC for yesterday's journal. Empty is off.
@@ -129,6 +130,7 @@ def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
         algos=algos,
         venue_down_after_s=_f(raw.get("venue_down_after_s"), base.venue_down_after_s),
         account_stale_after_s=_f(raw.get("account_stale_after_s"), base.account_stale_after_s),
+        down_after_s=_f(raw.get("down_after_s"), base.down_after_s),
         repeat_s=_f(raw.get("repeat_s"), base.repeat_s),
         max_per_min=max(1, int(_f(raw.get("max_per_min"), base.max_per_min))),
         daily_at=_daily_at(raw.get("daily_at")),
@@ -160,10 +162,48 @@ def public_push_status() -> dict[str, Any]:
     }
 
 
-def boot_text(network: str, algos: int, positions: int) -> str:
-    return (
+def boot_text(
+    network: str,
+    algos: int,
+    positions: int,
+    down: dict[str, Any] | None = None,
+) -> str:
+    plain = (
         f"Desk up ({network}) — {_count(algos, 'algo', 'algos')} restored, "
         f"{_count(positions, 'Position', 'Positions')} open"
+    )
+    if not down:
+        return plain
+    how = "clean stop" if down.get("clean") else "not a clean stop"
+    return (
+        f"Desk up ({network}) after {_hm(int(down['to']) - int(down['from']))} down "
+        f"({_hm_clock(int(down['from']))}–{_hm_clock(int(down['to']))} UTC, {how}). "
+        "Trails, Planner trailing parts and Auto kill were not watching; venue stops held. "
+        f"{_count(algos, 'algo', 'algos')} restored, "
+        f"{_count(positions, 'Position', 'Positions')} open."
+    )
+
+
+def freeze_text(
+    start_ms: int,
+    end_ms: int,
+    *,
+    positions: int,
+    upnl: float | None,
+    account_live: bool,
+) -> str:
+    if account_live:
+        tail = (
+            f"{_count(positions, 'Position', 'Positions')} open, "
+            f"uPnL {_signed_usd(0.0 if upnl is None else upnl)}"
+        )
+    else:
+        tail = "Positions unknown until the account feed is back"
+    return (
+        f"Desk was frozen {_hm(end_ms - start_ms)} "
+        f"({_hm_clock(start_ms)}–{_hm_clock(end_ms)} UTC). "
+        "Trails, Planner trailing parts and Auto kill were not watching; venue stops held. "
+        f"{tail}."
     )
 
 
@@ -198,6 +238,8 @@ class PushRouter:
         self._algos: dict[str, _SeenAlgo] = {}
         self._live_algos = 0
         self._positions: list[dict[str, str]] = []
+        self._upnl: float | None = None
+        self._account_live = False
         self._kill_seeded = False
         self._kill_fired_at: Any = None
         self._kill_status: str | None = None
@@ -220,6 +262,8 @@ class PushRouter:
             self._on_account(msg)
         elif kind == "feed_health":
             self._on_feed(msg)
+        elif kind == "desk_freeze":
+            self._on_freeze(msg)
         self.poll()
 
     def poll(self) -> None:
@@ -377,6 +421,25 @@ class PushRouter:
                 continue
             open_rows.append({"symbol": str(pos.get("symbol") or "?"), "size": _signed(size)})
         self._positions = open_rows
+        raw = msg.get("unrealized_pnl")
+        self._upnl = _num(raw) if raw not in (None, "") else None
+
+    def _on_freeze(self, msg: dict[str, Any]) -> None:
+        try:
+            start = int(msg["from"])
+            end = int(msg["to"])
+        except (KeyError, TypeError, ValueError):
+            return
+        text = msg.get("text")
+        if not isinstance(text, str) or not text:
+            text = freeze_text(
+                start,
+                end,
+                positions=len(self._positions),
+                upnl=self._upnl,
+                account_live=self._account_live,
+            )
+        self._out.push(f"freeze:{end}", text, urgent=True)
 
     def _on_feed(self, msg: dict[str, Any]) -> None:
         since = msg.get("venue_down_since") or 0
@@ -397,6 +460,7 @@ class PushRouter:
         else:
             self._venue_since = None
         account = str(msg.get("account_ws") or "")
+        self._account_live = account == "live"
         if account == "live":
             self._account_down_since = None
             self._account_announced = False
@@ -1024,6 +1088,24 @@ def _signed(value: float) -> str:
 
 def _span(seconds: float) -> str:
     return f"{max(1, round(seconds / 60))}m"
+
+
+def _hm(ms: int) -> str:
+    total = max(0, int(ms) // 1000)
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}m")
+    if seconds or not parts:
+        parts.append(f"{seconds}s")
+    return " ".join(parts)
+
+
+def _hm_clock(ms: int) -> str:
+    return time.strftime("%H:%M", time.gmtime(ms / 1000))
 
 
 def _count(n: int, one: str, many: str) -> str:

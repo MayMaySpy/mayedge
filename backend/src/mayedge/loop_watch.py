@@ -8,13 +8,15 @@ import logging
 import os
 import time
 from collections import deque
-from typing import Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
 _TICK_S = 0.25
 _WINDOW_S = 60.0
 _WARN_MS = 250.0
+_FREEZE_S = 30.0
 
 
 class Clock(Protocol):
@@ -43,6 +45,7 @@ class LoopWatch:
         self.clock = clock
         self._samples: deque[tuple[float, float]] = deque()
         self._warned_at: float | None = None
+        self._last_freeze: dict[str, int] | None = None
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -62,9 +65,12 @@ class LoopWatch:
             await self._tick()
 
     async def _tick(self) -> None:
-        expected = self.clock.mono() + _TICK_S
+        wall_before = self.clock.now()
+        mono_before = self.clock.mono()
+        expected = mono_before + _TICK_S
         await self.clock.sleep(_TICK_S)
         actual = self.clock.mono()
+        wall_after = self.clock.now()
         lag_ms = max(0.0, (actual - expected) * 1000.0)
         self._samples.append((actual, lag_ms))
         self._prune(actual)
@@ -73,27 +79,54 @@ class LoopWatch:
         ):
             logger.warning("event loop lag %.0f ms", lag_ms)
             self._warned_at = actual
+        self._note_freeze(wall_before, wall_after, actual - mono_before)
+
+    def _note_freeze(self, wall_before: float, wall_after: float, mono_jump: float) -> None:
+        wall_jump = wall_after - wall_before
+        if wall_jump <= _FREEZE_S:
+            return
+        wall_alone = wall_jump - mono_jump > _FREEZE_S
+        mono_missed = mono_jump > _TICK_S + _FREEZE_S
+        if not wall_alone and not mono_missed:
+            return
+        event = {
+            "type": "desk_freeze",
+            "from": round(wall_before * 1000),
+            "to": round(wall_after * 1000),
+        }
+        self._last_freeze = {"from": event["from"], "to": event["to"]}
+        if _freeze_emit is not None:
+            _freeze_emit(event)
 
     def _prune(self, now: float) -> None:
         while self._samples and now - self._samples[0][0] >= _WINDOW_S:
             self._samples.popleft()
 
-    def snapshot(self) -> dict[str, float]:
+    def snapshot(self) -> dict[str, Any]:
         self._prune(self.clock.mono())
         if not self._samples:
-            return {"loop_lag_ms": 0.0, "loop_lag_max_60s_ms": 0.0}
-        return {
-            "loop_lag_ms": self._samples[-1][1],
-            "loop_lag_max_60s_ms": max(lag for _stamp, lag in self._samples),
-        }
+            lags: dict[str, Any] = {"loop_lag_ms": 0.0, "loop_lag_max_60s_ms": 0.0}
+        else:
+            lags = {
+                "loop_lag_ms": self._samples[-1][1],
+                "loop_lag_max_60s_ms": max(lag for _stamp, lag in self._samples),
+            }
+        lags["last_freeze"] = self._last_freeze
+        return lags
 
 
 _active: LoopWatch | None = None
+_freeze_emit: Callable[[dict[str, Any]], None] | None = None
 
 
-def snapshot() -> dict[str, float]:
+def set_freeze_emitter(fn: Callable[[dict[str, Any]], None] | None) -> None:
+    global _freeze_emit
+    _freeze_emit = fn
+
+
+def snapshot() -> dict[str, Any]:
     if _active is None:
-        return {"loop_lag_ms": 0.0, "loop_lag_max_60s_ms": 0.0}
+        return {"loop_lag_ms": 0.0, "loop_lag_max_60s_ms": 0.0, "last_freeze": None}
     return _active.snapshot()
 
 
