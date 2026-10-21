@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Any, Generic
+from typing import Any
 
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import (
@@ -17,7 +17,7 @@ from mayedge.algos.chase.config import (
     STOP_CANCEL_TRIES,
     UNPROVEN_RETRY_MS,
 )
-from mayedge.algos.chase.fills import BookT, ChaseFillMixin, StateT
+from mayedge.algos.chase.fills import ChaseFillMixin, FillBook, FillState
 from mayedge.algos.chase.iceberg import (
     Action,
     ChaseIcebergParams,
@@ -40,7 +40,7 @@ from mayedge.lighter.budget import BudgetRefused
 logger = logging.getLogger(__name__)
 
 
-class ChasePlaceMixin(ChaseFillMixin[BookT, StateT], Generic[BookT, StateT]):
+class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, StateT]):
     """Requote loop: decide, amend live clip, or place post-only child."""
 
     _lock: asyncio.Lock

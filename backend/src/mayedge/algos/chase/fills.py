@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Protocol
 
 from mayedge.algos.chase import util
 from mayedge.algos.chase.config import (
@@ -47,10 +47,6 @@ class FillState(Protocol):
     reduce_only: bool
 
 
-BookT = TypeVar("BookT", bound=FillBook)
-StateT = TypeVar("StateT", bound=FillState)
-
-
 def may_invent_fill(
     clip: Clip,
     now: int,
@@ -70,7 +66,7 @@ def may_invent_fill(
     return ledger.should_fill_when_missing(clip)
 
 
-class ChaseFillMixin(Generic[BookT, StateT]):
+class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
     """Drain trades, sync open orders, reconcile master qty."""
 
     _book: BookT
