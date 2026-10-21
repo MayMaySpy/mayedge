@@ -4,6 +4,7 @@ docs/
 backend/.venv/
 backend/.env
 backend/data/
+backups/
 web/node_modules/
 web/dist/
 __pycache__/

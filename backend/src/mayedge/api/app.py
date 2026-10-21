@@ -17,6 +17,8 @@ from mayedge.api.routes import include_api
 from mayedge.api.spa import mount_spa
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.auto_kill import auto_kill
+from mayedge.backup import health as backup_health
+from mayedge.backup import start_backup
 from mayedge.config import settings
 from mayedge.journal_sync import note_fill
 from mayedge.journal_sync import start as start_journal
@@ -83,6 +85,7 @@ async def run_kill(*, flatten: bool, slippage: float = FLATTEN_SLIPPAGE) -> Kill
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    backup = None
     fanout = BroadcastFanout(manager.broadcast)
     fanout.start()
     pusher = TelegramPusher.from_settings()
@@ -102,6 +105,8 @@ async def lifespan(app: FastAPI):
     start_portfolio_sync()
     await desk.start()
     await desk.restore()
+    backup = start_backup(pusher)
+    app.state.backup = backup
     n_algos = len(desk.algo_book().get("working") or [])
     pusher.push(
         "boot",
@@ -120,6 +125,8 @@ async def lifespan(app: FastAPI):
         await pusher.stop()
         await fanout.stop()
         await desk.stop()
+        if backup is not None:
+            await backup.stop()
         store.close_db()
 
 
@@ -149,6 +156,7 @@ def create_app() -> FastAPI:
             "status": "ok",
             "network": settings.lighter_network.value,
             "trading_enabled": order_service.enabled,
+            "backup": backup_health(),
             **{k: v for k, v in feed_health.snapshot().items() if k != "type"},
         }
 

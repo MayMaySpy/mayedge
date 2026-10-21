@@ -23,9 +23,10 @@ web/.env.local
 # Logs
 *.log
 
-# Local SQLite
+# Local SQLite and host Backups (outside Docker)
 backend/data/
 *.db
+backups/
 *.db-wal
 *.db-shm
 

@@ -6,11 +6,13 @@ services:
       - "127.0.0.1:14200:8000"
     volumes:
       - mayedge-data:/app/data
+      - ./backups:/app/backups
     environment:
       BIND_HOST: "0.0.0.0"
       BIND_PORT: "8000"
       DB_PATH: /app/data/mayedge.db
       WEB_ROOT: /app/web
+      BACKUP_DIR: /app/backups
     mem_limit: 1536m
     logging:
       driver: json-file

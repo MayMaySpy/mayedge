@@ -97,6 +97,18 @@ Lighter WebSocket fan-out. Public market data works without keys. Testnet or mai
 
 The desk keeps its own history in SQLite: **OI samples** for 30 days then **OI hours** for good, **Liquidation days**, **Funding estimates** for 30 days, and **Funding prints** for good. Five minutes after boot, then daily, the **Funding backfill** reads up to a year of funding for each perp not yet filled, and writes only when the venue's latest rows match the prints the desk recorded itself.
 
+#### Backups
+
+The desk writes a daily **Backup** at 03:30 UTC into `backups/` next to `docker-compose.yml`, on the host outside Docker, and keeps the newest 7. `make backup` takes one now.
+
+```bash
+docker compose down            # never -v
+gunzip -k backups/mayedge-2026-10-21.db.gz
+docker run --rm -v mayedge_mayedge-data:/data -v "$PWD/backups":/b alpine \
+  sh -c 'cp /b/mayedge-2026-10-21.db /data/mayedge.db && rm -f /data/mayedge.db-wal /data/mayedge.db-shm'
+docker compose up -d
+```
+
 ## Docs
 
 | Doc | What's in it |

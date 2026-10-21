@@ -2,7 +2,7 @@ VPS ?= mayedge
 REMOTE ?= /opt/mayedge
 RSYNC_EXCL := deploy/rsync-exclude
 
-.PHONY: help ci ci-backend ci-web up down-local logs-local push-env deploy serve check logs down
+.PHONY: help ci ci-backend ci-web up down-local logs-local backup push-env deploy serve check logs down
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 		'make up            local docker compose up --build' \
 		'make down-local    local docker compose down' \
 		'make logs-local    local compose logs' \
+		'make backup        take one Backup in the running desk' \
 		'make push-env      rsync backend/.env → VPS (600)' \
 		'make deploy        rsync tree, compose up --build, Tailscale Serve' \
 		'make serve         Tailscale Serve → 127.0.0.1:14200' \
@@ -41,6 +42,9 @@ down-local:
 
 logs-local:
 	docker compose logs -f --tail=200
+
+backup:
+	docker compose exec mayedge python -m mayedge.backup
 
 push-env:
 	test -f backend/.env || { echo 'missing backend/.env — cp backend/.env.example backend/.env' >&2; exit 1; }

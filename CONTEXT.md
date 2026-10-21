@@ -409,3 +409,9 @@ _Avoid_: largest fill, max print
 **Liquidation intensity**:
 A Market's liquidations in the window as a fraction of its open interest. Unknown if open interest is missing or 0.
 _Avoid_: % OI, liq/OI
+
+### Desk history
+
+**Backup**:
+A compressed copy of the desk database taken while the desk runs, kept on the host outside Docker.
+_Avoid_: snapshot, dump, export

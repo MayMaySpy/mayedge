@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Telegram pushes. Both must be set, or the desk sends nothing.
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    # Empty backup_dir leaves Backups off. backup_at is UTC HH:MM.
+    backup_dir: str = ""
+    backup_keep: int = 7
+    backup_at: str = "03:30"
 
     @property
     def base_url(self) -> str:
