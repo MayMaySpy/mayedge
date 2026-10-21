@@ -17,6 +17,7 @@ from mayedge.alive import last_down, mark_clean, note_boot, start_alive
 from mayedge.api.guard import BrowserGuard
 from mayedge.api.routes import include_api
 from mayedge.api.spa import mount_spa
+from mayedge.api.turn import LoopTurn
 from mayedge.api.ws import BroadcastFanout, manager, send_json
 from mayedge.auto_kill import auto_kill
 from mayedge.backup import health as backup_health
@@ -195,12 +196,13 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # Added last, so it runs first.
     app.add_middleware(
         BrowserGuard,
         allowed_hosts=settings.allowed_hosts,
         allowed_origins=settings.cors_origins,
     )
+    # Added last, so it runs first. One handler per turn, ahead of the guard.
+    app.add_middleware(LoopTurn)
 
     @app.exception_handler(VenueBlocked)
     async def _venue_blocked(_request: Request, exc: VenueBlocked) -> JSONResponse:
