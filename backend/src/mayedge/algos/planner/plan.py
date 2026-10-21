@@ -139,7 +139,11 @@ class Plan:
             "warnings": list(self.warnings),
             "steps": [step.to_json() for step in self.steps],
             "rungs": [
-                {"index": r.index, "price": fmt_decimal(r.price) or "0", "qty": fmt_decimal(r.qty) or "0"}
+                {
+                    "index": r.index,
+                    "price": fmt_decimal(r.price) or "0",
+                    "qty": fmt_decimal(r.qty) or "0",
+                }
                 for r in self.rungs
             ],
         }
@@ -162,7 +166,11 @@ class Plan:
             warnings=tuple(str(w) for w in raw.get("warnings") or ()),
             steps=tuple(PlannedStep.from_json(x) for x in raw.get("steps") or ()),
             rungs=tuple(
-                Rung(index=int(x["index"]), price=Decimal(str(x["price"])), qty=Decimal(str(x["qty"])))
+                Rung(
+                    index=int(x["index"]),
+                    price=Decimal(str(x["price"])),
+                    qty=Decimal(str(x["qty"])),
+                )
                 for x in raw.get("rungs") or ()
             ),
         )
@@ -277,7 +285,9 @@ def ladder_rungs(
 
 def ladder_full_fill(params: PlannerParams, tick: Decimal) -> Decimal:
     """EL2: the average with every rung filled."""
-    weights = ladder_rungs(params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0"))
+    weights = ladder_rungs(
+        params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0")
+    )
     avg = sum((r.price * r.qty for r in weights), Decimal("0"))
     # Rounded the worse way, so R is never drawn smaller than the rungs make it.
     return round_price(avg, tick, up=params.side == "buy")
@@ -285,7 +295,9 @@ def ladder_full_fill(params: PlannerParams, tick: Decimal) -> Decimal:
 
 def ladder_furthest(params: PlannerParams, tick: Decimal) -> Decimal:
     """EL2: the rung nearest the stop."""
-    weights = ladder_rungs(params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0"))
+    weights = ladder_rungs(
+        params, size=Decimal("1"), tick=tick, qty_step=Decimal("0"), min_qty=Decimal("0")
+    )
     return weights[-1].price
 
 
@@ -325,7 +337,9 @@ def _check_trail_ticks(distance: Decimal, kind: str, ctx: MarketContext, rule: s
         raise PlanRefused(rule, f"The trail distance is under {MIN_TRAIL_TICKS} ticks")
 
 
-def trail_price_distance(unit: TrailUnit, distance: Decimal, r: Decimal) -> tuple[Decimal, engine.DistanceKind]:
+def trail_price_distance(
+    unit: TrailUnit, distance: Decimal, r: Decimal
+) -> tuple[Decimal, engine.DistanceKind]:
     """An R distance becomes a price; a % stays a % of the best price."""
     if unit == "r":
         return distance * r, "price"
@@ -452,10 +466,11 @@ def price_plan(
             raise PlanRefused("S1", f"Target {fmt_decimal(leg.price)} is not past entry")
     if size <= 0:
         raise PlanRefused("P2", "Size is 0")
-    sized, warnings = _size_targets(
-        priced, size=size, qty_step=ctx.qty_step, min_qty=ctx.min_qty
+    sized, warnings = _size_targets(priced, size=size, qty_step=ctx.qty_step, min_qty=ctx.min_qty)
+    planned = tuple(
+        _planned_target(i + 1, leg, side=side, entry=entry, r=r, ctx=ctx)
+        for i, leg in enumerate(sized)
     )
-    planned = tuple(_planned_target(i + 1, leg, side=side, entry=entry, r=r, ctx=ctx) for i, leg in enumerate(sized))
     closing = sum((t.qty for t in planned), Decimal("0"))
     be = breakeven_price(side, entry, taker_bps=ctx.taker_bps, tick=ctx.tick)
     steps = plan_steps(stop_steps, planned, size=size, breakeven=be)
@@ -536,7 +551,9 @@ def resize_targets(
         sized, warnings = _size_targets(legs, size=held, qty_step=ctx.qty_step, min_qty=ctx.min_qty)
     except PlanRefused:
         sized = []
-        warnings = ["The Position is too small for any target at the venue minimum. The stop covers it"]
+        warnings = [
+            "The Position is too small for any target at the venue minimum. The stop covers it"
+        ]
     new_left = {t.index: ZERO for t in open_targets}
     for leg in sized:
         new_left[leg.index] = leg.qty
@@ -618,7 +635,9 @@ def plan_steps(
     return tuple(out)
 
 
-def plan_size(params: PlannerParams, ctx: MarketContext, *, entry: Decimal, stop: Decimal) -> Decimal:
+def plan_size(
+    params: PlannerParams, ctx: MarketContext, *, entry: Decimal, stop: Decimal
+) -> Decimal:
     if params.mode == "attach":
         return abs(ctx.position_size)
     if params.size is not None and params.risk_pct is not None:

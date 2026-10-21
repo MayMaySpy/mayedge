@@ -86,7 +86,9 @@ class PlannerState:
         trigger = raw.get("stop_trigger")
         self.stop_trigger = Decimal(str(trigger)) if trigger not in (None, "") else None
         steps = raw.get("steps_done")
-        self.steps_done = int(steps) if steps is not None else (1 if raw.get("breakeven_done") else 0)
+        self.steps_done = (
+            int(steps) if steps is not None else (1 if raw.get("breakeven_done") else 0)
+        )
         deadline = raw.get("entry_deadline_ms")
         self.entry_deadline_ms = int(deadline) if deadline else None
         trails = obj(raw.get("trails"))

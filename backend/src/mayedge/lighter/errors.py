@@ -26,9 +26,7 @@ def has_code(text: Any, code: str) -> bool:
 
 def has_code_prefix(text: Any, prefix: str) -> bool:
     """True when a code of ``prefix`` plus one digit stands alone in ``text``."""
-    return (
-        re.search(rf"(?<![\d.]){re.escape(prefix)}\d(?!\d|\.\d)", str(text or "")) is not None
-    )
+    return re.search(rf"(?<![\d.]){re.escape(prefix)}\d(?!\d|\.\d)", str(text or "")) is not None
 
 
 def venue_client_error(err: Any) -> tuple[int, str] | None:

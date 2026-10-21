@@ -67,14 +67,33 @@ class TwapPlanTests(unittest.TestCase):
 
     def test_styles_pick_market_ioc_or_post(self) -> None:
         self.assertEqual(
-            slice_quote("aggressive", "buy", bid=Decimal(1), ask=Decimal(2), mid=Decimal("1.5"), mark=Decimal("1.5"))[
-                "kind"
-            ],
+            slice_quote(
+                "aggressive",
+                "buy",
+                bid=Decimal(1),
+                ask=Decimal(2),
+                mid=Decimal("1.5"),
+                mark=Decimal("1.5"),
+            )["kind"],
             "market",
         )
-        neu = slice_quote("neutral", "buy", bid=Decimal(1), ask=Decimal(2), mid=Decimal("1.5"), mark=Decimal("1.5"))
+        neu = slice_quote(
+            "neutral",
+            "buy",
+            bid=Decimal(1),
+            ask=Decimal(2),
+            mid=Decimal("1.5"),
+            mark=Decimal("1.5"),
+        )
         self.assertEqual(neu["tif"], "ioc")
-        pas = slice_quote("passive", "buy", bid=Decimal(1), ask=Decimal(2), mid=Decimal("1.5"), mark=Decimal("1.5"))
+        pas = slice_quote(
+            "passive",
+            "buy",
+            bid=Decimal(1),
+            ask=Decimal(2),
+            mid=Decimal("1.5"),
+            mark=Decimal("1.5"),
+        )
         self.assertEqual(pas["tif"], "post_only")
         self.assertEqual(pas["price"], "1")
 

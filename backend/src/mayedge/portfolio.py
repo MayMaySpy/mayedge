@@ -66,7 +66,9 @@ class Bucket:
 
 def buckets(rows: list[dict[str, Any]]) -> list[Bucket]:
     out = [
-        Bucket(to_ms(row.get("timestamp")), {k: _dec(v) for k, v in row.items() if k != "timestamp"})
+        Bucket(
+            to_ms(row.get("timestamp")), {k: _dec(v) for k, v in row.items() if k != "timestamp"}
+        )
         for row in rows
         if isinstance(row, dict)
     ]
@@ -174,14 +176,20 @@ class PoolRow:
     principal: Decimal | None
 
 
-def pool_row(share: dict[str, Any], pool_account: dict[str, Any] | None, lit_price: Decimal) -> PoolRow:
+def pool_row(
+    share: dict[str, Any], pool_account: dict[str, Any] | None, lit_price: Decimal
+) -> PoolRow:
     """N6, P4, P5: what one pool share holds."""
     index = int(_dec(share.get("public_pool_index")))
     shares = _dec(share.get("shares_amount"))
     principal = _dec(share.get("principal_amount")) or None
     info = (pool_account or {}).get("pool_info") or {}
     total_shares = _dec(info.get("total_shares"))
-    apy = _dec(info.get("annual_percentage_yield")) if info.get("annual_percentage_yield") is not None else None
+    apy = (
+        _dec(info.get("annual_percentage_yield"))
+        if info.get("annual_percentage_yield") is not None
+        else None
+    )
     if index == STAKING_POOL:
         lit = ZERO
         for asset in (pool_account or {}).get("assets") or []:
@@ -318,7 +326,9 @@ class Unlock:
 
 def unlocks(account: dict[str, Any]) -> list[Unlock]:
     rows = [
-        Unlock(int(_dec(u.get("asset_index"))), _dec(u.get("amount")), to_ms(u.get("unlock_timestamp")))
+        Unlock(
+            int(_dec(u.get("asset_index"))), _dec(u.get("amount")), to_ms(u.get("unlock_timestamp"))
+        )
         for u in account.get("pending_unlocks") or []
         if isinstance(u, dict)
     ]
@@ -367,7 +377,13 @@ class PortfolioNow:
             "kinds": {name: kind_json(k) for name, k in self.kinds.items()},
             "mismatch": [{"kind": m.kind, "drift": _s(m.drift)} for m in self.mismatch],
             "spot": [
-                {"symbol": r.symbol, "qty": _s(r.qty), "price": _s(r.price), "value": _s(r.value), "upnl": _s(r.upnl)}
+                {
+                    "symbol": r.symbol,
+                    "qty": _s(r.qty),
+                    "price": _s(r.price),
+                    "value": _s(r.value),
+                    "upnl": _s(r.upnl),
+                }
                 for r in self.spot
             ],
             "pools": [
@@ -385,7 +401,12 @@ class PortfolioNow:
             ],
             "perps": {
                 "collateral": [
-                    {"symbol": r.symbol, "qty": _s(r.qty), "price": _s(r.price), "value": _s(r.value)}
+                    {
+                        "symbol": r.symbol,
+                        "qty": _s(r.qty),
+                        "price": _s(r.price),
+                        "value": _s(r.value),
+                    }
                     for r in self.collateral
                 ],
                 "upnl": _s(self.upnl),
@@ -393,7 +414,8 @@ class PortfolioNow:
             },
             "spot_gap": _s(spot_gap(self.kinds["spot"].value, self.spot)) if self.detail else None,
             "unlocks": [
-                {"asset_index": u.asset_index, "amount": _s(u.amount), "unlock_ms": u.unlock_ms} for u in self.pending
+                {"asset_index": u.asset_index, "amount": _s(u.amount), "unlock_ms": u.unlock_ms}
+                for u in self.pending
             ],
         }
 
@@ -501,7 +523,9 @@ def days(
         if open_b.ts_ms >= first and close_b.ts_ms - open_b.ts_ms == DAY_MS:
             row(open_b.ts_ms, open_b, close_b)
     # Today, so far: the bucket at 00:00 UTC (daily, or hourly when the daily one is not in yet).
-    opening = next((b for b in daily if b.ts_ms == today), None) or next((b for b in hourly if b.ts_ms == today), None)
+    opening = next((b for b in daily if b.ts_ms == today), None) or next(
+        (b for b in hourly if b.ts_ms == today), None
+    )
     latest = hourly[-1] if hourly and hourly[-1].ts_ms > today else None
     row(today, opening, latest)
     return out

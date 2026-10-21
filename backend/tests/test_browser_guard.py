@@ -111,7 +111,9 @@ class GuardedSocketTests(unittest.TestCase):
         client = TestClient(create_app(), base_url="http://localhost")
         with (
             self.assertRaises(WebSocketDisconnect),
-            client.websocket_connect("ws://localhost/ws", headers={"Origin": "https://evil.example"}),
+            client.websocket_connect(
+                "ws://localhost/ws", headers={"Origin": "https://evil.example"}
+            ),
         ):
             pass
 
@@ -125,5 +127,7 @@ class GuardedSocketTests(unittest.TestCase):
 
     def test_the_desk_page_opens_the_feed(self) -> None:
         client = TestClient(create_app(), base_url="http://localhost")
-        with client.websocket_connect("ws://localhost/ws", headers={"Origin": "http://localhost"}) as ws:
+        with client.websocket_connect(
+            "ws://localhost/ws", headers={"Origin": "http://localhost"}
+        ) as ws:
             self.assertEqual(ws.receive_json()["type"], "init")

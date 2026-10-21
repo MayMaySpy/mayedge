@@ -594,7 +594,11 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
 
     def _rung(self, price: str) -> int:
         """The latest rung Clip sent at this price."""
-        return int([kw for kw in self.venue.sent("limit") if kw["price"] == price][-1]["client_order_index"])
+        return int(
+            [kw for kw in self.venue.sent("limit") if kw["price"] == price][-1][
+                "client_order_index"
+            ]
+        )
 
     async def _rung_fills(self, job: PlannerRunner, price: str, qty: str = "0.5") -> None:
         self.venue.fill(self._rung(price), qty)
@@ -690,7 +694,9 @@ class PlannerJobTests(IsolatedAsyncioTestCase):
         budget.reset()
         self.addCleanup(budget.reset)
         # Two sends free past what the stop needs.
-        self.assertTrue(budget.try_acquire(TX_CEILING["algo"] - RUNG_TX_RESERVE - 2, tx=True, lane="algo"))
+        self.assertTrue(
+            budget.try_acquire(TX_CEILING["algo"] - RUNG_TX_RESERVE - 2, tx=True, lane="algo")
+        )
         job = await self._start(LADDER)
         await self._tick(job)
         self.assertEqual([r["price"] for r in self.venue.sent("limit")], ["99.5", "99"])
@@ -748,17 +754,16 @@ class MarketZeroTests(TestCase):
 
         with patch.object(planner_harness, "MI", 0):
             v = FakeVenue(position=D("-0.2"), entry=D("100"))
-            v._rest(7, side="buy", size="0.2", price="110",
-                    order_type="stop-loss", trigger="110")
+            v._rest(7, side="buy", size="0.2", price="110", order_type="stop-loss", trigger="110")
             ctx, symbol = planner_venue.market_context(v.execution(), 0)
             protects = planner_venue.ticket_protects(v.execution(), 0)
         self.assertEqual(symbol, "ETH")
         self.assertEqual(ctx.position_size, D("-0.2"))
         self.assertEqual(len(protects), 1)
         plan = build_plan(
-            PlannerParams(mode="attach", side="sell", stop=D("110"),
-                          targets=[Target("r", D("1"), D("100"))]),
+            PlannerParams(
+                mode="attach", side="sell", stop=D("110"), targets=[Target("r", D("1"), D("100"))]
+            ),
             ctx,
         )
         self.assertEqual(plan.size, D("0.2"))
-

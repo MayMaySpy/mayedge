@@ -57,7 +57,10 @@ class PlannerBookTests(IsolatedAsyncioTestCase):
 
     def test_preview_says_which_rule_a_plan_breaks(self) -> None:
         out = self.book.preview_from_body({**BODY, "stop": "101"})
-        self.assertEqual(out["refused"], {"rule": "S1", "message": "The stop must be on the losing side of entry"})
+        self.assertEqual(
+            out["refused"],
+            {"rule": "S1", "message": "The stop must be on the losing side of entry"},
+        )
 
     async def test_one_planner_per_market(self) -> None:
         await self.book.start_from_body(BODY)

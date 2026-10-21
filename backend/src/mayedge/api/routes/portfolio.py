@@ -45,7 +45,9 @@ def _since(range_: str, now_ms: int) -> int:
     return 0 if span is None else now_ms - span * DAY_MS
 
 
-@router.get("/api/portfolio/history", response_model=None, responses=documents(responses.PortfolioHistory))
+@router.get(
+    "/api/portfolio/history", response_model=None, responses=documents(responses.PortfolioHistory)
+)
 async def get_portfolio_history(range: str = "7d") -> dict[str, Any]:
     """H4, H5: stored values per kind, hourly for 1d and 7d, daily beyond. No venue read."""
     since = _since(range, int(time.time() * 1000))
@@ -61,7 +63,9 @@ async def get_portfolio_history(range: str = "7d") -> dict[str, Any]:
     return {"range": range, "resolution": resolution, **out}
 
 
-@router.get("/api/portfolio/days", response_model=None, responses=documents(responses.PortfolioDays))
+@router.get(
+    "/api/portfolio/days", response_model=None, responses=documents(responses.PortfolioDays)
+)
 async def get_portfolio_days(range: str = "30d") -> dict[str, Any]:
     """H6: Day change per kind per UTC day. No venue read."""
     now = int(time.time() * 1000)

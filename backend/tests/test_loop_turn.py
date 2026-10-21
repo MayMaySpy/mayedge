@@ -87,9 +87,7 @@ class LoopTurnTests(unittest.IsolatedAsyncioTestCase):
         async def once_http() -> None:
             await turn(cast(Scope, {"type": "http"}), _receive, _send)
 
-        gap = await _gap(
-            asyncio.gather(once_http(), once_http(), once_send(), once_send())
-        )
+        gap = await _gap(asyncio.gather(once_http(), once_http(), once_send(), once_send()))
         self.assertLess(gap, 20.0)
 
 

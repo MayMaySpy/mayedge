@@ -88,14 +88,20 @@ class TrailJobTests(IsolatedAsyncioTestCase):
         self.venue.position = D(size)
         self.venue.entry = D("100")
 
-    async def _start(self, params: TrailParams, replaced: list[dict[str, Any]] | None = None) -> TrailRunner:
+    async def _start(
+        self, params: TrailParams, replaced: list[dict[str, Any]] | None = None
+    ) -> TrailRunner:
         ctx, _ = planner_venue.market_context(self.venue.execution(), MI)
         resolved = check_start(params, ctx)
         params.side = resolved.side
         job = TrailRunner(self.book)
         await job.start(
-            algo_id="TR-0001", market_index=MI, symbol="ETH", params=params,
-            resolved=resolved, replaced=replaced,
+            algo_id="TR-0001",
+            market_index=MI,
+            symbol="ETH",
+            params=params,
+            resolved=resolved,
+            replaced=replaced,
         )
         await job._halt()
         job._stop.clear()
@@ -194,11 +200,21 @@ class TrailJobTests(IsolatedAsyncioTestCase):
 
     async def test_a_trail_stop_replaces_stop_tickets(self) -> None:
         self._long()
-        ticket = {"market_index": MI, "order_index": "77", "client_order_index": "1000000005",
-                  "order_type": "stop-loss", "side": "sell"}
+        ticket = {
+            "market_index": MI,
+            "order_index": "77",
+            "client_order_index": "1000000005",
+            "order_type": "stop-loss",
+            "side": "sell",
+        }
         self.venue.orders[1_000_000_005] = ticket
-        tp = {"market_index": MI, "order_index": "78", "client_order_index": "1000000006",
-              "order_type": "take-profit", "side": "sell"}
+        tp = {
+            "market_index": MI,
+            "order_index": "78",
+            "client_order_index": "1000000006",
+            "order_type": "take-profit",
+            "side": "sell",
+        }
         self.venue.orders[1_000_000_006] = tp
         book = TrailBook(execution=self.venue.execution, broadcast=lambda _p: None)
         preview = book.preview_from_body(
@@ -259,8 +275,10 @@ class TrailJobTests(IsolatedAsyncioTestCase):
         self.assertFalse(is_algo_client_order(kept["client_order_index"]))
         self.assertEqual(job.state.status, ChaseStatus.STOPPED)
         # Only the kept Ticket is left.
-        self.assertEqual([o["client_order_index"] for o in self.venue.orders.values()],
-                         [str(kept["client_order_index"])])
+        self.assertEqual(
+            [o["client_order_index"] for o in self.venue.orders.values()],
+            [str(kept["client_order_index"])],
+        )
 
     async def test_stopping_without_keep_cancels_the_stop(self) -> None:
         self._long()
@@ -356,9 +374,7 @@ class TrailJobTests(IsolatedAsyncioTestCase):
     # ── Entry ──
 
     async def test_entry_fires_a_market_order_when_price_comes_back(self) -> None:
-        job = await self._start(
-            _params(kind="entry", side="buy", size="1", activation="95")
-        )
+        job = await self._start(_params(kind="entry", side="buy", size="1", activation="95"))
         await self._mark(job, "96")
         await self._mark(job, "95")
         await self._mark(job, "93")
@@ -438,7 +454,9 @@ class TrailJobTests(IsolatedAsyncioTestCase):
 
     async def test_the_backstop_comes_off_after_a_fire(self) -> None:
         self._long()
-        job = await self._start(_params(kind="tp", reference="last", activation="105", size_pct="50"))
+        job = await self._start(
+            _params(kind="tp", reference="last", activation="105", size_pct="50")
+        )
         await self._print(job, "105", ms=MIN_GAP_MS)
         self.assertEqual(self.venue.sent("trigger_sl")[0]["trigger"], "103.9")
         await self._print(job, "104")

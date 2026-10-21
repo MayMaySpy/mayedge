@@ -73,8 +73,12 @@ class LadderPlanTests(unittest.TestCase):
         self.assertTrue(all(r.qty * r.price >= Decimal("10") for r in mon("40000", 8)))
 
     def test_is_passive_buy(self) -> None:
-        self.assertTrue(is_passive(side="buy", price=Decimal("99"), bid=Decimal("98"), ask=Decimal("100")))
-        self.assertFalse(is_passive(side="buy", price=Decimal("100"), bid=Decimal("98"), ask=Decimal("100")))
+        self.assertTrue(
+            is_passive(side="buy", price=Decimal("99"), bid=Decimal("98"), ask=Decimal("100"))
+        )
+        self.assertFalse(
+            is_passive(side="buy", price=Decimal("100"), bid=Decimal("98"), ask=Decimal("100"))
+        )
 
     def test_window_selects_closest_unfilled(self) -> None:
         params = LadderParams(

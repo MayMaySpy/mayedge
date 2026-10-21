@@ -81,7 +81,9 @@ async def _backfill(fetch: Fetch, resolution: str, now_ms: int) -> None:
         try:
             rows = await _read(fetch, resolution, start, end)
         except HorizonReached:
-            logger.info("portfolio %s backfill reached the venue's horizon at %s", resolution, start)
+            logger.info(
+                "portfolio %s backfill reached the venue's horizon at %s", resolution, start
+            )
             portfolio_note_backfilled(resolution)
             return
         if (rows and _all_zero(rows)) or start <= floor:
@@ -106,7 +108,9 @@ async def sync_once(fetch: Fetch, *, enabled: bool, now_ms: int | None = None) -
     return {"started": True}
 
 
-async def _venue_fetch(resolution: str, mode: str, start_ms: int, end_ms: int, count: int) -> list[dict[str, Any]]:
+async def _venue_fetch(
+    resolution: str, mode: str, start_ms: int, end_ms: int, count: int
+) -> list[dict[str, Any]]:
     import httpx
 
     from mayedge.config import settings
@@ -126,12 +130,21 @@ async def _venue_fetch(resolution: str, mode: str, start_ms: int, end_ms: int, c
         params["ignore_transfers"] = "true"
     auth = await order_service.auth_token()
     async with httpx.AsyncClient(base_url=settings.base_url, timeout=20.0) as client:
-        resp = await client.get("/api/v1/pnl", params=params, headers={"authorization": auth, "Accept": "application/json"})
+        resp = await client.get(
+            "/api/v1/pnl",
+            params=params,
+            headers={"authorization": auth, "Accept": "application/json"},
+        )
         if resp.status_code == 400 and _code(resp) == HORIZON_CODE:
             raise HorizonReached(resolution)
         if resp.status_code >= 400:
             logger.warning(
-                "portfolio pnl %s %s→%s answered %s: %s", resolution, start_ms, end_ms, resp.status_code, resp.text[:300]
+                "portfolio pnl %s %s→%s answered %s: %s",
+                resolution,
+                start_ms,
+                end_ms,
+                resp.status_code,
+                resp.text[:300],
             )
         resp.raise_for_status()
         body = resp.json()

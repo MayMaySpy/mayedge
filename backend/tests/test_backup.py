@@ -93,9 +93,7 @@ class TakeBackupTests(unittest.TestCase):
             conn.execute(
                 "INSERT INTO journal_notes(trip_key, note, tags, updated_at) VALUES('t', 'n', '[]', 1)"
             )
-            conn.execute(
-                "INSERT INTO journal_funding(market_index, ts, amount) VALUES(1, 2, '3')"
-            )
+            conn.execute("INSERT INTO journal_funding(market_index, ts, amount) VALUES(1, 2, '3')")
             conn.commit()
         backup._active = None
 

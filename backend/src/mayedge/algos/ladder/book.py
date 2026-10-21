@@ -71,9 +71,11 @@ class LadderBook(ClipBook[LadderRunner]):
         tick, qty_step, min_qty, min_quote = self._market_limits(market_index)
         seed_raw = body.get("seed")
         rng = None
-        if (params.size_var_pct > 0 or params.price_var_pct > 0) and seed_raw is not None and str(
-            seed_raw
-        ) != "":
+        if (
+            (params.size_var_pct > 0 or params.price_var_pct > 0)
+            and seed_raw is not None
+            and str(seed_raw) != ""
+        ):
             rng = NumericLcg(int(seed_raw))
         validate_params(
             params, tick=tick, qty_step=qty_step, min_qty=min_qty, rng=rng, min_quote=min_quote
@@ -93,9 +95,7 @@ class LadderBook(ClipBook[LadderRunner]):
     ) -> None:
         await self._ensure_book(market_index)
         if self.live_on_market_side(market_index, params.side):
-            raise ValueError(
-                f"Ladder already running on market {market_index} side {params.side}"
-            )
+            raise ValueError(f"Ladder already running on market {market_index} side {params.side}")
 
         async def begin(job: LadderRunner, algo_id: str) -> None:
             await job.start(

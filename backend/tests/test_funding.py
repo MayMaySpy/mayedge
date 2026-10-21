@@ -34,7 +34,14 @@ _MINUTE = int(_NOW) // 60
 
 def _perp(market_index: int, funding: float | None, market_type: str = "perp") -> MarketMeta:
     return MarketMeta(
-        market_index, f"M{market_index}", 2, 4, 0.0, 0.0, market_type=market_type, funding_rate=funding
+        market_index,
+        f"M{market_index}",
+        2,
+        4,
+        0.0,
+        0.0,
+        market_type=market_type,
+        funding_rate=funding,
     )
 
 
@@ -68,28 +75,32 @@ class FundingStoreTest(unittest.TestCase):
         # A day at 0.001, written by the run before this one.
         for back in range(40, 0, -1):
             store.flush_funding(
-                [{"market_index": 1, "funding": 0.001}], minute_index=_MINUTE - back, keep_minutes=4320
+                [{"market_index": 1, "funding": 0.001}],
+                minute_index=_MINUTE - back,
+                keep_minutes=4320,
             )
         det = AlertDetector(
             lambda message: None, AlertSettings(), log=AlertLog(store=MemoryLogStore())
         )
         det.seed_levels("funding", store.recent_funding(_MINUTE - 1440))
         det._symbols[1] = "ETH"
-        det._snapshots[1] = deque([
-            MarketSnapshot(
-                ts=_NOW - 1,
-                mark=100.0,
-                last=100.0,
-                index=100.0,
-                mid=100.0,
-                bid=99.99,
-                ask=100.01,
-                oi=5_000_000.0,
-                vol_quote=10_000_000.0,
-                funding=0.012,
-                premium=0.0,
-            )
-        ])
+        det._snapshots[1] = deque(
+            [
+                MarketSnapshot(
+                    ts=_NOW - 1,
+                    mark=100.0,
+                    last=100.0,
+                    index=100.0,
+                    mid=100.0,
+                    bid=99.99,
+                    ask=100.01,
+                    oi=5_000_000.0,
+                    vol_quote=10_000_000.0,
+                    funding=0.012,
+                    premium=0.0,
+                )
+            ]
+        )
         with patch("mayedge.alerts.time.time", return_value=_NOW):
             strip = det.funding_extremes()
         # Extreme on the first print after boot, with no minutes of its own yet.
@@ -134,7 +145,10 @@ class FundingHistoryTest(_StoreCase):
             [{"market_index": 1, "funding": 0.001}], minute_index=_MINUTE, keep_minutes=60
         )
         got = store.list_funding(1, resolution="1d", count=500, now=_NOW)
-        self.assertEqual(got[0], {"time": (_HOUR - 24 * 400) * 3600 // 86400 * 86400, "rate": 0.003, "settled": True})
+        self.assertEqual(
+            got[0],
+            {"time": (_HOUR - 24 * 400) * 3600 // 86400 * 86400, "rate": 0.003, "settled": True},
+        )
 
     def test_a_bucket_of_prints_is_their_mean(self) -> None:
         start = _HOUR // 4 * 4 - 4
@@ -218,7 +232,9 @@ class FundingCalibrationTest(unittest.TestCase):
         self.assertIsNone(calibrate([(rows, local)]))
 
     def test_milliseconds_are_read_as_seconds(self) -> None:
-        rows = parse_venue_fundings([{"timestamp": 1_800_000_000_000, "rate": "0.1", "direction": "long"}])
+        rows = parse_venue_fundings(
+            [{"timestamp": 1_800_000_000_000, "rate": "0.1", "direction": "long"}]
+        )
         self.assertEqual(rows[0].time_s, 1_800_000_000)
 
 
@@ -236,7 +252,9 @@ class FundingBackfillTest(_StoreCase):
 
         async def fetch(idx: int, end_ms: int, count: int, resolution: str) -> list[dict]:
             calls.append((idx, end_ms, count))
-            hours = sorted((h for h in venue if (h + 1) * 3600 * 1000 <= end_ms), reverse=True)[:count]
+            hours = sorted((h for h in venue if (h + 1) * 3600 * 1000 <= end_ms), reverse=True)[
+                :count
+            ]
             return [_venue(h, *venue[h]) for h in hours]
 
         perp = _perp(1, 0.001)
@@ -293,7 +311,10 @@ class FundingDayStoreTest(_StoreCase):
         for back in range(1, 63):
             self._hours(_DAY - back, rate=0.001)
         store.insert_funding_days(
-            [{"market_index": 1, "day_index": _DAY - back, "rate": 0.002} for back in range(63, 364)]
+            [
+                {"market_index": 1, "day_index": _DAY - back, "rate": 0.002}
+                for back in range(63, 364)
+            ]
         )
         got = store.funding_averages(1, now=_DAY * 86400)
         by = {w["label"]: w for w in got["windows"]}
@@ -367,7 +388,9 @@ class FundingDayBackfillTest(_StoreCase):
     def test_writes_a_year_of_days_once(self) -> None:
         self._seed_hours()
         local = full_days(store.funding_prints_for(1, 0))
-        venue = self._venue(lambda d: local[d]["sum"] if d in local else 0.024 * (1 if d % 2 else -1))
+        venue = self._venue(
+            lambda d: local[d]["sum"] if d in local else 0.024 * (1 if d % 2 else -1)
+        )
         got, calls = self._run(venue)
         self.assertEqual(got, 365)
         self.assertEqual(calls, ["1d", "1d"])  # probe, then the market's page

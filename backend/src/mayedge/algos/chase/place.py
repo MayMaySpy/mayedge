@@ -561,13 +561,9 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
                 await self._finish_done()
                 return
 
-            must_pull = live is not None and self._working_crosses(
-                live.price, view, params.side
-            )
+            must_pull = live is not None and self._working_crosses(live.price, view, params.side)
             rate_limited = now < self._backoff_until
-            cooling = (
-                self._last_tx_ms > 0 and now - self._last_tx_ms < MIN_REQUOTE_MS
-            )
+            cooling = self._last_tx_ms > 0 and now - self._last_tx_ms < MIN_REQUOTE_MS
 
             if quote.action == Action.PAUSE:
                 if self._state.ledger.working() is not None:

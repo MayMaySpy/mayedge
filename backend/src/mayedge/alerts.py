@@ -189,9 +189,7 @@ class AlertDetector:
         self._minute.seed(market_index, bars)
         self._measure(market_index, time.time())
 
-    def seed_levels(
-        self, name: str, by_market: Mapping[int, Iterable[tuple[int, float]]]
-    ) -> None:
+    def seed_levels(self, name: str, by_market: Mapping[int, Iterable[tuple[int, float]]]) -> None:
         """K6, F3: stored minutes of funding or open interest, from before this run."""
         for market_index, samples in by_market.items():
             self._level.seed(market_index, name, samples)

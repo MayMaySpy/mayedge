@@ -177,10 +177,11 @@ async def run_sync() -> dict[str, Any]:
         await budget.take("background", wait=True)
 
     async def trades(cursor: str | None) -> dict[str, Any]:
-        page = await account_service.fetch_account_trades(
-            cursor=cursor, limit=PAGE, budgeted=False
-        )
-        return {"rows": [_fill_row(row) for row in page.get("trades") or []], "next": page.get("next_cursor")}
+        page = await account_service.fetch_account_trades(cursor=cursor, limit=PAGE, budgeted=False)
+        return {
+            "rows": [_fill_row(row) for row in page.get("trades") or []],
+            "next": page.get("next_cursor"),
+        }
 
     async def funding(cursor: str | None) -> dict[str, Any]:
         page = await account_service.fetch_account_funding(

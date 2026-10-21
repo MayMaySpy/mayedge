@@ -297,10 +297,15 @@ class PlannerBook:
     async def _wait_feeds_ready(self) -> None:
         deadline = time.monotonic() + RESTORE_FEED_TIMEOUT_S
         while time.monotonic() < deadline:
-            if feed_health.snapshot().get("account_ws") == "live" and self.execution().orders_hydrated():
+            if (
+                feed_health.snapshot().get("account_ws") == "live"
+                and self.execution().orders_hydrated()
+            ):
                 return
             await asyncio.sleep(0.1)
-        logger.warning("planner restore: account feed not ready within %.0fs", RESTORE_FEED_TIMEOUT_S)
+        logger.warning(
+            "planner restore: account feed not ready within %.0fs", RESTORE_FEED_TIMEOUT_S
+        )
 
     async def restore(self) -> None:
         store.init_db()

@@ -76,7 +76,9 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         settings.db_path = self.old
 
     async def test_a_closed_trip_and_its_note(self) -> None:
-        journal_insert_fills([_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")])
+        journal_insert_fills(
+            [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]
+        )
         journal_insert_funding([{"market_index": 1, "ts": 1_700_000_050, "amount": "2"}])
         app = create_app()
         transport = ASGITransport(app=app)
@@ -101,7 +103,9 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             self.assertEqual(again.json()["trips"][0]["note"], "held through the spike")
             self.assertEqual(again.json()["trips"][0]["tags"], ["planned"])
 
-            stats = await client.get("/api/journal/summary", params={"range": "all", "group": "none"})
+            stats = await client.get(
+                "/api/journal/summary", params={"range": "all", "group": "none"}
+            )
             self.assertEqual(stats.status_code, 200)
             responses.JournalSummary.model_validate(stats.json())
             group = stats.json()["groups"][0]
@@ -120,7 +124,9 @@ class JournalApiTests(IsolatedAsyncioTestCase):
                 self.assertEqual(len(got.json()["trips"]), count, algo)
 
     async def test_a_closed_trip_reads_its_excursion_once(self) -> None:
-        journal_insert_fills([_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")])
+        journal_insert_fills(
+            [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]
+        )
         bars = [
             Candle(time=1_699_999_980, open=100, high=104, low=97, close=103, volume=1),
             Candle(time=1_700_000_040, open=103, high=112, low=101, close=110, volume=1),

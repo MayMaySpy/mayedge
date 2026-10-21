@@ -215,9 +215,7 @@ class AdvancedTwapRunner:
             return
         try:
             resp = await get_trades(market_id=self.market_index, cursor=None, limit=50)
-            trades = (
-                resp.get("trades") if is_obj(resp) else getattr(resp, "trades", None)
-            )
+            trades = resp.get("trades") if is_obj(resp) else getattr(resp, "trades", None)
             if trades:
                 self._pending_trades.extend(trades)
                 self._drain_trades()
@@ -478,7 +476,9 @@ class AdvancedTwapRunner:
                 self.status = ChaseStatus.STOPPED
                 self._finish()
                 return
-            p.slices_done = max(p.slices_done, order_count(p.duration_seconds, p.frequency_seconds) - 1)
+            p.slices_done = max(
+                p.slices_done, order_count(p.duration_seconds, p.frequency_seconds) - 1
+            )
         else:
             skip = skip_reason(
                 side=p.side,
@@ -521,7 +521,9 @@ class AdvancedTwapRunner:
         slip = float(abs(p.max_price - mark) / mark)
         return max(0.001, min(slip, 0.05))
 
-    async def _place(self, qty: Decimal, quote: dict[str, str | None], mark: Decimal | None) -> None:
+    async def _place(
+        self, qty: Decimal, quote: dict[str, str | None], mark: Decimal | None
+    ) -> None:
         p = self.params
         if not p:
             return
@@ -584,7 +586,11 @@ class AdvancedTwapRunner:
             payload = ex.cached_account_payload() or {}
             for row in payload.get("open_orders") or ():
                 raw = row if is_obj(row) else None
-                coi_row = int((raw or {}).get("client_order_index") or getattr(row, "client_order_index", 0) or 0)
+                coi_row = int(
+                    (raw or {}).get("client_order_index")
+                    or getattr(row, "client_order_index", 0)
+                    or 0
+                )
                 if coi_row == coi:
                     idx = (raw or {}).get("order_index") or getattr(row, "order_index", None)
                     break

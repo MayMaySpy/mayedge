@@ -90,12 +90,14 @@ async def kill(
                 try:
                     size_raw = parse_decimal(pos.size)
                 except ValueError:
-                    flatten_legs.append({
-                        "market_index": pos.market_index,
-                        "symbol": pos.symbol,
-                        "ok": False,
-                        "error": f"invalid size {pos.size!r}",
-                    })
+                    flatten_legs.append(
+                        {
+                            "market_index": pos.market_index,
+                            "symbol": pos.symbol,
+                            "ok": False,
+                            "error": f"invalid size {pos.size!r}",
+                        }
+                    )
                     continue
                 if size_raw == 0:
                     continue

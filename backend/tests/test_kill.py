@@ -84,7 +84,6 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
         orders.cancel_all_orders.assert_awaited_once_with(None)
         orders.create_market_order.assert_not_called()
 
-
     @expects_logs()
     async def test_a_book_that_will_not_stop_does_not_hold_up_the_rest(self) -> None:
         algos = MagicMock()
@@ -185,9 +184,7 @@ class AccountSummaryForKillTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.order_service")
     @patch("mayedge.api.app.account_service")
     @expects_logs()
-    async def test_falls_back_to_cache_when_rest_fails(
-        self, account_svc, order_svc
-    ) -> None:
+    async def test_falls_back_to_cache_when_rest_fails(self, account_svc, order_svc) -> None:
         order_svc.get_account_summary = AsyncMock(side_effect=RuntimeError("budget"))
         cached = AccountSummary(collateral="1", available="1", unrealized_pnl="0")
         account_svc.cached_summary.return_value = cached

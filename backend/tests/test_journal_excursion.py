@@ -25,7 +25,6 @@ _BARS = [_bar(0, 99, 95), _bar(60, 104, 97), _bar(120, 120, 80), _bar(180, 200, 
 
 
 class ExcursionTests(unittest.TestCase):
-
     def test_a_long_measures_down_against_and_up_for(self) -> None:
         # Bars at 0 and 60 cover a trip open from 30 to 100; the bar at 120 starts after it closed.
         found = excursion("long", Decimal(100), Decimal(2), _BARS, 30, 100, "1m", 60)

@@ -74,9 +74,7 @@ class LoopWatch:
         lag_ms = max(0.0, (actual - expected) * 1000.0)
         self._samples.append((actual, lag_ms))
         self._prune(actual)
-        if lag_ms > _WARN_MS and (
-            self._warned_at is None or actual - self._warned_at >= _WINDOW_S
-        ):
+        if lag_ms > _WARN_MS and (self._warned_at is None or actual - self._warned_at >= _WINDOW_S):
             logger.warning("event loop lag %.0f ms", lag_ms)
             self._warned_at = actual
         self._note_freeze(wall_before, wall_after, actual - mono_before)

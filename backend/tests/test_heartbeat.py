@@ -31,7 +31,9 @@ class HeartbeatTests(unittest.IsolatedAsyncioTestCase):
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         self.addAsyncCleanup(client.aclose)
-        state = {"feeds": feeds or {"market_ws": "live", "account_ws": "live", "venue_down_since": 0}}
+        state = {
+            "feeds": feeds or {"market_ws": "live", "account_ws": "live", "venue_down_since": 0}
+        }
 
         async def sleep(seconds: float) -> None:
             clock["t"] += seconds
@@ -75,7 +77,9 @@ class HeartbeatTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent_quiet, [])
 
         await quiet({"market_ws": "down", "account_ws": "live", "venue_down_since": 0})
-        await quiet({"market_ws": "live", "account_ws": "down", "venue_down_since": 0}, trading=True)
+        await quiet(
+            {"market_ws": "live", "account_ws": "down", "venue_down_since": 0}, trading=True
+        )
         await quiet({"market_ws": "live", "account_ws": "live", "venue_down_since": 0}, lag=2000)
         await quiet({"market_ws": "live", "account_ws": "live", "venue_down_since": 50})
 

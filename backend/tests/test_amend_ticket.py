@@ -90,10 +90,13 @@ class AmendTicketTests(IsolatedAsyncioTestCase):
         live.trigger_price = "90"
         live.price = "89.10"
 
-        with patch(
-            "mayedge.lighter.orders.account_service.find_open_order",
-            return_value=live,
-        ), self.assertRaisesRegex(ValueError, "size"):
+        with (
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order",
+                return_value=live,
+            ),
+            self.assertRaisesRegex(ValueError, "size"),
+        ):
             await svc.amend_ticket(1, 42, "85", size="0.2")
 
         svc._signer.modify_order.assert_not_called()
@@ -130,10 +133,13 @@ class AmendTicketTests(IsolatedAsyncioTestCase):
         clip = _ticket()
         clip.client_order_index = CHASE_COI_BASE + 3
 
-        with patch(
-            "mayedge.lighter.orders.account_service.find_open_order",
-            return_value=clip,
-        ), self.assertRaisesRegex(ValueError, "Clip"):
+        with (
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order",
+                return_value=clip,
+            ),
+            self.assertRaisesRegex(ValueError, "Clip"),
+        ):
             await svc.amend_ticket(1, 42, "101.25")
 
         svc._signer.modify_order.assert_not_called()
@@ -143,10 +149,13 @@ class AmendTicketTests(IsolatedAsyncioTestCase):
         svc._signer = MagicMock()
         svc._signer.modify_order = AsyncMock()
 
-        with patch(
-            "mayedge.lighter.orders.account_service.find_open_order",
-            return_value=None,
-        ), self.assertRaisesRegex(ValueError, "not found"):
+        with (
+            patch(
+                "mayedge.lighter.orders.account_service.find_open_order",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(ValueError, "not found"),
+        ):
             await svc.amend_ticket(1, 42, "101.25")
 
         svc._signer.modify_order.assert_not_called()

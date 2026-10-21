@@ -160,7 +160,9 @@ class PlanMathTests(unittest.TestCase):
         self.assertEqual(
             breakeven_price("sell", D("100"), taker_bps=D("5"), tick=D("0.01")), D("99.90")
         )
-        self.assertEqual(breakeven_price("buy", D("2.19082"), taker_bps=D("0"), tick=D("0.00001")), D("2.19082"))
+        self.assertEqual(
+            breakeven_price("buy", D("2.19082"), taker_bps=D("0"), tick=D("0.00001")), D("2.19082")
+        )
 
     def test_percentages_are_from_entry(self) -> None:
         plan = build_plan(_enter(), ZRO)
@@ -204,7 +206,9 @@ class StopStepTests(unittest.TestCase):
     def test_a_row_from_before_steps_reads_its_breakeven_flag(self) -> None:
         raw = _enter().to_json()
         raw.pop("stop_steps")
-        self.assertEqual(PlannerParams.from_json({**raw, "breakeven": True}).stop_steps, "breakeven")
+        self.assertEqual(
+            PlannerParams.from_json({**raw, "breakeven": True}).stop_steps, "breakeven"
+        )
         self.assertEqual(PlannerParams.from_json({**raw, "breakeven": False}).stop_steps, "off")
 
 
@@ -222,9 +226,7 @@ class PlanRefusalTests(unittest.TestCase):
         self.assertEqual(self._refused(_enter(), ctx), "S1")
 
     def test_a_target_behind_entry_is_refused(self) -> None:
-        self.assertEqual(
-            self._refused(_enter(targets=[Target("price", D("2.1"), D("100"))])), "S1"
-        )
+        self.assertEqual(self._refused(_enter(targets=[Target("price", D("2.1"), D("100"))])), "S1")
 
     def test_a_stop_beyond_the_liquidation_price_is_refused(self) -> None:
         ctx = _ctx(liq_price=D("2.1"))
@@ -279,16 +281,22 @@ class TargetOrderTests(unittest.TestCase):
         plan = build_plan(
             _enter(
                 size=D("20"),
-                targets=[Target("r", D("1"), D("10"), "limit"), Target("r", D("2"), D("90"), "trigger")],
+                targets=[
+                    Target("r", D("1"), D("10"), "limit"),
+                    Target("r", D("2"), D("90"), "trigger"),
+                ],
             ),
             ZRO,
         )
         self.assertEqual([(t.qty, t.order) for t in plan.targets], [(D("20"), "trigger")])
 
     def test_a_target_without_a_type_is_a_trigger(self) -> None:
-        self.assertEqual(Target.from_json({"kind": "r", "value": "2", "pct": "50"}).order, "trigger")
         self.assertEqual(
-            Target.from_json({"kind": "r", "value": "2", "pct": "50", "order": "limit"}).order, "limit"
+            Target.from_json({"kind": "r", "value": "2", "pct": "50"}).order, "trigger"
+        )
+        self.assertEqual(
+            Target.from_json({"kind": "r", "value": "2", "pct": "50", "order": "limit"}).order,
+            "limit",
         )
         with self.assertRaises(PlanRefused):
             Target.from_json({"kind": "r", "value": "2", "pct": "50", "order": "market"})
@@ -334,8 +342,13 @@ class ChaseEntryTests(unittest.TestCase):
     def test_a_chase_band_with_its_low_over_its_high_is_refused(self) -> None:
         with self.assertRaises(PlanRefused) as e:
             PlannerParams.from_json(
-                {"side": "buy", "stop": "1", "entry_type": "chase",
-                 "entry_chase": {"low": "2.2", "high": "2.1"}, "targets": []}
+                {
+                    "side": "buy",
+                    "stop": "1",
+                    "entry_type": "chase",
+                    "entry_chase": {"low": "2.2", "high": "2.1"},
+                    "targets": [],
+                }
             )
         self.assertEqual(e.exception.rule, "E11")
 
@@ -347,7 +360,9 @@ class ChaseEntryTests(unittest.TestCase):
 
 class LadderEntryTests(unittest.TestCase):
     def _ladder(self, rungs: int = 5, strength: str = "0", **kw: Any) -> PlannerParams:
-        ladder = EntryLadder(price_from=D("2.19"), price_to=D("2.15"), rungs=rungs, strength=D(strength))
+        ladder = EntryLadder(
+            price_from=D("2.19"), price_to=D("2.15"), rungs=rungs, strength=D(strength)
+        )
         return _enter(entry_type="ladder", entry_price=None, entry_ladder=ladder, **kw)
 
     @staticmethod
@@ -358,15 +373,26 @@ class LadderEntryTests(unittest.TestCase):
     def test_a_ladder_entry_rests_its_rungs_like_the_ladder_algo(self) -> None:
         plan = build_plan(self._ladder(strength="1"), ZRO)
         # Strength high: 3:1 from the high rung to the low one.
-        self.assertEqual([r.price for r in plan.rungs], [D("2.19"), D("2.18"), D("2.17"), D("2.16"), D("2.15")])
+        self.assertEqual(
+            [r.price for r in plan.rungs], [D("2.19"), D("2.18"), D("2.17"), D("2.16"), D("2.15")]
+        )
         self.assertEqual([r.qty for r in plan.rungs], [D("30"), D("25"), D("20"), D("15"), D("10")])
         same = build_rungs(
-            side="buy", qty=D("100"), price_from=D("2.19"), price_to=D("2.15"), rungs=5,
-            tick=ZRO.tick, qty_step=ZRO.qty_step, min_qty=ZRO.min_qty, size_skew=D("1"),
+            side="buy",
+            qty=D("100"),
+            price_from=D("2.19"),
+            price_to=D("2.15"),
+            rungs=5,
+            tick=ZRO.tick,
+            qty_step=ZRO.qty_step,
+            min_qty=ZRO.min_qty,
+            size_skew=D("1"),
         )
         self.assertEqual(list(plan.rungs), same)
         # Either way round: a buy ladder runs down from its higher price.
-        flipped = replace(self._ladder(strength="1"), entry_ladder=EntryLadder(D("2.15"), D("2.19"), 5, D("1")))
+        flipped = replace(
+            self._ladder(strength="1"), entry_ladder=EntryLadder(D("2.15"), D("2.19"), 5, D("1"))
+        )
         self.assertEqual(build_plan(flipped, ZRO).rungs, plan.rungs)
 
     def test_a_ladder_entry_is_sized_so_every_rung_filling_loses_the_risk(self) -> None:
@@ -417,12 +443,21 @@ class LadderEntryTests(unittest.TestCase):
     def test_a_ladder_rung_must_meet_the_quote_minimum_at_its_own_price(self) -> None:
         # MON: $10 minimum. 1500 a rung clears it at mark 0.02 (500) but not near 0.005 (2000).
         mon = MarketContext(
-            tick=D("0.00001"), qty_step=D("0.1"), min_qty=D("500"), mark=D("0.01999"),
-            equity=D("5537"), min_base=D("250"), min_quote=D("10"),
+            tick=D("0.00001"),
+            qty_step=D("0.1"),
+            min_qty=D("500"),
+            mark=D("0.01999"),
+            equity=D("5537"),
+            min_base=D("250"),
+            min_quote=D("10"),
         )
         ladder = EntryLadder(price_from=D("0.01"), price_to=D("0.005"), rungs=20, strength=D("0"))
         params = _enter(
-            entry_type="ladder", entry_price=None, entry_ladder=ladder, stop=D("0.004"), size=D("30000"),
+            entry_type="ladder",
+            entry_price=None,
+            entry_ladder=ladder,
+            stop=D("0.004"),
+            size=D("30000"),
             targets=[Target("price", D("0.03"), D("100"))],
         )
         with self.assertRaises(PlanRefused) as e:
@@ -440,8 +475,13 @@ class LadderEntryTests(unittest.TestCase):
         self.assertEqual(Plan.from_json(plan.to_json()).rungs, plan.rungs)
         with self.assertRaises(PlanRefused) as e:
             PlannerParams.from_json(
-                {"side": "buy", "stop": "1", "entry_type": "ladder",
-                 "entry_ladder": {"price_from": "2", "price_to": "2", "rungs": 5}, "targets": []}
+                {
+                    "side": "buy",
+                    "stop": "1",
+                    "entry_type": "ladder",
+                    "entry_ladder": {"price_from": "2", "price_to": "2", "rungs": 5},
+                    "targets": [],
+                }
             )
         self.assertEqual(e.exception.rule, "EL1")
 
@@ -468,7 +508,12 @@ class ResizeTests(unittest.TestCase):
     def test_a_filled_target_stays_and_the_rest_resize(self) -> None:
         plan = self._plan("1000", "50", "30")
         resized, _ = resize_targets(
-            plan, filled={1: D("500")}, expected=D("500"), held=D("250"), stop_steps="breakeven", ctx=ZRO
+            plan,
+            filled={1: D("500")},
+            expected=D("500"),
+            held=D("250"),
+            stop_steps="breakeven",
+            ctx=ZRO,
         )
         self.assertEqual([t.qty for t in resized.targets], [D("500"), D("150")])
         self.assertEqual(resized.runner, D("100"))

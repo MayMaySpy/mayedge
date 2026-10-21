@@ -82,7 +82,9 @@ async def get_trips(
     return {"trips": [_trip_json(trip, notes) for trip in capped]}
 
 
-@router.get("/api/journal/summary", response_model=None, responses=documents(responses.JournalSummary))
+@router.get(
+    "/api/journal/summary", response_model=None, responses=documents(responses.JournalSummary)
+)
 async def get_summary(
     range: str = "30d",
     group: str = "none",
@@ -109,7 +111,11 @@ async def get_summary(
     }
 
 
-@router.put("/api/journal/trips/{trip_key}/note", response_model=None, responses=documents(responses.JournalNote))
+@router.put(
+    "/api/journal/trips/{trip_key}/note",
+    response_model=None,
+    responses=documents(responses.JournalNote),
+)
 async def put_note(trip_key: str, body: NoteBody) -> dict[str, Any]:
     await asyncio.to_thread(journal_put_note, trip_key, body.note, body.tags)
     return {"trip_key": trip_key, "note": body.note, "tags": body.tags}
@@ -157,8 +163,7 @@ def _stamp(trips: list[RoundTrip], upnl: dict[int, Decimal]) -> list[RoundTrip]:
     if not any(trip.open for trip in trips):
         return trips
     return [
-        replace(trip, upnl=upnl.get(trip.market_index)) if trip.open else trip
-        for trip in trips
+        replace(trip, upnl=upnl.get(trip.market_index)) if trip.open else trip for trip in trips
     ]
 
 

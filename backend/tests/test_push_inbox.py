@@ -111,9 +111,7 @@ class StatusTextTests(unittest.TestCase):
             }
         )
         router.on_message({"type": "feed_health", "account_ws": "live", "venue_down_since": 0})
-        router.on_message(
-            {"type": "auto_kill", "armed": True, "loss_usd": 500, "profit_usd": 1000}
-        )
+        router.on_message({"type": "auto_kill", "armed": True, "loss_usd": 500, "profit_usd": 1000})
         self.assertEqual(
             router.status_text("mainnet"),
             "Desk status (mainnet), 14:00 UTC\n"

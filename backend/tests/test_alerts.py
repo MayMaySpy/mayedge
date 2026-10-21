@@ -144,15 +144,17 @@ class ApplyMarketStatsTest(unittest.TestCase):
     def test_apply_market_stats_parses_extended_fields(self) -> None:
         gw = LighterGateway()
         gw._markets[1] = _meta()
-        gw._apply_market_stats({
-            "market_stats": {
-                "market_id": 1,
-                "mark_price": "2000",
-                "open_interest": "5000000",
-                "best_bid_price": "1998",
-                "mid_price": "2000",
+        gw._apply_market_stats(
+            {
+                "market_stats": {
+                    "market_id": 1,
+                    "mark_price": "2000",
+                    "open_interest": "5000000",
+                    "best_bid_price": "1998",
+                    "mid_price": "2000",
+                }
             }
-        })
+        )
         meta = gw._markets[1]
         self.assertEqual(meta.open_interest, 10_000_000.0)
         self.assertEqual(meta.best_bid_price, 1998.0)
@@ -237,9 +239,12 @@ class PriceSpikeTest(unittest.TestCase):
         h = Harness()
         h.market()
         events = h.tick(_at(100.5))
-        self.assertEqual([(e["rule"], e["severity"], e["direction"]) for e in events], [
-            ("move", NOTABLE, "up"),
-        ])
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [
+                ("move", NOTABLE, "up"),
+            ],
+        )
         move = _fact(events, "move")
         self.assertAlmostEqual(move["value"], 0.5)
         self.assertAlmostEqual(move["multiple"], 2.5, places=2)
@@ -306,9 +311,12 @@ class VolumeSpikeTest(unittest.TestCase):
         # $80k is the hour's biggest minute, and not three times it.
         self.assertEqual(self._trade(800.0), [])
         events = self._trade(1_000.0)
-        self.assertEqual([(e["rule"], e["severity"], e["direction"]) for e in events], [
-            ("volume", NOTABLE, "flat"),
-        ])
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [
+                ("volume", NOTABLE, "flat"),
+            ],
+        )
         volume = _fact(events, "volume")
         self.assertAlmostEqual(volume["value"], 100_000.0)
         self.assertAlmostEqual(volume["multiple"], 100_000.0 / 30_060.0, places=2)
@@ -331,9 +339,12 @@ class OiSpikeTest(unittest.TestCase):
     def test_an_oi_spike_doubles_the_hours_biggest_change(self) -> None:
         self.assertEqual(self._change(50_350_000.0), [])
         events = self._change(49_500_000.0)
-        self.assertEqual([(e["rule"], e["severity"], e["direction"]) for e in events], [
-            ("oi", NOTABLE, "down"),
-        ])
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [
+                ("oi", NOTABLE, "down"),
+            ],
+        )
         oi = _fact(events, "oi")
         self.assertAlmostEqual(oi["value"], -1.0)
         self.assertAlmostEqual(oi["usd"], -500_000.0)
@@ -369,9 +380,12 @@ class LiquidationsTest(unittest.TestCase):
     def test_liquidations_are_sized_against_open_interest(self) -> None:
         # $120k is 24 bps of $50M.
         events = self._liquidate(15_000.0)
-        self.assertEqual([(e["rule"], e["severity"], e["direction"]) for e in events], [
-            ("liqs", URGENT, "down"),
-        ])
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [
+                ("liqs", URGENT, "down"),
+            ],
+        )
         self.assertAlmostEqual(_fact(events, "liqs")["bps"], 24.0)
         self.assertEqual(self._liquidate(15_000.0, side="buy")[0]["direction"], "up")
         self.assertEqual(self._liquidate(10_000.0), [])
@@ -420,9 +434,12 @@ class HeldTest(unittest.TestCase):
         h.held[1] = Held(side="long")
         h.market()
         events = h.tick(_at(99.5))
-        self.assertEqual([(e["severity"], e["held"], e["direction"]) for e in events], [
-            (URGENT, "long", "down"),
-        ])
+        self.assertEqual(
+            [(e["severity"], e["held"], e["direction"]) for e in events],
+            [
+                (URGENT, "long", "down"),
+            ],
+        )
 
         resting = Harness()
         resting.held[1] = Held()
@@ -434,9 +451,12 @@ class HeldTest(unittest.TestCase):
         h.held[1] = Held(side="long", liquidation_price=92.0)
         h.seed(1, [_snap(_T0 - 65)])
         events = h.tick(_meta())
-        self.assertEqual([(e["rule"], e["severity"], e["direction"]) for e in events], [
-            ("near_liq", URGENT, "down"),
-        ])
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [
+                ("near_liq", URGENT, "down"),
+            ],
+        )
         self.assertAlmostEqual(_fact(events, "near_liq")["value"], 8.0)
 
         short = Harness()
@@ -591,10 +611,13 @@ class FundingStripTest(unittest.TestCase):
     def test_the_strip_lists_what_is_extreme_now(self) -> None:
         # Furthest first. A thin market is on it only when held. A market with no day is not.
         rows = self._strip(0.008)
-        self.assertEqual([(row["symbol"], row["held"]) for row in rows], [
-            ("MINE", True),
-            ("ETH", False),
-        ])
+        self.assertEqual(
+            [(row["symbol"], row["held"]) for row in rows],
+            [
+                ("MINE", True),
+                ("ETH", False),
+            ],
+        )
 
 
 class ActivityTest(unittest.TestCase):
@@ -619,7 +642,9 @@ class ActivityTest(unittest.TestCase):
         # No bars and no history yet: blank, not zero.
         self.assertIsNone(eth["vol_x"])
         self.assertIsNone(eth["funding_z"])
-        self.assertEqual((rows[0]["funding"], rows[0]["held"], rows[0]["move_5m"]), (0.004, True, None))
+        self.assertEqual(
+            (rows[0]["funding"], rows[0]["held"], rows[0]["move_5m"]), (0.004, True, None)
+        )
 
     def test_a_thin_market_is_on_no_board(self) -> None:
         self.assertNotIn("THIN", [row["symbol"] for row in self._board()])

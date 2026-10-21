@@ -131,7 +131,10 @@ class TestOrderBookCurrentMarket(unittest.IsolatedAsyncioTestCase):
         snap1 = {
             "type": "subscribed/order_book",
             "channel": "order_book:1",
-            "order_book": {"bids": [{"price": "9", "size": "1"}], "asks": [{"price": "10", "size": "1"}]},
+            "order_book": {
+                "bids": [{"price": "9", "size": "1"}],
+                "asks": [{"price": "10", "size": "1"}],
+            },
         }
         await feed.handle_message(snap1)
         await asyncio.sleep(0.12)

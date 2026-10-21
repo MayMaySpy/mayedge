@@ -157,9 +157,7 @@ class AutoKillClassTests(unittest.IsolatedAsyncioTestCase):
             ak.start(run_kill=run_kill, emit=lambda _: None, positions=lambda: books.pop(0))
             await self._fire(ak)
 
-            self.assertEqual(
-                [c.kwargs["slippage"] for c in run_kill.await_args_list], [0.01, 0.02]
-            )
+            self.assertEqual([c.kwargs["slippage"] for c in run_kill.await_args_list], [0.01, 0.02])
             self.assertEqual(ak.view()["last_kill_status"], "killed")
             self.assertFalse(ak.view()["armed"])
 

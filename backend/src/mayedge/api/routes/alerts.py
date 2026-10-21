@@ -34,9 +34,7 @@ async def get_alert_settings() -> dict[str, Any]:
 
 
 @router.get("/api/alerts/whatif")
-async def get_alert_whatif(
-    rule: str, knob: str, value: float, days: int = 30
-) -> dict[str, Any]:
+async def get_alert_whatif(rule: str, knob: str, value: float, days: int = 30) -> dict[str, Any]:
     span = days if days in (7, 30, 90) else None
     if span is None:
         raise HTTPException(400, "days must be 7, 30, or 90")

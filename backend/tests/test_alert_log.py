@@ -144,7 +144,9 @@ class StatsTest(unittest.TestCase):
                 _row(f"move-{i}", market_index=i + 1, symbol="ETH" if i < 2 else "BTC"),
                 entry_bar=_ENTRY,
             )
-            log.resolve(i + 1, _after(_bar(_ENTRY + 60, 100.0 + left, 100.0 - against)), now=_ENTRY + 1000)
+            log.resolve(
+                i + 1, _after(_bar(_ENTRY + 60, 100.0 + left, 100.0 - against)), now=_ENTRY + 1000
+            )
         by_symbol = log.stats(since_ms=0, by="symbol")
         self.assertEqual([row["key"] for row in by_symbol], ["ETH", "BTC"])
         self.assertEqual(by_symbol[0]["n"], 2)
@@ -183,9 +185,7 @@ class WhatIfTest(unittest.TestCase):
             log.write(_with_fact("drop", kind, **fact_low), entry_bar=_ENTRY)
             current = 5.0
             tighter_value = 8.0 if tighter == "higher" else 2.0
-            out = log.whatif(
-                rule=kind, knob=knob, value=tighter_value, since_ms=0, current=current
-            )
+            out = log.whatif(rule=kind, knob=knob, value=tighter_value, since_ms=0, current=current)
             self.assertFalse(out["looser"], knob)
             self.assertEqual(out["baseline"]["n"], 2, knob)
             self.assertEqual(out["whatif"]["n"], 1, knob)
@@ -233,21 +233,23 @@ class DetectorWritesTest(unittest.TestCase):
         det.seed_minute_bars(
             1, [Candle(_ENTRY - (70 - i) * 60, 100.0, 100.0, 100.0, 100.0, 1.0) for i in range(70)]
         )
-        det._snapshots[1] = deque([
-            MarketSnapshot(
-                ts=_ENTRY - 65,
-                mark=100.0,
-                last=100.0,
-                index=100.0,
-                mid=100.0,
-                bid=99.99,
-                ask=100.01,
-                oi=5_000_000.0,
-                vol_quote=10_000_000.0,
-                funding=0.0,
-                premium=0.0,
-            )
-        ])
+        det._snapshots[1] = deque(
+            [
+                MarketSnapshot(
+                    ts=_ENTRY - 65,
+                    mark=100.0,
+                    last=100.0,
+                    index=100.0,
+                    mid=100.0,
+                    bid=99.99,
+                    ask=100.01,
+                    oi=5_000_000.0,
+                    vol_quote=10_000_000.0,
+                    funding=0.0,
+                    premium=0.0,
+                )
+            ]
+        )
         meta = MarketMeta(
             1,
             "ETH",

@@ -60,9 +60,7 @@ class ChaseBook(ClipBook[ChaseIcebergRunner]):
     ) -> None:
         await self._ensure_book(market_index)
         if self.live_on_market_side(market_index, params.side):
-            raise ValueError(
-                f"Chase already running on market {market_index} side {params.side}"
-            )
+            raise ValueError(f"Chase already running on market {market_index} side {params.side}")
 
         async def begin(job: ChaseIcebergRunner, algo_id: str) -> None:
             await job.start(

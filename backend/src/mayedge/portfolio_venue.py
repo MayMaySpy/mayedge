@@ -22,9 +22,13 @@ REUSE_S = 30.0
 _cache: dict[tuple[int, bool], tuple[float, PortfolioNow]] = {}
 
 
-async def _get(client: httpx.AsyncClient, auth: str, path: str, params: dict[str, Any]) -> dict[str, Any]:
+async def _get(
+    client: httpx.AsyncClient, auth: str, path: str, params: dict[str, Any]
+) -> dict[str, Any]:
     await budget.take("read", wait=True)
-    resp = await client.get(path, params=params, headers={"authorization": auth, "Accept": "application/json"})
+    resp = await client.get(
+        path, params=params, headers={"authorization": auth, "Accept": "application/json"}
+    )
     resp.raise_for_status()
     body = resp.json()
     return body if isinstance(body, dict) else {}
@@ -53,12 +57,16 @@ async def read_venue(open_ms: int, now_ms: int, *, detail: bool = True) -> dict[
         account: dict[str, Any] = {}
         pools: dict[int, dict[str, Any]] = {}
         if detail:
-            found = await _get(client, auth, "/api/v1/account", {"by": "index", "value": str(account_index)})
+            found = await _get(
+                client, auth, "/api/v1/account", {"by": "index", "value": str(account_index)}
+            )
             account = (found.get("accounts") or [{}])[0]
         for share in account.get("shares") or []:
             index = int(share.get("public_pool_index") or 0)
             if index and index not in pools:
-                body = await _get(client, auth, "/api/v1/account", {"by": "index", "value": str(index)})
+                body = await _get(
+                    client, auth, "/api/v1/account", {"by": "index", "value": str(index)}
+                )
                 pools[index] = (body.get("accounts") or [{}])[0]
     return {
         "pnl": pnl.get("pnl") or [],
@@ -68,7 +76,9 @@ async def read_venue(open_ms: int, now_ms: int, *, detail: bool = True) -> dict[
     }
 
 
-async def read_portfolio(open_ms: int, *, now_ms: int | None = None, detail: bool = True) -> PortfolioNow:
+async def read_portfolio(
+    open_ms: int, *, now_ms: int | None = None, detail: bool = True
+) -> PortfolioNow:
     """N7: one venue read per Day open every 30s. N8: without detail, only the two pnl series."""
     from mayedge.lighter.account import account_service
 

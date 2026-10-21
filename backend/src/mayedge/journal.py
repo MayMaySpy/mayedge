@@ -175,15 +175,15 @@ def round_trips(
         rows.sort(key=lambda fill: (fill.ts, _trade_order(fill.trade_id)))
         built = _replay(rows, algo_links, oldest_ts=oldest_ts)
         live = None if upnl is None else upnl.get(market_index)
-        trips.extend(
-            _with_funding(built, fund_by_market.get(market_index, []), live, planner_risk)
-        )
+        trips.extend(_with_funding(built, fund_by_market.get(market_index, []), live, planner_risk))
     trips.sort(key=lambda trip: (trip.open_ts, trip.market_index, trip.trip_key))
     return trips
 
 
 def summary(trips: list[RoundTrip], group_by: GroupBy) -> list[Summary]:
-    counted = [trip for trip in trips if not trip.partial and not trip.open and trip.close_ts is not None]
+    counted = [
+        trip for trip in trips if not trip.partial and not trip.open and trip.close_ts is not None
+    ]
     groups: dict[str, list[RoundTrip]] = defaultdict(list)
     if group_by == "none":
         groups["all"] = counted
@@ -486,7 +486,9 @@ def _summarize(key: str, trips: list[RoundTrip], *, with_curve: bool) -> Summary
         net=net,
         avg_win=avg_win,
         avg_loss=avg_loss,
-        profit_factor=(win_net / abs(loss_net)) if losses and win_net != 0 else (None if not losses else ZERO),
+        profit_factor=(win_net / abs(loss_net))
+        if losses and win_net != 0
+        else (None if not losses else ZERO),
         expectancy=(net / count) if count else None,
         largest_win=max((trip.net for trip in wins), default=None),
         largest_loss=min((trip.net for trip in losses), default=None),
@@ -535,7 +537,11 @@ def _streaks(trips: list[RoundTrip]) -> tuple[int, int, int]:
 
 
 def _avg_hold(trips: list[RoundTrip]) -> Decimal | None:
-    held = [seconds_of(trip.close_ts) - seconds_of(trip.open_ts) for trip in trips if trip.close_ts is not None]
+    held = [
+        seconds_of(trip.close_ts) - seconds_of(trip.open_ts)
+        for trip in trips
+        if trip.close_ts is not None
+    ]
     return Decimal(sum(held)) / len(held) if held else None
 
 

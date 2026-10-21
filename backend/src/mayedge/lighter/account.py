@@ -55,6 +55,7 @@ def set_fill_listener(fn: Callable[[], None] | None) -> None:
     global _fill_listener
     _fill_listener = fn
 
+
 # Auth tokens last up to 8h. Reconnect before a 7h token dies.
 _AUTH_TTL_S = 7 * 60 * 60
 _ACCOUNT_WS_TTL = _AUTH_TTL_S - 10 * 60
@@ -190,7 +191,9 @@ class AccountService:
 
     def margin_parts(self) -> list[MarginPart]:
         """The Portfolio margin term by term, from the same inputs as the header's figure."""
-        return portfolio_margin_parts(self._cross_portfolio(), self._assets, self._live_asset_meta())
+        return portfolio_margin_parts(
+            self._cross_portfolio(), self._assets, self._live_asset_meta()
+        )
 
     def margin_free(self) -> float:
         """The part of the Portfolio margin free for new orders, from the same inputs as margin_parts."""
@@ -403,7 +406,9 @@ class AccountService:
                     logger.exception("account ws error, reconnecting in 3s")
                 else:
                     feed_health.note_venue_down(reason)
-                    logger.warning("account ws error, reconnecting in 3s: Lighter unavailable (%s)", reason)
+                    logger.warning(
+                        "account ws error, reconnecting in 3s: Lighter unavailable (%s)", reason
+                    )
                 feed_health.set_account_ws("reconnecting")
                 await asyncio.sleep(3)
 

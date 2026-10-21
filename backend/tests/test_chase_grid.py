@@ -215,7 +215,9 @@ class TestBreakEven(unittest.TestCase):
                 )
             ],
         )
-        plan = decide(params(be_delay_ms=1_000, be_bps=D("0")), mkt("100.05", "100.10"), rt, now=2_000)
+        plan = decide(
+            params(be_delay_ms=1_000, be_bps=D("0")), mkt("100.05", "100.10"), rt, now=2_000
+        )
         self.assertIsNotNone(plan.be)
         assert plan.be is not None
         self.assertEqual(plan.be.side, "sell")

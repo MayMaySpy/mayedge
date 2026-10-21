@@ -324,7 +324,9 @@ class AlertLog:
         rows = [row for row in self._db().since(since_ms) if row.rule == rule]
         baseline = _summarize(rule, rows)
         looser = _is_looser(tighter, value, current)
-        kept = rows if looser else [row for row in rows if _clears(row, kind, field, value, tighter)]
+        kept = (
+            rows if looser else [row for row in rows if _clears(row, kind, field, value, tighter)]
+        )
         return {
             "rule": rule,
             "knob": knob,
@@ -371,11 +373,7 @@ def _summarize(key: str, rows: list[LoggedRow]) -> dict[str, Any]:
     measured = [row for row in rows if row.left_pct is not None]
     lefts = [float(row.left_pct or 0.0) for row in measured]
     againsts = [float(row.against_pct or 0.0) for row in measured]
-    beats = sum(
-        1
-        for row in measured
-        if (row.left_pct or 0.0) > (row.against_pct or 0.0)
-    )
+    beats = sum(1 for row in measured if (row.left_pct or 0.0) > (row.against_pct or 0.0))
     opened = sum(1 for row in rows if row.opened_at is not None)
     return {
         "rule": key,
@@ -405,7 +403,9 @@ def _fact_number(row: LoggedRow, kind: str, field: str) -> float | None:
         facts = json.loads(row.facts or "[]")
     except json.JSONDecodeError:
         return None
-    fact = next((item for item in facts if isinstance(item, dict) and item.get("kind") == kind), None)
+    fact = next(
+        (item for item in facts if isinstance(item, dict) and item.get("kind") == kind), None
+    )
     if fact is None:
         return None
     if field == "multiple":

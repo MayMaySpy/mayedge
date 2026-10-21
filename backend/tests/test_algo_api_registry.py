@@ -23,7 +23,10 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
     @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
     @patch("mayedge.api.app.desk.get_book")
-    @patch("mayedge.api.app.desk.algo_book", return_value={"type": "algo", "working": [], "history": []})
+    @patch(
+        "mayedge.api.app.desk.algo_book",
+        return_value={"type": "algo", "working": [], "history": []},
+    )
     @patch("mayedge.api.app.order_service")
     async def test_start_chase_delegates_to_book(
         self, order_service, algo_book, get_book, *_mocks
@@ -75,7 +78,12 @@ class AlgoApiRegistryTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.desk.get_book")
     async def test_get_algo_type_returns_book_dict(self, get_book, *_mocks) -> None:
         book = MagicMock()
-        book.to_dict.return_value = {"type": "algo", "id": "chase-iceberg", "working": [], "history": []}
+        book.to_dict.return_value = {
+            "type": "algo",
+            "id": "chase-iceberg",
+            "working": [],
+            "history": [],
+        }
         get_book.return_value = book
         app = create_app()
         transport = ASGITransport(app=app)
@@ -124,7 +132,6 @@ class PlannerApiTests(unittest.IsolatedAsyncioTestCase):
         order_service.create_sl_tp.assert_not_called()
 
 
-
 class TrailApiTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
     @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
@@ -154,7 +161,10 @@ class TrailApiTests(unittest.IsolatedAsyncioTestCase):
     @patch("mayedge.api.app.desk.start", new_callable=AsyncMock)
     @patch("mayedge.api.app.desk.restore", new_callable=AsyncMock)
     @patch("mayedge.api.app.desk.stop", new_callable=AsyncMock)
-    @patch("mayedge.api.app.desk.algo_book", return_value={"type": "algo", "working": [], "history": []})
+    @patch(
+        "mayedge.api.app.desk.algo_book",
+        return_value={"type": "algo", "working": [], "history": []},
+    )
     @patch("mayedge.api.app.desk.trail_book")
     async def test_trail_stop_passes_keep_stop(self, trail_book, *_mocks) -> None:
         trail_book.has = MagicMock(return_value=True)

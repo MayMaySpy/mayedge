@@ -659,9 +659,7 @@ class ChaseRunnerFillSyncTests(IsolatedChaseTestCase):
             boot.clock.advance(MIN_REQUOTE_MS + 1)
             await boot.job._evaluate()
         self.assertEqual(len(boot.orders.modify_attempts), 1)
-        self.assertEqual(
-            boot.orders.modify_attempts[0]["order_index"], first["client_order_index"]
-        )
+        self.assertEqual(boot.orders.modify_attempts[0]["order_index"], first["client_order_index"])
         self.assertEqual(len(boot.orders.modifies), 0)
         self.assertEqual(len(boot.orders.creates), 1)
         self.assertEqual(boot.orders.cancels, [])

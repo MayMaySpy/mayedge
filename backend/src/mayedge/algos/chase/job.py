@@ -434,9 +434,7 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
                     try:
                         await self.unpause()
                     except Exception:
-                        logger.exception(
-                            "chase auto-resume failed for %s", self._state.algo_id
-                        )
+                        logger.exception("chase auto-resume failed for %s", self._state.algo_id)
                     continue
                 if self._state.status in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
                     continue

@@ -13,7 +13,9 @@ def _meta(conn: Any, key: str) -> str | None:
     return None if row is None else str(row["value"])
 
 
-def portfolio_put_buckets(resolution: str, mode: str, rows: list[tuple[int, dict[str, Any]]]) -> None:
+def portfolio_put_buckets(
+    resolution: str, mode: str, rows: list[tuple[int, dict[str, Any]]]
+) -> None:
     """(ts in ms, bucket) pairs. A bucket answered again replaces the stored one."""
     if not rows:
         return

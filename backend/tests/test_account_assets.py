@@ -497,5 +497,7 @@ class MarginPartsTests(unittest.TestCase):
         parts = portfolio_margin_parts(1014.012307, assets, details)
         self.assertEqual([(p.symbol, p.cross) for p in parts], [("USDC", True), ("ETH", False)])
         self.assertAlmostEqual(parts[1].value, 0.50000082 * 2518.95 * 0.7)
-        self.assertAlmostEqual(sum(p.value for p in parts), portfolio_margin_usd(1014.012307, assets, details))
+        self.assertAlmostEqual(
+            sum(p.value for p in parts), portfolio_margin_usd(1014.012307, assets, details)
+        )
         self.assertAlmostEqual(sum(p.value for p in parts), 1895.6462528995, places=6)

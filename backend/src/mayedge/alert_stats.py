@@ -134,7 +134,6 @@ class MinuteBook:
             vol_quote_5m=vol_5m,
         )
 
-
     def hour(self, market_index: int, *, now: float, window_min: int = 60) -> HourBase | None:
         """K1, K6. None until the book reaches a full window back."""
         dq = self._bars.get(market_index)

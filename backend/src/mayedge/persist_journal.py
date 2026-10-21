@@ -165,9 +165,7 @@ def journal_load_fills() -> list[dict[str, Any]]:
 
 def journal_load_funding() -> list[dict[str, Any]]:
     with reading() as conn:
-        rows = conn.execute(
-            "SELECT * FROM journal_funding ORDER BY ts, market_index"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM journal_funding ORDER BY ts, market_index").fetchall()
     return [dict(row) for row in rows]
 
 

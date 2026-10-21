@@ -54,16 +54,12 @@ def _sky() -> MarketMeta:
 class MakerMinTests(TestCase):
     def test_sky_110_clears_ten_dollar_min(self) -> None:
         meta = _sky()
-        OrderService()._check_maker_size(
-            meta, parse_to_int("110", 0), parse_to_int("0.094", 6)
-        )
+        OrderService()._check_maker_size(meta, parse_to_int("110", 0), parse_to_int("0.094", 6))
 
     def test_sky_106_asks_for_107(self) -> None:
         meta = _sky()
         with self.assertRaises(ValueError) as ctx:
-            OrderService()._check_maker_size(
-                meta, parse_to_int("106", 0), parse_to_int("0.094", 6)
-            )
+            OrderService()._check_maker_size(meta, parse_to_int("106", 0), parse_to_int("0.094", 6))
         self.assertEqual(str(ctx.exception), "Min 107 SKY (or $10)")
 
 
@@ -116,6 +112,7 @@ class MarketOrderLocalBookTests(IsolatedAsyncioTestCase):
         from mayedge.lighter.budget import budget
 
         budget.reset()
+
     async def test_buy_uses_ask_and_does_not_rest_fetch_book(self) -> None:
         svc = OrderService()
         svc._signer = MagicMock()
@@ -304,9 +301,7 @@ class NotionalCapPricingTests(IsolatedAsyncioTestCase):
         with (
             patch.object(settings, "max_order_notional", 500.0),
             patch.object(svc, "_market_meta", return_value=_eth()),
-            patch(
-                "mayedge.lighter.orders.account_service.find_open_order", return_value=live
-            ),
+            patch("mayedge.lighter.orders.account_service.find_open_order", return_value=live),
             self.assertRaises(ValueError) as ctx,
         ):
             await svc.amend_ticket(1, 77, "10")

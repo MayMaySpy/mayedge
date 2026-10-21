@@ -120,7 +120,9 @@ def _round_qty(qty: Decimal, step: Decimal) -> Decimal:
     return n * step
 
 
-def rung_min_qty(price: Decimal, *, min_qty: Decimal, min_quote: Decimal, qty_step: Decimal) -> Decimal:
+def rung_min_qty(
+    price: Decimal, *, min_qty: Decimal, min_quote: Decimal, qty_step: Decimal
+) -> Decimal:
     """The venue's minimum for one order at this price: its base minimum, or its
     quote minimum at this price, whichever is more, rounded up to the lot."""
     need = min_qty
@@ -195,7 +197,9 @@ def _size_weights(
     return [w / total for w in raw]
 
 
-def _gap_weights(n: int, var_frac: Decimal, rng: random.Random | NumericLcg | None) -> list[Decimal]:
+def _gap_weights(
+    n: int, var_frac: Decimal, rng: random.Random | NumericLcg | None
+) -> list[Decimal]:
     if n <= 0:
         return []
     if var_frac <= 0 or rng is None:
@@ -317,7 +321,9 @@ def build_rungs(
         patched = last_rung.qty + remainder
         if patched <= 0:
             raise ValueError("Too many orders for size")
-        need = rung_min_qty(last_rung.price, min_qty=min_qty, min_quote=min_quote, qty_step=qty_step)
+        need = rung_min_qty(
+            last_rung.price, min_qty=min_qty, min_quote=min_quote, qty_step=qty_step
+        )
         if need > 0 and patched < need:
             raise _too_small(last_rung.price, need, min_quote)
         out[-1] = Rung(index=last_rung.index, price=last_rung.price, qty=patched)
@@ -407,10 +413,6 @@ def select_rungs_to_place(
         return []
     excluded = live_rung_indices(params, ledger) | filled_rung_indices(params, ledger)
     pending = [r for r in params.rung_list if r.index not in excluded]
-    passive = [
-        r
-        for r in pending
-        if is_passive(side=params.side, price=r.price, bid=bid, ask=ask)
-    ]
+    passive = [r for r in pending if is_passive(side=params.side, price=r.price, bid=bid, ask=ask)]
     ordered = sort_by_closeness(passive, params.side)
     return ordered[:need]

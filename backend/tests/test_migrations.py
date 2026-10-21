@@ -24,7 +24,9 @@ def _shape(conn: sqlite3.Connection) -> dict[str, object]:
         )
     ]
     shape: dict[str, object] = {
-        t: sorted((str(c[1]), str(c[2]), int(c[3])) for c in conn.execute(f"PRAGMA table_info({t})"))
+        t: sorted(
+            (str(c[1]), str(c[2]), int(c[3])) for c in conn.execute(f"PRAGMA table_info({t})")
+        )
         for t in tables
     }
     shape["indexes"] = sorted(
@@ -131,9 +133,7 @@ class MigrationTests(unittest.TestCase):
         with store._lock:
             conn = store._connect()
             migrations._v6(conn)
-            conn.execute(
-                "INSERT INTO oi_days VALUES (100, 1, 'BTC', 3.0, 1.0, 2.0)"
-            )
+            conn.execute("INSERT INTO oi_days VALUES (100, 1, 'BTC', 3.0, 1.0, 2.0)")
             store._set_meta(conn, "schema_version", "10")
             conn.commit()
             store._migrate(conn)

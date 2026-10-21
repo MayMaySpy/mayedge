@@ -27,11 +27,15 @@ KINDS = {
 class PnlBucketTests(TestCase):
     def test_value_less_cumulative_pnl_is_the_net_flow_of_each_kind(self) -> None:
         # ignore_transfers=true answers each kind's value; the default answers PnL since the account opened.
-        for value_row, pnl_row in zip(FIXTURE["pnl_1d_ignore_transfers"], FIXTURE["pnl_1d"], strict=True):
+        for value_row, pnl_row in zip(
+            FIXTURE["pnl_1d_ignore_transfers"], FIXTURE["pnl_1d"], strict=True
+        ):
             self.assertEqual(value_row["timestamp"], pnl_row["timestamp"])
             for kind, (field, inflow, outflow) in KINDS.items():
                 flows = pnl_row[inflow] - pnl_row[outflow]
-                self.assertAlmostEqual(value_row[field] - pnl_row[field], flows, delta=1.0, msg=kind)
+                self.assertAlmostEqual(
+                    value_row[field] - pnl_row[field], flows, delta=1.0, msg=kind
+                )
 
     def test_pnl_and_flows_are_cumulative_and_only_volume_is_per_bucket(self) -> None:
         rows = FIXTURE["pnl_1h"]
@@ -47,7 +51,9 @@ class PnlBucketTests(TestCase):
         for key in ("pnl_1d", "pnl_1h", "pnl_1d_ignore_transfers"):
             stamps = [row["timestamp"] for row in FIXTURE[key]]
             self.assertTrue(all(ts < 10**12 for ts in stamps), key)
-            self.assertNotEqual(stamps[-1] % 3600, 0, f"{key}: the last bucket is the partial one, stamped now")
+            self.assertNotEqual(
+                stamps[-1] % 3600, 0, f"{key}: the last bucket is the partial one, stamped now"
+            )
             self.assertTrue(all(ts % 3600 == 0 for ts in stamps[:-1]), key)
 
     def test_staked_lit_is_not_a_bucket_field(self) -> None:
@@ -60,10 +66,14 @@ class AccountTests(TestCase):
         account = FIXTURE["account"]
         usdc = next(a for a in account["assets"] if a["symbol"] == "USDC")
         self.assertEqual(float(usdc["balance"]), 0.0)
-        self.assertAlmostEqual(float(usdc["margin_balance"]), float(account["total_asset_value"]), delta=0.01)
+        self.assertAlmostEqual(
+            float(usdc["margin_balance"]), float(account["total_asset_value"]), delta=0.01
+        )
         # total_asset_value is the perps kind's value; the venue's own perps value agrees.
         self.assertAlmostEqual(
-            FIXTURE["pnl_1d_ignore_transfers"][-1]["trade_pnl"], float(account["total_asset_value"]), delta=1.0
+            FIXTURE["pnl_1d_ignore_transfers"][-1]["trade_pnl"],
+            float(account["total_asset_value"]),
+            delta=1.0,
         )
 
     def test_spot_used_as_collateral_sits_in_margin_balance_and_counts_as_spot(self) -> None:
@@ -78,7 +88,9 @@ class AccountTests(TestCase):
     def test_the_share_is_lit_staking_and_principal_is_in_lit(self) -> None:
         share = FIXTURE["account"]["shares"][0]
         self.assertEqual(share["public_pool_index"], STAKING_INDEX)
-        self.assertEqual(share["entry_timestamp"], 0, "entry_timestamp is not set: do not show it as a date")
+        self.assertEqual(
+            share["entry_timestamp"], 0, "entry_timestamp is not set: do not show it as a date"
+        )
         pool = FIXTURE["staking_pool_account"]
         lit = float(next(a["balance"] for a in pool["assets"] if a["symbol"] == "LIT"))
         staked_lit = share["shares_amount"] * lit / pool["pool_info"]["total_shares"]

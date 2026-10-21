@@ -44,14 +44,26 @@ class FollowTests(unittest.TestCase):
         self.assertTrue(p.active)
         self.assertEqual(p.trigger, D("2.2162"))
         self.assertFalse(
-            move_due(LONG_EXIT, venue=D("2.2162"), wanted=trigger_at(LONG_EXIT, D("2.252")),
-                     best=D("2.252"), now_ms=10_000, last_move_ms=0)
+            move_due(
+                LONG_EXIT,
+                venue=D("2.2162"),
+                wanted=trigger_at(LONG_EXIT, D("2.252")),
+                best=D("2.252"),
+                now_ms=10_000,
+                last_move_ms=0,
+            )
         )
         p = _run(LONG_EXIT, ["2.26"], p)
         self.assertEqual(p.trigger, D("2.2261"))
         self.assertTrue(
-            move_due(LONG_EXIT, venue=D("2.2162"), wanted=D("2.2261"), best=D("2.26"),
-                     now_ms=10_000, last_move_ms=0)
+            move_due(
+                LONG_EXIT,
+                venue=D("2.2162"),
+                wanted=D("2.2261"),
+                best=D("2.26"),
+                now_ms=10_000,
+                last_move_ms=0,
+            )
         )
         self.assertTrue(crossed(LONG_EXIT, D("2.2261"), D("2.2261")))
 
@@ -111,12 +123,14 @@ class StepTests(unittest.TestCase):
         f = Follow(side="sell", distance=D("1"), distance_kind="price", tick=D("0.01"))
         self.assertEqual(step(f, D("100")), D("0.1"))
         self.assertFalse(
-            move_due(f, venue=D("99"), wanted=D("99.09"), best=D("100.09"), now_ms=0,
-                     last_move_ms=None)
+            move_due(
+                f, venue=D("99"), wanted=D("99.09"), best=D("100.09"), now_ms=0, last_move_ms=None
+            )
         )
         self.assertTrue(
-            move_due(f, venue=D("99"), wanted=D("99.1"), best=D("100.1"), now_ms=0,
-                     last_move_ms=None)
+            move_due(
+                f, venue=D("99"), wanted=D("99.1"), best=D("100.1"), now_ms=0, last_move_ms=None
+            )
         )
 
     def test_the_step_is_at_least_two_ticks(self) -> None:

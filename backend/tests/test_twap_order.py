@@ -108,7 +108,8 @@ class TwapSlippageTests(IsolatedAsyncioTestCase):
         send = AsyncMock()
         with (
             patch.object(svc, "_market_meta", return_value=meta),
-            patch.object(svc, "_retry_nonce", send),self.assertRaises(ValueError) as ctx
+            patch.object(svc, "_retry_nonce", send),
+            self.assertRaises(ValueError) as ctx,
         ):
             await svc.create_twap_order(
                 market_index=1,

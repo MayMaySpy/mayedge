@@ -218,9 +218,7 @@ def _row_to_run(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         "algo_id": algo_id,
         "venue": row["venue"] if "venue" in dict(row) else "lighter",
         "algo_type": row["algo_type"] if "algo_type" in dict(row) else "chase-iceberg",
-        "params_json": json.loads(row["params_json"] or "{}")
-        if "params_json" in dict(row)
-        else {},
+        "params_json": json.loads(row["params_json"] or "{}") if "params_json" in dict(row) else {},
         "status": row["status"],
         "market_index": row["market_index"],
         "symbol": row["symbol"],
@@ -274,7 +272,7 @@ def load_history(limit: int = 30, *, algo_type: str | None = None) -> list[dict[
         args.append(limit)
         sql = f"""
             SELECT * FROM algo_runs
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY updated_at DESC
             LIMIT ?
         """

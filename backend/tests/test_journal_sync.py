@@ -85,7 +85,9 @@ class JournalSyncTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.takes, 2)
         self.assertEqual({row["trade_id"] for row in journal_load_fills()}, {"1", "2", "3"})
 
-    async def test_an_interrupted_backfill_walks_past_known_fills_until_it_reaches_the_end(self) -> None:
+    async def test_an_interrupted_backfill_walks_past_known_fills_until_it_reaches_the_end(
+        self,
+    ) -> None:
         # The first walk stored the newest page and then stopped (budget, network).
         journal_insert_fills([_fill("3", 30)])
         pages = {

@@ -28,6 +28,7 @@ def is_algo_client_order(coi: int | None) -> bool:
         return False
     return any(base <= coi < end for base, end in _ALGO_COI_BANDS)
 
+
 _lock = threading.Lock()
 _seq = 0
 _loaded = False

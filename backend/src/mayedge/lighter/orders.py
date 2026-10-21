@@ -220,7 +220,9 @@ class OrderService:
             raise ValueError("Invalid stop price")
         return self._scale_price(fmt_decimal(worst) or "0", meta.price_decimals)
 
-    def _check_trigger_side(self, meta: MarketMeta, *, is_ask: bool, role: str, trigger: str) -> None:
+    def _check_trigger_side(
+        self, meta: MarketMeta, *, is_ask: bool, role: str, trigger: str
+    ) -> None:
         mark = float(meta.mark_price or meta.last_trade_price or 0)
         try:
             trig = float(parse_decimal(trigger))
@@ -664,7 +666,11 @@ class OrderService:
                 if protect_role_kind(order.order_type) == (role, kind)
             ]
             replaced.extend(order for order in existing[role] if order not in same)
-            target = same[0] if same and (req.BaseAmount > 0 or _position_tied(same[0].remaining)) else None
+            target = (
+                same[0]
+                if same and (req.BaseAmount > 0 or _position_tied(same[0].remaining))
+                else None
+            )
             replaced.extend(same[1:] if target is not None else same)
             if target is None:
                 to_create.append((role, kind, req, coi))
@@ -738,9 +744,7 @@ class OrderService:
         """
         meta = self._market_meta(market_index)
         price_int = self._scale_price(price, meta.price_decimals)
-        trigger_int = (
-            0 if trigger is None else self._scale_price(trigger, meta.price_decimals)
-        )
+        trigger_int = 0 if trigger is None else self._scale_price(trigger, meta.price_decimals)
         is_ask = None if side is None else self._is_ask(side)
         if size is not None:
             base_amount = self._scale_size(size, meta.size_decimals)
@@ -825,9 +829,7 @@ class OrderService:
             side=live.side if live.side in ("buy", "sell") else None,
         )
 
-    async def cancel_tickets(
-        self, side: str, market_index: int | None = None
-    ) -> dict[str, Any]:
+    async def cancel_tickets(self, side: str, market_index: int | None = None) -> dict[str, Any]:
         if side not in ("buy", "sell"):
             raise ValueError("side must be buy or sell")
         n = 0

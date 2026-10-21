@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS journal_notes (
 );
 """
 
-_SCHEMA = """
+_SCHEMA = (
+    """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -226,7 +227,9 @@ CREATE TABLE IF NOT EXISTS funding_days (
     rate REAL NOT NULL,
     PRIMARY KEY (market_index, day_index)
 );
-""" + _JOURNAL_TABLES
+"""
+    + _JOURNAL_TABLES
+)
 
 _last_liq_fold_at = time.time()
 _last_oi_fold_at = time.time()
@@ -293,9 +296,7 @@ def _open_reader() -> sqlite3.Connection:
         path = Path(settings.db_path)
     with _read_lock:
         if _reader is None:
-            opened = sqlite3.connect(
-                f"file:{path}?mode=ro", uri=True, check_same_thread=False
-            )
+            opened = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
             opened.row_factory = sqlite3.Row
             _reader = opened
         return _reader

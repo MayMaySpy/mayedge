@@ -50,7 +50,13 @@ LIVE_ASSETS = [
         "usd": "610.5",
         "unrealized_pnl": "",
     },
-    {"symbol": "ETH", "balance": "0.25", "index_price": "2437", "usd": "609.25", "unrealized_pnl": "12.5"},
+    {
+        "symbol": "ETH",
+        "balance": "0.25",
+        "index_price": "2437",
+        "usd": "609.25",
+        "unrealized_pnl": "12.5",
+    },
 ]
 
 
@@ -125,8 +131,15 @@ class HoldingTests(TestCase):
         self.assertGreater(row.units, D(share["principal_amount"]))
 
     def test_an_llp_share_is_valued_at_the_pools_share_price(self) -> None:
-        share = {"public_pool_index": 281474976710654, "shares_amount": 1000, "principal_amount": "900"}
-        pool = {"total_asset_value": "2000", "pool_info": {"total_shares": 2000, "annual_percentage_yield": 14.6}}
+        share = {
+            "public_pool_index": 281474976710654,
+            "shares_amount": 1000,
+            "principal_amount": "900",
+        }
+        pool = {
+            "total_asset_value": "2000",
+            "pool_info": {"total_shares": 2000, "annual_percentage_yield": 14.6},
+        }
         row = pool_row(share, pool, D("3"))
         self.assertEqual((row.kind, row.unit, row.value), ("llp", "USD", D("1000")))
 
@@ -137,13 +150,21 @@ class HoldingTests(TestCase):
 
     def test_usdc_is_the_perps_collateral(self) -> None:
         rows = collateral_rows(LIVE_ASSETS)
-        self.assertEqual([(r.symbol, r.qty, r.value) for r in rows], [("USDC", D("610.5"), D("610.5"))])
+        self.assertEqual(
+            [(r.symbol, r.qty, r.value) for r in rows], [("USDC", D("610.5"), D("610.5"))]
+        )
         self.assertEqual(collateral_rows([{**LIVE_ASSETS[0], "margin_balance": "0"}]), [])
 
     def test_perps_detail_names_the_collateral_and_the_open_upnl(self) -> None:
         now = portfolio_now(
-            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
-            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"),
+            now_ms=NOW_MS,
+            open_ms=OPEN_MS,
+            pnl_rows=PNL,
+            value_rows=VALUES,
+            account={},
+            pool_accounts={},
+            live_assets=LIVE_ASSETS,
+            lit_price=D("0"),
             upnl=D("-12.25"),
         ).to_json()
         responses.PortfolioNow.model_validate(now)
@@ -163,12 +184,25 @@ class HoldingTests(TestCase):
             MarginRow("ETH", False, D("0.50000082"), D("2518.95"), D("0.7"), D("881.6339458995")),
         ]
         plain = portfolio_now(
-            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
-            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"),
+            now_ms=NOW_MS,
+            open_ms=OPEN_MS,
+            pnl_rows=PNL,
+            value_rows=VALUES,
+            account={},
+            pool_accounts={},
+            live_assets=LIVE_ASSETS,
+            lit_price=D("0"),
         ).to_json()
         with_margin = portfolio_now(
-            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
-            account={}, pool_accounts={}, live_assets=LIVE_ASSETS, lit_price=D("0"), margin=margin,
+            now_ms=NOW_MS,
+            open_ms=OPEN_MS,
+            pnl_rows=PNL,
+            value_rows=VALUES,
+            account={},
+            pool_accounts={},
+            live_assets=LIVE_ASSETS,
+            lit_price=D("0"),
+            margin=margin,
             margin_free=D("1500.25"),
         ).to_json()
         responses.PortfolioNow.model_validate(with_margin)
@@ -176,7 +210,9 @@ class HoldingTests(TestCase):
         # Free for new orders, and the rest held by open Positions and orders.
         self.assertEqual(with_margin["perps"]["margin"]["free"], "1500.25")
         self.assertEqual(with_margin["perps"]["margin"]["used"], "395.3962528995")
-        self.assertEqual([p["symbol"] for p in with_margin["perps"]["margin"]["parts"]], ["USDC", "ETH"])
+        self.assertEqual(
+            [p["symbol"] for p in with_margin["perps"]["margin"]["parts"]], ["USDC", "ETH"]
+        )
         # N10: it changes no value.
         self.assertEqual(plain["kinds"], with_margin["kinds"])
         self.assertEqual(plain["total"], with_margin["total"])
@@ -191,13 +227,24 @@ class HoldingTests(TestCase):
 
     def test_holding_detail_does_not_change_the_totals(self) -> None:
         bare = portfolio_now(
-            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
-            account={}, pool_accounts={}, live_assets=[], lit_price=D("0"),
+            now_ms=NOW_MS,
+            open_ms=OPEN_MS,
+            pnl_rows=PNL,
+            value_rows=VALUES,
+            account={},
+            pool_accounts={},
+            live_assets=[],
+            lit_price=D("0"),
         )
         full = portfolio_now(
-            now_ms=NOW_MS, open_ms=OPEN_MS, pnl_rows=PNL, value_rows=VALUES,
-            account=FIXTURE["account"], pool_accounts={STAKING_POOL: FIXTURE["staking_pool_account"]},
-            live_assets=LIVE_ASSETS, lit_price=D("3"),
+            now_ms=NOW_MS,
+            open_ms=OPEN_MS,
+            pnl_rows=PNL,
+            value_rows=VALUES,
+            account=FIXTURE["account"],
+            pool_accounts={STAKING_POOL: FIXTURE["staking_pool_account"]},
+            live_assets=LIVE_ASSETS,
+            lit_price=D("3"),
         )
         self.assertEqual(bare.to_json()["total"], full.to_json()["total"])
         self.assertEqual(len(full.to_json()["pools"]), 1)
@@ -236,7 +283,9 @@ class ReadTests(IsolatedAsyncioTestCase):
     async def test_a_plain_answer_reads_only_the_pnl_series(self) -> None:
         reads: list[str] = []
 
-        async def get(_client: object, _auth: str, path: str, params: dict[str, object]) -> dict[str, object]:
+        async def get(
+            _client: object, _auth: str, path: str, params: dict[str, object]
+        ) -> dict[str, object]:
             reads.append(f"{path}{'+values' if params.get('ignore_transfers') else ''}")
             if path == "/api/v1/pnl":
                 return {"pnl": VALUES if params.get("ignore_transfers") else PNL}
@@ -252,7 +301,10 @@ class ReadTests(IsolatedAsyncioTestCase):
             self.assertEqual(plain.pools, [])
             detailed = await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS)
             # Both pnl series again, then the account and the one pool held.
-            self.assertEqual(reads[2:], ["/api/v1/pnl", "/api/v1/pnl+values", "/api/v1/account", "/api/v1/account"])
+            self.assertEqual(
+                reads[2:],
+                ["/api/v1/pnl", "/api/v1/pnl+values", "/api/v1/account", "/api/v1/account"],
+            )
             self.assertEqual(len(detailed.pools), 1)
             again = await portfolio_venue.read_portfolio(OPEN_MS, now_ms=NOW_MS, detail=False)
             self.assertIs(again, detailed, "a detailed answer serves a plain one")
@@ -265,7 +317,9 @@ class ReadTests(IsolatedAsyncioTestCase):
             patch.object(portfolio_venue, "read_venue", AsyncMock(return_value=_raw())),
         ):
             app = create_app()
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://localhost"
+            ) as client:
                 ok = await client.get("/api/portfolio")
                 self.assertEqual(ok.status_code, 200)
                 body = ok.json()

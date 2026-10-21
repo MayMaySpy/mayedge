@@ -216,7 +216,15 @@ class RoundTripTests(TestCase):
         trips = round_trips(
             [
                 fill(trade_id="a", ts=100, size=D("1"), usd=D("100")),
-                fill(trade_id="b", side="sell", price=D("110"), pnl=D("10"), ts=200, size=D("1"), usd=D("110")),
+                fill(
+                    trade_id="b",
+                    side="sell",
+                    price=D("110"),
+                    pnl=D("10"),
+                    ts=200,
+                    size=D("1"),
+                    usd=D("110"),
+                ),
             ],
             [fund(50, "9"), fund(100, "1"), fund(150, "2"), fund(200, "3"), fund(250, "8")],
             {},
@@ -231,8 +239,13 @@ class RoundTripTests(TestCase):
             [
                 fill(trade_id="a", ts=1792514997035, size=D("1"), usd=D("100")),
                 fill(
-                    trade_id="b", side="sell", price=D("110"), pnl=D("10"), ts=1792516065376,
-                    size=D("1"), usd=D("110"),
+                    trade_id="b",
+                    side="sell",
+                    price=D("110"),
+                    pnl=D("10"),
+                    ts=1792516065376,
+                    size=D("1"),
+                    usd=D("110"),
                 ),
             ],
             [fund(1792508400, "-0.023922"), fund(1792515600, "0.136353"), fund(1792519200, "5")],
@@ -260,7 +273,9 @@ class RoundTripTests(TestCase):
     def test_r_uses_the_stored_stop_and_is_absent_without_one(self) -> None:
         fills = [
             fill(trade_id="a", size=D("2"), usd=D("200"), fee=D("1"), ts=1),
-            fill(trade_id="b", side="sell", size=D("2"), usd=D("220"), pnl=D("20"), fee=D("1"), ts=2),
+            fill(
+                trade_id="b", side="sell", size=D("2"), usd=D("220"), pnl=D("20"), fee=D("1"), ts=2
+            ),
         ]
         scored = round_trips(fills, [], {"a": "PL-0002"}, {"PL-0002": (D("100"), D("90"))})
         self.assertEqual(scored[0].algo, "planner")
@@ -332,7 +347,9 @@ class RoundTripTests(TestCase):
         self.assertEqual(stats.net_bps, D("-15") / D("80") * 10_000)
         self.assertEqual(stats.recovery_factor, D("-0.5"))
         # W, L, W: no run longer than one; the last trip won.
-        self.assertEqual((stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (1, 1, 1))
+        self.assertEqual(
+            (stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (1, 1, 1)
+        )
         self.assertEqual(stats.avg_hold_win_s, D("100"))
         self.assertEqual(stats.avg_hold_loss_s, D("100"))
         assert stats.long is not None
@@ -357,4 +374,6 @@ class RoundTripTests(TestCase):
             rows.append(fill(trade_id=f"o{i}", ts=t, usd=D("10")))
             rows.append(fill(trade_id=f"c{i}", side="sell", ts=t + 10, pnl=D(net), usd=D("10")))
         stats = summary(round_trips(rows, [], {}, {}), "none")[0]
-        self.assertEqual((stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (2, 3, 2))
+        self.assertEqual(
+            (stats.max_win_streak, stats.max_loss_streak, stats.current_streak), (2, 3, 2)
+        )

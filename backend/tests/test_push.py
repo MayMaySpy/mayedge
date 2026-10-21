@@ -136,7 +136,9 @@ def _algo(*rows: dict[str, object]) -> dict[str, object]:
 def _utc_stamp(hour: int, minute: int, *, second: int = 30, day_offset: int = 0) -> float:
     base = time.gmtime(1_700_000_000)
     return float(
-        calendar.timegm((base.tm_year, base.tm_mon, base.tm_mday + day_offset, hour, minute, second, 0, 0, 0))
+        calendar.timegm(
+            (base.tm_year, base.tm_mon, base.tm_mday + day_offset, hour, minute, second, 0, 0, 0)
+        )
     )
 
 
@@ -364,17 +366,27 @@ class RouterTests(unittest.TestCase):
 
         sink = Sink()
         router = PushRouter(
-            sink, PushSettings(daily_at="08:00"), ManualClock(_utc_stamp(8, 0)), journal=journal, portfolio=portfolio
+            sink,
+            PushSettings(daily_at="08:00"),
+            ManualClock(_utc_stamp(8, 0)),
+            journal=journal,
+            portfolio=portfolio,
         )
         router.poll()
         self.assertTrue(sink.rows[0][1].startswith("Yesterday: Portfolio +$412 (Perps +$380"))
         sink = Sink()
         router = PushRouter(
-            sink, PushSettings(daily_at="08:00"), ManualClock(_utc_stamp(8, 0)), journal=journal, portfolio=broken
+            sink,
+            PushSettings(daily_at="08:00"),
+            ManualClock(_utc_stamp(8, 0)),
+            journal=journal,
+            portfolio=broken,
         )
         with self.assertLogs("mayedge.push_router", level="WARNING"):
             router.poll()
-        self.assertEqual(sink.rows[0][1], "Yesterday: Net +$380 over 9 Round trips, fees $38, funding −$6")
+        self.assertEqual(
+            sink.rows[0][1], "Yesterday: Net +$380 over 9 Round trips, fees $38, funding −$6"
+        )
 
     def test_a_failed_journal_read_does_not_stop_the_push(self) -> None:
         def journal(day: str) -> tuple[int, float, float, float]:
@@ -950,6 +962,7 @@ class PortfolioDayTests(unittest.TestCase):
         self.assertIsNone(portfolio_day_totals("2023-11-15"), "no bucket at the day's end yet")
         portfolio_put_buckets("1d", "pnl", [bucket(day_ms + 86_400_000, 480.0, 42.0)])
         self.assertEqual(
-            portfolio_day_totals("2023-11-15"), {"perps": 380.0, "spot": 0.0, "llp": 0.0, "staking": -8.0}
+            portfolio_day_totals("2023-11-15"),
+            {"perps": 380.0, "spot": 0.0, "llp": 0.0, "staking": -8.0},
         )
         self.assertIsNone(portfolio_day_totals("2023-11-14"), "no bucket at that day's start")

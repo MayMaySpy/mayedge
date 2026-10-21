@@ -36,7 +36,13 @@ def bucket(ts_ms: int, mode: str) -> dict[str, Any]:
     pnl = (ts_ms - OPENED) // HOUR_MS
     inflow = 1000 + (500 if ts_ms >= DEPOSIT_AT else 0)
     trade = pnl + inflow if mode == "values" else pnl
-    return {"timestamp": ts_ms // 1000, "trade_pnl": trade, "inflow": inflow, "outflow": 0, "volume": 3}
+    return {
+        "timestamp": ts_ms // 1000,
+        "trade_pnl": trade,
+        "inflow": inflow,
+        "outflow": 0,
+        "volume": 3,
+    }
 
 
 class FakeVenue:
@@ -47,10 +53,16 @@ class FakeVenue:
         # The venue's hourly lookback; older windows answer code 22403.
         self.hourly_horizon_ms: int | None = None
 
-    async def fetch(self, resolution: str, mode: str, start_ms: int, end_ms: int, count: int) -> list[dict[str, Any]]:
+    async def fetch(
+        self, resolution: str, mode: str, start_ms: int, end_ms: int, count: int
+    ) -> list[dict[str, Any]]:
         if self.fail_after is not None and len(self.calls) >= self.fail_after:
             raise RuntimeError("venue down")
-        if resolution == "1h" and self.hourly_horizon_ms is not None and start_ms < self.now - self.hourly_horizon_ms:
+        if (
+            resolution == "1h"
+            and self.hourly_horizon_ms is not None
+            and start_ms < self.now - self.hourly_horizon_ms
+        ):
             raise HorizonReached(resolution)
         self.calls.append((resolution, mode, start_ms, end_ms))
         step = HOUR_MS if resolution == "1h" else DAY_MS
@@ -78,15 +90,24 @@ class StoreCase(IsolatedAsyncioTestCase):
 
 class SyncTests(StoreCase):
     async def test_only_closed_buckets_are_stored(self) -> None:
-        self.assertEqual([ts for ts, _ in closed([bucket(NOW, "pnl"), bucket(NOW - NOW % HOUR_MS, "pnl")], HOUR_MS)],
-                         [NOW - NOW % HOUR_MS])
+        self.assertEqual(
+            [
+                ts
+                for ts, _ in closed(
+                    [bucket(NOW, "pnl"), bucket(NOW - NOW % HOUR_MS, "pnl")], HOUR_MS
+                )
+            ],
+            [NOW - NOW % HOUR_MS],
+        )
         venue = FakeVenue(NOW)
         await sync_once(venue.fetch, enabled=True, now_ms=NOW)
         stamps = [row["timestamp"] * 1000 for row in portfolio_buckets("1h", "pnl")]
         self.assertTrue(stamps)
         self.assertTrue(all(ts % HOUR_MS == 0 for ts in stamps))
         self.assertNotIn(NOW, stamps)
-        self.assertTrue(all(row["timestamp"] * 1000 % DAY_MS == 0 for row in portfolio_buckets("1d", "values")))
+        self.assertTrue(
+            all(row["timestamp"] * 1000 % DAY_MS == 0 for row in portfolio_buckets("1d", "values"))
+        )
 
     async def test_a_bucket_answered_again_replaces_the_stored_one(self) -> None:
         ts = NOW - NOW % HOUR_MS
@@ -103,7 +124,9 @@ class SyncTests(StoreCase):
         self.assertLessEqual(hourly[0]["timestamp"] * 1000, OPENED)
         # It stopped at the first all-zero window, not at the 90-day horizon.
         self.assertGreater(hourly[0]["timestamp"] * 1000, NOW - 90 * DAY_MS)
-        self.assertGreater(portfolio_buckets("1d", "pnl")[0]["timestamp"] * 1000, NOW - 730 * DAY_MS)
+        self.assertGreater(
+            portfolio_buckets("1d", "pnl")[0]["timestamp"] * 1000, NOW - 730 * DAY_MS
+        )
 
     async def test_backfill_stops_at_the_venues_horizon(self) -> None:
         venue = FakeVenue(NOW)
@@ -112,7 +135,9 @@ class SyncTests(StoreCase):
         self.assertTrue(portfolio_backfilled("1h"))
         oldest = portfolio_buckets("1h", "pnl")[0]["timestamp"] * 1000
         self.assertGreaterEqual(oldest, NOW - 7 * DAY_MS)
-        self.assertGreater(oldest, OPENED, "the hourly series ends at the venue's horizon, not the account's open")
+        self.assertGreater(
+            oldest, OPENED, "the hourly series ends at the venue's horizon, not the account's open"
+        )
         # Daily buckets still reach back to the open.
         self.assertLessEqual(portfolio_buckets("1d", "pnl")[0]["timestamp"] * 1000, OPENED)
 
@@ -146,7 +171,9 @@ class SyncTests(StoreCase):
 
     async def test_nothing_syncs_when_trading_is_off(self) -> None:
         venue = FakeVenue(NOW)
-        self.assertEqual(await sync_once(venue.fetch, enabled=False, now_ms=NOW), {"started": False})
+        self.assertEqual(
+            await sync_once(venue.fetch, enabled=False, now_ms=NOW), {"started": False}
+        )
         self.assertEqual(venue.calls, [])
 
 
@@ -160,18 +187,28 @@ class HistoryTests(TestCase):
         out = history(_series(HOUR_MS, start, end, "values"), _series(HOUR_MS, start, end, "pnl"))
         self.assertEqual(out["flows"], [{"ts": DEPOSIT_AT, "kind": "perps", "amount": "500"}])
         before, after = out["points"][2], out["points"][3]
-        self.assertEqual(int(after["perps"]) - int(before["perps"]), 501, "the deposit and an hour of PnL")
+        self.assertEqual(
+            int(after["perps"]) - int(before["perps"]), 501, "the deposit and an hour of PnL"
+        )
 
     def test_days_are_utc_days(self) -> None:
         daily = _series(DAY_MS, OPENED, NOW, "pnl")
         hourly = _series(HOUR_MS, NOW - 2 * DAY_MS, NOW, "pnl")
         rows = days(hourly, daily, since_ms=NOW - 3 * DAY_MS, now_ms=NOW)
         self.assertTrue(all(row["start"] % DAY_MS == 0 for row in rows))
-        self.assertEqual([row["day"] for row in rows][-1], time.strftime("%Y-%m-%d", time.gmtime(NOW / 1000)))
+        self.assertEqual(
+            [row["day"] for row in rows][-1], time.strftime("%Y-%m-%d", time.gmtime(NOW / 1000))
+        )
         full = rows[-2]
-        self.assertEqual(full["kinds"]["perps"], "24", "$1 an hour over a whole day; the deposit is not in it")
+        self.assertEqual(
+            full["kinds"]["perps"], "24", "$1 an hour over a whole day; the deposit is not in it"
+        )
         # The deposit day's change leaves the $500 out.
-        deposit_day = next(row for row in days(hourly, daily, since_ms=OPENED, now_ms=NOW) if row["start"] == DEPOSIT_AT)
+        deposit_day = next(
+            row
+            for row in days(hourly, daily, since_ms=OPENED, now_ms=NOW)
+            if row["start"] == DEPOSIT_AT
+        )
         self.assertEqual(deposit_day["kinds"]["perps"], "24")
 
     def test_today_runs_from_utc_midnight_to_the_last_hourly_bucket(self) -> None:
@@ -183,7 +220,10 @@ class HistoryTests(TestCase):
         self.assertEqual(today["kinds"]["perps"], "13")
         # Before the daily bucket for today is stored, today opens on the hourly one at 00:00.
         no_daily_today = [row for row in daily if row["timestamp"] * 1000 < NOW - NOW % DAY_MS]
-        self.assertEqual(days(hourly, no_daily_today, since_ms=NOW - DAY_MS, now_ms=NOW)[-1]["kinds"]["perps"], "13")
+        self.assertEqual(
+            days(hourly, no_daily_today, since_ms=NOW - DAY_MS, now_ms=NOW)[-1]["kinds"]["perps"],
+            "13",
+        )
 
 
 class RouteTests(StoreCase):
@@ -192,7 +232,9 @@ class RouteTests(StoreCase):
         await sync_once(venue.fetch, enabled=True, now_ms=NOW)
         app = create_app()
         with patch("mayedge.api.routes.portfolio.time.time", lambda: NOW / 1000):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://localhost"
+            ) as client:
                 week = (await client.get("/api/portfolio/history", params={"range": "7d"})).json()
                 self.assertEqual(week["resolution"], "1h")
                 responses.PortfolioHistory.model_validate(week)
@@ -203,7 +245,8 @@ class RouteTests(StoreCase):
                 self.assertEqual(every["resolution"], "1d")
                 # From before the account: the opening deposit, then the later one.
                 self.assertEqual(
-                    [(f["ts"], f["amount"]) for f in every["flows"]], [(OPENED, "1000"), (DEPOSIT_AT, "500")]
+                    [(f["ts"], f["amount"]) for f in every["flows"]],
+                    [(OPENED, "1000"), (DEPOSIT_AT, "500")],
                 )
                 daily = (await client.get("/api/portfolio/days", params={"range": "7d"})).json()
                 self.assertNotIn("tz", daily)

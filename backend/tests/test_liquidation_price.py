@@ -252,7 +252,9 @@ class AssetMetaTests(IsolatedAsyncioTestCase):
         )
         order_api = MagicMock()
         order_api.order_book_details = AsyncMock(
-            return_value=SimpleNamespace(order_book_details=[live, dead], spot_order_book_details=[])
+            return_value=SimpleNamespace(
+                order_book_details=[live, dead], spot_order_book_details=[]
+            )
         )
         gw = LighterGateway()
         gw._client = cast(Any, object())

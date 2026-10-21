@@ -146,9 +146,7 @@ class OpenInterestStoreTests(unittest.TestCase):
             hour = conn.execute(
                 "SELECT symbol, oi_high, oi_low, oi_close FROM oi_hours WHERE market_index = 1"
             ).fetchone()
-            btc = conn.execute(
-                "SELECT oi_close FROM oi_hours WHERE market_index = 2"
-            ).fetchone()
+            btc = conn.execute("SELECT oi_close FROM oi_hours WHERE market_index = 2").fetchone()
         self.assertEqual(hour["symbol"], "ETHEREUM")
         self.assertEqual(hour["oi_high"], 250.0)
         self.assertEqual(hour["oi_low"], 100.0)
@@ -213,7 +211,9 @@ class OpenInterestStoreTests(unittest.TestCase):
             ]
             details: list[str] = []
             for sql, params in statements:
-                details.extend(str(row[-1]) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+                details.extend(
+                    str(row[-1]) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params)
+                )
         for line in details:
             if "oi_samples" not in line:
                 continue

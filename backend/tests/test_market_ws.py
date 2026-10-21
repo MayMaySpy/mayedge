@@ -122,6 +122,7 @@ class TestToneConnReadsWhileSubscribing(unittest.IsolatedAsyncioTestCase):
         gw = _gw()
         fake = _FakeToneWs()
         seen: list[tuple[int, str]] = []
+
         async def on_tone(mi: int, res: str, _bars: object) -> None:
             seen.append((mi, res))
 
@@ -143,7 +144,9 @@ class TestToneConnReadsWhileSubscribing(unittest.IsolatedAsyncioTestCase):
             task = asyncio.create_task(_tone_conn(gw, gw._tone_epoch, channels))
             await asyncio.sleep(0.02)
             bar = {"t": 1_700_000_000, "o": 1, "h": 2, "l": 1, "c": 2, "v": 3}
-            await fake.inbox.put(json.dumps({"type": "update/candle", "channel": "candle/1/1m", "candles": [bar]}))
+            await fake.inbox.put(
+                json.dumps({"type": "update/candle", "channel": "candle/1/1m", "candles": [bar]})
+            )
             await asyncio.sleep(0.02)
             self.assertEqual(seen, [(1, "1m")])
             self.assertEqual([m["channel"] for m in fake.sent], ["candle/1/1m"])

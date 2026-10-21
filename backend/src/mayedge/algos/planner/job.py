@@ -591,7 +591,11 @@ class PlannerRunner:
                     # E9: the desk holds the entry until the price comes back.
                     f = entry_follow(params, self._tick())
                     st.trails["entry"] = engine.follow(f, Point(), self._mark())
-                    st.reason = "entry following" if st.trails["entry"].active else "entry waits for its Activation"
+                    st.reason = (
+                        "entry following"
+                        if st.trails["entry"].active
+                        else "entry waits for its Activation"
+                    )
                 else:
                     await self._send_entry()
             else:
@@ -729,7 +733,9 @@ class PlannerRunner:
     async def _work_ladder(self, now: int) -> None:
         return await entry_phase._work_ladder(self, now)
 
-    def _pending_rungs(self, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal) -> list[Rung]:
+    def _pending_rungs(
+        self, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal
+    ) -> list[Rung]:
         return entry_phase._pending_rungs(self, rungs, clips, half)
 
     def _end(self, reason: str) -> None:
@@ -783,7 +789,12 @@ class PlannerRunner:
         return manage_phase._step_price(self, step)
 
     def _leg_follow(
-        self, distance: Decimal, kind: engine.DistanceKind, *, activation: Decimal | None, floor: Decimal | None
+        self,
+        distance: Decimal,
+        kind: engine.DistanceKind,
+        *,
+        activation: Decimal | None,
+        floor: Decimal | None,
     ) -> Follow:
         return Follow(
             side=self._close_side(),
@@ -802,9 +813,15 @@ class PlannerRunner:
             return point.trigger
         return engine.backstop(f, point.trigger, point.best or point.trigger)
 
-    def _move_due(self, role: str, f: Follow, *, venue_at: Decimal, wanted: Decimal, best: Decimal, now: int) -> bool:
+    def _move_due(
+        self, role: str, f: Follow, *, venue_at: Decimal, wanted: Decimal, best: Decimal, now: int
+    ) -> bool:
         if not engine.move_due(
-            f, venue=venue_at, wanted=wanted, best=best, now_ms=now,
+            f,
+            venue=venue_at,
+            wanted=wanted,
+            best=best,
+            now_ms=now,
             last_move_ms=self._state.trail_moves.get(role),
         ):
             return False

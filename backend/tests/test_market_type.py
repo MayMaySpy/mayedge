@@ -80,7 +80,15 @@ class UnknownPositionTests(TestCase):
     def test_a_position_on_an_unknown_market_publishes(self) -> None:
         positions = merge_positions(
             [],
-            [{"market_id": 99999, "position": "1.5", "symbol": "BOOP", "sign": 1, "unrealized_pnl": "3"}],
+            [
+                {
+                    "market_id": 99999,
+                    "position": "1.5",
+                    "symbol": "BOOP",
+                    "sign": 1,
+                    "unrealized_pnl": "3",
+                }
+            ],
             snapshot=True,
         )
         self.assertEqual(len(positions), 1)

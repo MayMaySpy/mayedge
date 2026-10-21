@@ -89,9 +89,7 @@ class BrowserGuard:
         await self.app(scope, receive, send)
 
     @staticmethod
-    async def _refuse(
-        scope: Scope, receive: Receive, send: Send, status: int, reason: str
-    ) -> None:
+    async def _refuse(scope: Scope, receive: Receive, send: Send, status: int, reason: str) -> None:
         if scope["type"] == "websocket":
             await WebSocketClose(code=1008, reason=reason)(scope, receive, send)
             return

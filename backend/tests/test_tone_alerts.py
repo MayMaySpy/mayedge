@@ -251,7 +251,9 @@ def _eth(volume_24h: float) -> MarketMeta:
 
 
 class ToneCandleFeedTest(unittest.IsolatedAsyncioTestCase):
-    async def _close_a_blue_bar(self, meta: MarketMeta) -> tuple[list[dict[str, Any]], LighterGateway]:
+    async def _close_a_blue_bar(
+        self, meta: MarketMeta
+    ) -> tuple[list[dict[str, Any]], LighterGateway]:
         sent: list[dict[str, Any]] = []
         detector = AlertDetector(sent.append)
         detector.on_market_stats(meta)

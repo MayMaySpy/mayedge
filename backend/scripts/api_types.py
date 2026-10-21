@@ -18,7 +18,13 @@ _HEADER = """\
 // Do not edit: change backend/src/mayedge/api/{schemas,responses}.py and run `make api-types`.
 """
 
-_SCALARS = {"string": "string", "integer": "number", "number": "number", "boolean": "boolean", "null": "null"}
+_SCALARS = {
+    "string": "string",
+    "integer": "number",
+    "number": "number",
+    "boolean": "boolean",
+    "null": "null",
+}
 
 
 def _ts(schema: dict[str, Any]) -> str:

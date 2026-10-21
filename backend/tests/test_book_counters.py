@@ -145,9 +145,7 @@ class BookCounterRestartTests(IsolatedAsyncioTestCase):
                 book = await self._restart(cls)
                 self.assertEqual(book.alloc_id(), f"{prefix}0010")
                 self.assertEqual(book.alloc_coi(), coi_base + 13)
-                self.assertEqual(
-                    store.load_book_counters(algo_type), {"id_seq": 10, "coi_seq": 13}
-                )
+                self.assertEqual(store.load_book_counters(algo_type), {"id_seq": 10, "coi_seq": 13})
 
     async def test_seeding_ignores_other_books_rows(self) -> None:
         _archive_run("LD-0050", "ladder", LADDER_COI_BASE + 60)

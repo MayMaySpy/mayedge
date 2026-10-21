@@ -188,14 +188,10 @@ class GridRuntime:
                     )
                 )
         kinds_raw = obj(raw.get("clip_kinds"))
-        clip_kinds = (
-            {int(k): str(v) for k, v in kinds_raw.items()} if is_obj(kinds_raw) else {}
-        )
+        clip_kinds = {int(k): str(v) for k, v in kinds_raw.items()} if is_obj(kinds_raw) else {}
         handled_raw = obj(raw.get("handled_fill_qty"))
         handled_fill_qty = (
-            {int(k): Decimal(str(v)) for k, v in handled_raw.items()}
-            if is_obj(handled_raw)
-            else {}
+            {int(k): Decimal(str(v)) for k, v in handled_raw.items()} if is_obj(handled_raw) else {}
         )
         inv_vwap = raw.get("inventory_vwap")
         anchor = raw.get("grid_anchor")
@@ -204,9 +200,7 @@ class GridRuntime:
         return cls(
             inventory=Decimal(str(raw.get("inventory") or "0")),
             inventory_vwap=Decimal(str(inv_vwap)) if inv_vwap is not None else None,
-            lots=[
-                Lot.from_json(item) for item in (raw.get("lots") or ()) if is_obj(item)
-            ],
+            lots=[Lot.from_json(item) for item in (raw.get("lots") or ()) if is_obj(item)],
             hot_cells=hot,
             reentry_until=int(raw.get("reentry_until") or 0),
             grid_anchor=Decimal(str(anchor)) if anchor is not None else None,

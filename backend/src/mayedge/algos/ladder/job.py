@@ -224,7 +224,9 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 try:
                     await self._evaluate()
                 except Exception:
-                    logger.exception("ladder auto-resume evaluate failed for %s", self._state.algo_id)
+                    logger.exception(
+                        "ladder auto-resume evaluate failed for %s", self._state.algo_id
+                    )
                     self._state.status = ChaseStatus.ERROR
                     self._state.error = "resume evaluate failed"
                     self._publish()

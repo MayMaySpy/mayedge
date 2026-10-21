@@ -102,6 +102,7 @@ async def _evaluate_manage(runner: PlannerRunner, now: int, prices: list[Decimal
     if st.status == ChaseStatus.RUNNING and st.phase == "managing":
         await runner._trail_targets(now, prices)
 
+
 def resize_to_position(runner: PlannerRunner, pos: Decimal) -> None:
     """M6: resize every target's unfilled part to its share of ``pos``. The venue follows in _place_targets."""
     st = runner._state
@@ -144,6 +145,7 @@ def _due_step(runner: PlannerRunner) -> PlannedStep | None:
         if tp is not None and tp.status == "filled" and tp.filled >= tp.qty:
             due = step
     return due
+
 
 async def _take_step(runner: PlannerRunner) -> None:
     """M2–M4 and M9: step the stop toward profit, once per step, never back."""
@@ -194,6 +196,7 @@ async def _take_step(runner: PlannerRunner) -> None:
     st.steps_done = step.after
     st.reason = f"stop at {name}"
 
+
 def _step_price(runner: PlannerRunner, step: PlannedStep) -> Decimal:
     """M2: a step to a Trail target goes to the price it filled at."""
     st = runner._state
@@ -210,6 +213,7 @@ def _step_price(runner: PlannerRunner, step: PlannedStep) -> Decimal:
         return step.price
     avg = sum((f.price * f.qty for f in fills), ZERO) / qty
     return stop_price(runner._side(), avg, runner._tick())
+
 
 async def _trail_stop(runner: PlannerRunner, now: int, prices: list[Decimal]) -> None:
     """M10: past its start the stop follows the best price, never below the stepped stop."""
@@ -239,7 +243,9 @@ async def _trail_stop(runner: PlannerRunner, now: int, prices: list[Decimal]) ->
     if not point.active or point.trigger is None:
         return
     wanted = runner._venue_wanted(f, point)
-    if not runner._move_due("stop", f, venue_at=current, wanted=wanted, best=point.best or wanted, now=now):
+    if not runner._move_due(
+        "stop", f, venue_at=current, wanted=wanted, best=point.best or wanted, now=now
+    ):
         return
     moved = await runner._amend_trigger(stop, wanted)
     if moved is None:
@@ -252,6 +258,7 @@ async def _trail_stop(runner: PlannerRunner, now: int, prices: list[Decimal]) ->
     st.trail_moves["stop"] = now
     st.reason = f"stop trailing at {_fmt(wanted)}"
 
+
 async def _trail_targets(runner: PlannerRunner, now: int, prices: list[Decimal]) -> None:
     """P9 Trail: at its price a target puts on a reduce-only Stop for its size, and follows."""
     st = runner._state
@@ -263,7 +270,10 @@ async def _trail_targets(runner: PlannerRunner, now: int, prices: list[Decimal])
             if st.status != ChaseStatus.RUNNING:
                 return
 
-async def _trail_target(runner: PlannerRunner, t: PlannedTarget, now: int, prices: list[Decimal]) -> None:
+
+async def _trail_target(
+    runner: PlannerRunner, t: PlannedTarget, now: int, prices: list[Decimal]
+) -> None:
     st = runner._state
     p = st.params
     assert p is not None and t.trail_distance is not None
@@ -311,7 +321,9 @@ async def _trail_target(runner: PlannerRunner, t: PlannedTarget, now: int, price
         st.trail_moves[role] = now
         st.reason = f"TP{t.index} trailing at {_fmt(wanted)}"
         return
-    if not runner._move_due(role, f, venue_at=clip.price, wanted=wanted, best=point.best or wanted, now=now):
+    if not runner._move_due(
+        role, f, venue_at=clip.price, wanted=wanted, best=point.best or wanted, now=now
+    ):
         return
     moved = await runner._amend_trigger(clip, wanted)
     if moved is None:
@@ -321,7 +333,10 @@ async def _trail_target(runner: PlannerRunner, t: PlannedTarget, now: int, price
         return
     st.trail_moves[role] = now
 
-async def _fire_target(runner: PlannerRunner, role: str, live: list[Clip], left: Decimal, px: Decimal) -> None:
+
+async def _fire_target(
+    runner: PlannerRunner, role: str, live: list[Clip], left: Decimal, px: Decimal
+) -> None:
     """Trail L1, L3: close the target's size at market, then pull its backstop."""
     st = runner._state
     p = st.params
@@ -343,4 +358,3 @@ async def _fire_target(runner: PlannerRunner, role: str, live: list[Clip], left:
     for c in live:
         await runner._cancel_clip(c)
     st.reason = f"{role.upper()} fired at {_fmt(px)}"
-

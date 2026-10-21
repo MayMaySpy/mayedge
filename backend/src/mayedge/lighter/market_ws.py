@@ -278,6 +278,7 @@ def _account_index(raw: Any) -> int:
 def _print_ts(t: dict[str, Any]) -> int:
     return int(t.get("timestamp", t.get("time", 0)) or 0)
 
+
 async def handle_trades(gw: LighterGateway, msg: dict[str, Any], *, snapshot: bool = False) -> None:
     market_index = message_market_index(msg, "trade")
     if market_index is None:

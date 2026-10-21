@@ -19,7 +19,11 @@ Kind = Literal["entry", "stop", "tp"]
 Reference = Literal["mark", "last"]
 
 HUNDRED = Decimal("100")
-KIND_NAMES: dict[str, str] = {"entry": "Trail Entry", "stop": "Trail Stop", "tp": "Trail Take Profit"}
+KIND_NAMES: dict[str, str] = {
+    "entry": "Trail Entry",
+    "stop": "Trail Stop",
+    "tp": "Trail Take Profit",
+}
 
 
 class TrailRefused(ValueError):
@@ -205,13 +209,19 @@ def _check_entry(params: TrailParams, ctx: MarketContext) -> Resolved:
 
 def _check_stop(params: TrailParams, ctx: MarketContext, side: Side) -> Resolved:
     bare = follow_of(params, side, ctx.tick, floor=None)
-    start = engine.round_away(bare, params.start) if params.start else engine.trigger_at(bare, ctx.mark)
+    start = (
+        engine.round_away(bare, params.start) if params.start else engine.trigger_at(bare, ctx.mark)
+    )
     if start <= 0:
         raise TrailRefused("S3", "The start is below 0")
     # A sell stop sits below mark, a buy stop above it.
     if not engine.better(bare, ctx.mark, start):
         raise TrailRefused("S3", "The start is on the wrong side of mark")
-    if ctx.liq_price is not None and ctx.liq_price > 0 and not engine.better(bare, start, ctx.liq_price):
+    if (
+        ctx.liq_price is not None
+        and ctx.liq_price > 0
+        and not engine.better(bare, start, ctx.liq_price)
+    ):
         raise TrailRefused("S3", "The start is beyond the Liquidation price")
     f = follow_of(params, side, ctx.tick, floor=start)
     _check_activation(f, ctx, required=False)

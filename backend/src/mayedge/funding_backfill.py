@@ -160,7 +160,9 @@ async def backfill_funding(
         if store.funding_backfill_done(idx):
             continue
         try:
-            got, oldest = await _backfill_market(idx, fetch, reading, end_ms, oldest_wanted, this_hour)
+            got, oldest = await _backfill_market(
+                idx, fetch, reading, end_ms, oldest_wanted, this_hour
+            )
         except Exception:
             logger.exception("funding backfill failed market=%s; retried next run", idx)
             continue
@@ -332,9 +334,7 @@ async def backfill_funding_days(
         )
     reading = calibrate_days(samples)
     if reading is None or reading.agg == "last":
-        best = ", ".join(
-            f"{r} {m} match {x} miss" for r, m, x in score_day_readings(samples)[:3]
-        )
+        best = ", ".join(f"{r} {m} match {x} miss" for r, m, x in score_day_readings(samples)[:3])
         logger.warning(
             "funding days backfill skipped: %s (%d probe markets). Best readings: %s",
             "the venue's day is its last hour, not a mean" if reading else "no single reading fits",

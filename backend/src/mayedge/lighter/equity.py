@@ -128,9 +128,7 @@ def format_cross_liquidation_price(
     return fmt_decimal(liq) or "0"
 
 
-def trade_available_usd(
-    available: float, portfolio_margin: float, cross_portfolio: float
-) -> float:
+def trade_available_usd(available: float, portfolio_margin: float, cross_portfolio: float) -> float:
     """Free margin for new orders: USDC available + LTV of non-quote collateral.
 
     Lighter ``available_balance`` is USDC-only. Order risk checks use TAV, so

@@ -80,7 +80,9 @@ def flush_funding_prints(rows: list[dict[str, Any]]) -> int:
     """Upsert each perp's print for its hour. Prints are never dropped."""
     if not rows:
         return 0
-    payload = [(int(row["market_index"]), int(row["hour_index"]), float(row["rate"])) for row in rows]
+    payload = [
+        (int(row["market_index"]), int(row["hour_index"]), float(row["rate"])) for row in rows
+    ]
     with _lock:
         conn = _connect()
         conn.executemany(
@@ -99,7 +101,9 @@ def insert_missing_funding_prints(rows: list[dict[str, Any]]) -> int:
     """Backfilled prints. A print the desk recorded live is never replaced."""
     if not rows:
         return 0
-    payload = [(int(row["market_index"]), int(row["hour_index"]), float(row["rate"])) for row in rows]
+    payload = [
+        (int(row["market_index"]), int(row["hour_index"]), float(row["rate"])) for row in rows
+    ]
     with _lock:
         conn = _connect()
         before = conn.total_changes
@@ -141,7 +145,9 @@ def insert_funding_days(rows: list[dict[str, Any]]) -> int:
     """Funding days from the venue: the mean 1h rate of one UTC day, in percent."""
     if not rows:
         return 0
-    payload = [(int(row["market_index"]), int(row["day_index"]), float(row["rate"])) for row in rows]
+    payload = [
+        (int(row["market_index"]), int(row["day_index"]), float(row["rate"])) for row in rows
+    ]
     with _lock:
         conn = _connect()
         conn.executemany(
@@ -170,7 +176,9 @@ def _days_key(market_index: int) -> str:
 def funding_days_backfill_done(market_index: int) -> bool:
     with _lock:
         conn = _connect()
-        row = conn.execute("SELECT 1 FROM meta WHERE key = ?", (_days_key(market_index),)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM meta WHERE key = ?", (_days_key(market_index),)
+        ).fetchone()
     return row is not None
 
 
@@ -197,7 +205,9 @@ def funding_backfill_done(market_index: int) -> bool:
 def mark_funding_backfill_done(market_index: int, oldest_hour: int | None) -> None:
     with _lock:
         conn = _connect()
-        _set_meta(conn, _backfill_key(market_index), str(oldest_hour if oldest_hour is not None else ""))
+        _set_meta(
+            conn, _backfill_key(market_index), str(oldest_hour if oldest_hour is not None else "")
+        )
         conn.commit()
 
 

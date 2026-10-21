@@ -107,6 +107,7 @@ async def _evaluate_entry(runner: PlannerRunner, now: int, prices: list[Decimal]
         return
     await runner._entry_over(now, filled, avg, closed_at=entry.closed_at)
 
+
 async def _work_chase(runner: PlannerRunner, now: int) -> None:
     st = runner._state
     p, plan = st.params, st.plan
@@ -159,7 +160,11 @@ async def _work_chase(runner: PlannerRunner, now: int) -> None:
         live.closed_at = now
         live = None
         runner._entry_vanished_ms = now
-    if live is None and runner._entry_vanished_ms and now - runner._entry_vanished_ms < MISSING_GRACE_MS:
+    if (
+        live is None
+        and runner._entry_vanished_ms
+        and now - runner._entry_vanished_ms < MISSING_GRACE_MS
+    ):
         st.reason = "entry waits for the last Clip's fills"  # E13
         return
     view = runner._chase_view()
@@ -203,6 +208,7 @@ async def _work_chase(runner: PlannerRunner, now: int) -> None:
         return
     await runner._amend_chase(live, quote.price, now)
 
+
 async def _rest_entry(runner: PlannerRunner, price: Decimal, qty: Decimal, now: int) -> str | None:
     """A post-only entry Clip: a Chase entry's (E10) or a Ladder rung (EL1).
 
@@ -233,6 +239,7 @@ async def _rest_entry(runner: PlannerRunner, price: Decimal, qty: Decimal, now: 
     st.reason = f"entry resting at {_fmt(price)}"
     return None
 
+
 async def _amend_chase(runner: PlannerRunner, clip: Clip, price: Decimal, now: int) -> None:
     """E10: move the Clip in place as the book walks."""
     await runner._await_order_index(clip)
@@ -256,6 +263,7 @@ async def _amend_chase(runner: PlannerRunner, clip: Clip, price: Decimal, now: i
     runner._state.ledger.amend(clip, price=price, now=now)
     runner._entry_moved_ms = now
     runner._state.reason = f"entry resting at {_fmt(price)}"
+
 
 async def _work_ladder(runner: PlannerRunner, now: int) -> None:
     st = runner._state
@@ -344,9 +352,14 @@ async def _work_ladder(runner: PlannerRunner, now: int) -> None:
             runner._gave_up.add(f"rung {_fmt(r.price)}")
     resting = len(live) + placed
     waiting = len(pending) - placed
-    st.reason = f"{resting} rungs resting, {waiting} waiting" if waiting else f"{resting} rungs resting"
+    st.reason = (
+        f"{resting} rungs resting, {waiting} waiting" if waiting else f"{resting} rungs resting"
+    )
 
-def _pending_rungs(runner: PlannerRunner, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal) -> list[Rung]:
+
+def _pending_rungs(
+    runner: PlannerRunner, rungs: tuple[Rung, ...], clips: list[Clip], half: Decimal
+) -> list[Rung]:
     """EL1: rungs with nothing resting and something left to fill, at what is left."""
     ctx, _ = venue.market_context(runner._exec(), runner._state.market_index)
     out: list[Rung] = []
@@ -365,6 +378,7 @@ def _pending_rungs(runner: PlannerRunner, rungs: tuple[Rung, ...], clips: list[C
             continue
         out.append(dataclasses.replace(r, qty=left))
     return out
+
 
 async def _track_entry(runner: PlannerRunner, now: int, prices: list[Decimal]) -> None:
     """E9: follow the best price, and fire the entry when the price comes back."""
@@ -396,6 +410,7 @@ async def _track_entry(runner: PlannerRunner, now: int, prices: list[Decimal]) -
     st.trails["entry"] = point
     st.reason = "entry following" if point.active else "entry waits for its Activation"
 
+
 async def _fire_entry(runner: PlannerRunner, px: Decimal) -> None:
     """E9 and P2: size from the price it fires at, check S1 again, send it at market."""
     st = runner._state
@@ -422,4 +437,3 @@ async def _fire_entry(runner: PlannerRunner, px: Decimal) -> None:
         return
     await runner._send_entry()
     st.reason = f"entry fired at {_fmt(px)}"
-

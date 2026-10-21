@@ -1,6 +1,6 @@
 """Wall time of the heavy desk reads. Never points at the live Docker volume.
 
-    uv run python scripts/profile_reads.py /path/to/copy.db
+uv run python scripts/profile_reads.py /path/to/copy.db
 """
 
 from __future__ import annotations

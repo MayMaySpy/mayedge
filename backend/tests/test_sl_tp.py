@@ -222,7 +222,6 @@ class StopTakeOrderTests(IsolatedAsyncioTestCase):
         signer.modify_order.assert_not_called()
         signer.create_sl_limit_order.assert_awaited()
 
-
     def _live_stop(self) -> OpenOrder:
         return OpenOrder(
             order_index=77,

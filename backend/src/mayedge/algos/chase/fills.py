@@ -228,7 +228,9 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 return row
         return None
 
-    async def _refresh_open_orders(self, *, rest: bool | None = None) -> list[dict[str, Any]] | None:
+    async def _refresh_open_orders(
+        self, *, rest: bool | None = None
+    ) -> list[dict[str, Any]] | None:
         """Open orders. WS cache when the account feed is live; REST only as fallback."""
         ex = self._exec()
         if not ex.enabled:
@@ -297,18 +299,12 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                     cursor=cursor,
                     limit=REST_TRADES_PAGE_LIMIT,
                 )
-                trades = (
-                    resp.get("trades")
-                    if is_obj(resp)
-                    else getattr(resp, "trades", None)
-                )
+                trades = resp.get("trades") if is_obj(resp) else getattr(resp, "trades", None)
                 if trades:
                     self._pending_trades.extend(trades)
                 self._drain_trades()
                 next_cursor = (
-                    resp.get("next_cursor")
-                    if is_obj(resp)
-                    else getattr(resp, "next_cursor", None)
+                    resp.get("next_cursor") if is_obj(resp) else getattr(resp, "next_cursor", None)
                 )
                 if not next_cursor:
                     return True
