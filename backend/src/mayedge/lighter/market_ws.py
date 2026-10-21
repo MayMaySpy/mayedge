@@ -397,7 +397,7 @@ async def handle_candle(gw: LighterGateway, msg: dict[str, Any]) -> None:
     parsed = parsed[-_MAX_MINUTE_CANDLES:]
     resolution = candle_channel_resolution(msg.get("channel"))
     if resolution is not None:
-        gw.on_tone_candles(market_index, resolution, parsed)
+        await gw.on_tone_candles(market_index, resolution, parsed)
     if market_index != gw._current_market_index or resolution not in (None, "1m"):
         return
     action, _ = split_ws_type(msg.get("type"))
@@ -495,7 +495,7 @@ async def _tone_conn(gw: LighterGateway, epoch: int, channels: list[str]) -> Non
                 if msg.get("error") or kind == "error":
                     logger.warning("tone ws error: %s", msg.get("error") or msg)
                     continue
-                _apply_tone_candles(gw, msg)
+                await _apply_tone_candles(gw, msg)
         finally:
             for task in side:
                 task.cancel()
@@ -510,7 +510,7 @@ async def _tone_ping(ws: Any) -> None:
         await ws_send(ws, {"type": "ping"})
 
 
-def _apply_tone_candles(gw: LighterGateway, msg: dict[str, Any]) -> None:
+async def _apply_tone_candles(gw: LighterGateway, msg: dict[str, Any]) -> None:
     resolution = candle_channel_resolution(msg.get("channel"))
     market_index = parse_channel_market(msg.get("channel"), "candle")
     if resolution is None or market_index is None:
@@ -524,4 +524,4 @@ def _apply_tone_candles(gw: LighterGateway, msg: dict[str, Any]) -> None:
         if bar is not None:
             bars.append(bar)
     if bars:
-        gw.on_tone_candles(market_index, resolution, bars)
+        await gw.on_tone_candles(market_index, resolution, bars)

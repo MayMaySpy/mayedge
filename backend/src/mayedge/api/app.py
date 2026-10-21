@@ -37,6 +37,7 @@ from mayedge.loop_watch import snapshot as loop_lag_snapshot
 from mayedge.portfolio_sync import start as start_portfolio_sync
 from mayedge.portfolio_sync import stop as stop_portfolio_sync
 from mayedge.push import TelegramPusher, boot_text, freeze_text, load_push_settings
+from mayedge.tone_compute import close as close_tone_pool
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,7 @@ async def lifespan(app: FastAPI):
         await pusher.stop()
         await fanout.stop()
         await desk.stop()
+        close_tone_pool()
         if backup is not None:
             await backup.stop()
         await watch.stop()

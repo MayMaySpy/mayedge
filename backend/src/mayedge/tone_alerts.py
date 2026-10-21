@@ -137,6 +137,25 @@ class ToneBook:
                     out.append(key)
         return out
 
+    def _open(
+        self,
+        market_index: int,
+        resolution: str,
+        bars: Sequence[Candle],
+        *,
+        now: float,
+    ) -> tuple[tuple[int, str], _Window] | None:
+        if resolution not in self.timeframes:
+            return None
+        step = TONE_TIMEFRAME_SECONDS[resolution]
+        key = (market_index, resolution)
+        window = _Window(bars=[], scored=set(), seeded=True)
+        window.bars = _merge([], bars, step, window.scored)
+        forming = _forming_time(window.bars, now, step)
+        window.scored = {bar.time for bar in window.bars if bar.time != forming}
+        self._series[key] = window
+        return key, window
+
     def seed(
         self,
         market_index: int,
@@ -145,28 +164,75 @@ class ToneBook:
         *,
         now: float,
     ) -> list[ToneHit]:
-        if resolution not in self.timeframes:
+        opened = self._open(market_index, resolution, bars, now=now)
+        if opened is None:
             return []
-        step = TONE_TIMEFRAME_SECONDS[resolution]
-        key = (market_index, resolution)
-        window = _Window(bars=[], scored=set(), seeded=True)
-        window.bars = _merge([], bars, step, window.scored)
-        forming = _forming_time(window.bars, now, step)
-        window.scored = {bar.time for bar in window.bars if bar.time != forming}
-        self._series[key] = window
+        key, window = opened
         self._stand(market_index, resolution, window)
+        return self._finish_pending(key, market_index, resolution, window, now=now)
+
+    async def seed_off_loop(
+        self,
+        market_index: int,
+        resolution: str,
+        bars: Sequence[Candle],
+        *,
+        now: float,
+    ) -> list[ToneHit]:
+        """Same as ``seed``, with the tone math in another process."""
+        opened = self._open(market_index, resolution, bars, now=now)
+        if opened is None:
+            return []
+        key, window = opened
+        await self._stand_off(market_index, resolution, window)
+        pending = self._pending.pop(key, [])
+        if not pending:
+            return []
+        return await self._apply_off(market_index, resolution, window, pending, now=now)
+
+    def _finish_pending(
+        self,
+        key: tuple[int, str],
+        market_index: int,
+        resolution: str,
+        window: _Window,
+        *,
+        now: float,
+    ) -> list[ToneHit]:
         pending = self._pending.pop(key, [])
         if not pending:
             return []
         return self._apply(market_index, resolution, window, pending, now=now)
 
-    def _stand(self, market_index: int, resolution: str, window: _Window) -> None:
+    def _real_tones(self, window: _Window) -> bool:
+        return (
+            self._tones_fn is candle_tones
+            and bool(window.scored)
+            and len(window.bars) >= self._min_bars
+        )
+
+    async def _stand_off(self, market_index: int, resolution: str, window: _Window) -> None:
+        if not self._real_tones(window):
+            self._stand(market_index, resolution, window)
+            return
+        from mayedge.tone_compute import tones
+
+        self._stand(market_index, resolution, window, tones=await tones(window.bars))
+
+    def _stand(
+        self,
+        market_index: int,
+        resolution: str,
+        window: _Window,
+        tones: list[str | None] | None = None,
+    ) -> None:
         """Bars loaded at boot raise nothing, but the last closed one still belongs on the board."""
         self._standing.pop((market_index, resolution), None)
         if not window.scored or len(window.bars) < self._min_bars:
             return
         last = max(window.scored)
-        for i, tone in enumerate(self._tones_fn(window.bars)):
+        found = self._tones_fn(window.bars) if tones is None else tones
+        for i, tone in enumerate(found):
             if window.bars[i].time == last and tone in ALERT_TONES:
                 self._standing[(market_index, resolution)] = ToneHit(
                     market_index, resolution, last, tone, window.bars[i].close
@@ -185,12 +251,35 @@ class ToneBook:
         key = (market_index, resolution)
         window = self._series.get(key)
         if window is None or not window.seeded:
-            bucket = self._pending.setdefault(key, [])
-            bucket.extend(bars)
-            if len(bucket) > _PENDING_CAP:
-                del bucket[:-_PENDING_CAP]
+            self._park(key, bars)
             return []
         return self._apply(market_index, resolution, window, bars, now=now)
+
+    async def observe_off_loop(
+        self,
+        market_index: int,
+        resolution: str,
+        bars: Sequence[Candle],
+        *,
+        now: float,
+    ) -> list[ToneHit]:
+        """Same as ``observe``, with the tone math in another process."""
+        if resolution not in self.timeframes or not bars:
+            return []
+        key = (market_index, resolution)
+        window = self._series.get(key)
+        if window is None or not window.seeded:
+            self._park(key, bars)
+            return []
+        if self._tones_fn is not candle_tones:
+            return self._apply(market_index, resolution, window, bars, now=now)
+        return await self._apply_off(market_index, resolution, window, bars, now=now)
+
+    def _park(self, key: tuple[int, str], bars: Sequence[Candle]) -> None:
+        bucket = self._pending.setdefault(key, [])
+        bucket.extend(bars)
+        if len(bucket) > _PENDING_CAP:
+            del bucket[:-_PENDING_CAP]
 
     def due(self, *, now: float) -> list[tuple[int, str]]:
         """Seeded series whose latest bar is past the close grace and still unscored."""
@@ -227,6 +316,15 @@ class ToneBook:
             return None
         return last.time
 
+    def _stage(self, window: _Window, resolution: str, incoming: Sequence[Candle]) -> list[int]:
+        step = TONE_TIMEFRAME_SECONDS[resolution]
+        window.bars = _merge(window.bars, incoming, step, window.scored)
+        return [
+            bar.time
+            for bar in window.bars
+            if bar.time not in window.scored and any(other.time > bar.time for other in window.bars)
+        ]
+
     def _apply(
         self,
         market_index: int,
@@ -237,16 +335,31 @@ class ToneBook:
         now: float,
     ) -> list[ToneHit]:
         del now
-        step = TONE_TIMEFRAME_SECONDS[resolution]
-        window.bars = _merge(window.bars, incoming, step, window.scored)
-        to_score = [
-            bar.time
-            for bar in window.bars
-            if bar.time not in window.scored and any(other.time > bar.time for other in window.bars)
-        ]
+        to_score = self._stage(window, resolution, incoming)
         if not to_score:
             return []
         return self._score(market_index, resolution, window, to_score)
+
+    async def _apply_off(
+        self,
+        market_index: int,
+        resolution: str,
+        window: _Window,
+        incoming: Sequence[Candle],
+        *,
+        now: float,
+    ) -> list[ToneHit]:
+        del now
+        to_score = self._stage(window, resolution, incoming)
+        if not to_score:
+            return []
+        if len(window.bars) < self._min_bars or self._tones_fn is not candle_tones:
+            return self._score(market_index, resolution, window, to_score)
+        from mayedge.tone_compute import tones
+
+        return self._score(
+            market_index, resolution, window, to_score, tones=await tones(window.bars)
+        )
 
     def _score(
         self,
@@ -254,13 +367,14 @@ class ToneBook:
         resolution: str,
         window: _Window,
         times: list[int],
+        tones: list[str | None] | None = None,
     ) -> list[ToneHit]:
         key = (market_index, resolution)
         if len(window.bars) < self._min_bars:
             window.scored.update(times)
             self._standing.pop(key, None)
             return []
-        tones = self._tones_fn(window.bars)
+        found = self._tones_fn(window.bars) if tones is None else tones
         index = {bar.time: i for i, bar in enumerate(window.bars)}
         hits: list[ToneHit] = []
         for bar_time in sorted(times):
@@ -268,9 +382,9 @@ class ToneBook:
             # T5: each close replaces whatever stood before it.
             self._standing.pop(key, None)
             i = index.get(bar_time)
-            if i is None or i >= len(tones):
+            if i is None or i >= len(found):
                 continue
-            tone = tones[i]
+            tone = found[i]
             if tone not in ALERT_TONES:
                 continue
             hit = ToneHit(

@@ -879,7 +879,7 @@ class LighterGateway:
     def _perp_indexes(self) -> list[int]:
         return sorted(meta.market_index for meta in self._markets.values() if meta.is_perp)
 
-    def on_tone_candles(
+    async def on_tone_candles(
         self,
         market_index: int,
         resolution: str,
@@ -903,7 +903,7 @@ class LighterGateway:
             alerts.on_minute_bars(market_index, candles)
         book = getattr(self, "_tone_book", None)
         if book is not None and resolution in book.timeframes:
-            book.observe(market_index, resolution, candles, now=time.time())
+            await book.observe_off_loop(market_index, resolution, candles, now=time.time())
 
     def tone_channels(self) -> list[str]:
         labels = set(self._tone_book.timeframes)
@@ -1091,7 +1091,9 @@ class LighterGateway:
                 continue
             if generation != self._tone_generation:
                 return
-            self._tone_book.seed(market_index, resolution, candles, now=time.time())
+            await self._tone_book.seed_off_loop(
+                market_index, resolution, candles, now=time.time()
+            )
 
 
 gateway = LighterGateway()

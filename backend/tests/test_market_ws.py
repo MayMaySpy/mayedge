@@ -122,7 +122,10 @@ class TestToneConnReadsWhileSubscribing(unittest.IsolatedAsyncioTestCase):
         gw = _gw()
         fake = _FakeToneWs()
         seen: list[tuple[int, str]] = []
-        gw.on_tone_candles = lambda mi, res, _bars: seen.append((mi, res))  # type: ignore[method-assign]
+        async def on_tone(mi: int, res: str, _bars: object) -> None:
+            seen.append((mi, res))
+
+        gw.on_tone_candles = on_tone  # type: ignore[method-assign]
         stalled = asyncio.Event()
         calls = 0
 
