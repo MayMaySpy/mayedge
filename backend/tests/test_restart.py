@@ -369,7 +369,7 @@ class RestartTests(IsolatedAsyncioTestCase):
         venue = FakeVenue()
         book = PlannerBook(execution=lambda: venue.execution(), broadcast=lambda _p: None)
         again: object | None = None
-        with patch.object(util, "now_ms", clock):
+        with patch("mayedge.algos.common.now_ms", clock):
             await book.start_from_body(
                 {
                     "market_index": MI,

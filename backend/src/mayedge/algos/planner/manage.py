@@ -29,10 +29,6 @@ if TYPE_CHECKING:
 ZERO = Decimal("0")
 
 
-def _fmt(d: Decimal | None) -> str | None:
-    return fmt_decimal(d)
-
-
 def _sign(side: str) -> int:
     return 1 if side == "buy" else -1
 
@@ -79,7 +75,7 @@ async def _evaluate_manage(runner: PlannerRunner, now: int, prices: list[Decimal
                 )
                 if not pending:
                     resize_to_position(runner, pos)
-                    st.reason = f"Position reduced to {_fmt(pos)}: targets resized"
+                    st.reason = f"Position reduced to {fmt_decimal(pos)}: targets resized"
             else:
                 st.status = ChaseStatus.PAUSED
                 st.reason = "position changed"  # M6
@@ -177,7 +173,7 @@ async def _take_step(runner: PlannerRunner) -> None:
             runner._close_side(),
             role="sl",
             kind="market",
-            trigger=_fmt(price) or "0",
+            trigger=fmt_decimal(price) or "0",
             slippage=p.slippage if p else 0.01,
         )
     except ValueError as e:
@@ -237,7 +233,7 @@ async def _trail_stop(runner: PlannerRunner, now: int, prices: list[Decimal]) ->
         if p.reference == "last" and trigger is not None and engine.crossed(f, trigger, px):
             st.trails["stop"] = point
             await runner._close_at_market()  # Trail L1
-            st.reason = f"trail stop: closed at market at {_fmt(px)}"
+            st.reason = f"trail stop: closed at market at {fmt_decimal(px)}"
             return
     st.trails["stop"] = point
     if not point.active or point.trigger is None:
@@ -256,7 +252,7 @@ async def _trail_stop(runner: PlannerRunner, now: int, prices: list[Decimal]) ->
         return
     st.stop_trigger = wanted
     st.trail_moves["stop"] = now
-    st.reason = f"stop trailing at {_fmt(wanted)}"
+    st.reason = f"stop trailing at {fmt_decimal(wanted)}"
 
 
 async def _trail_targets(runner: PlannerRunner, now: int, prices: list[Decimal]) -> None:
@@ -319,7 +315,7 @@ async def _trail_target(
             await runner._fire_target(role, [], left, runner._mark())  # Trail V2
             return
         st.trail_moves[role] = now
-        st.reason = f"TP{t.index} trailing at {_fmt(wanted)}"
+        st.reason = f"TP{t.index} trailing at {fmt_decimal(wanted)}"
         return
     if not runner._move_due(
         role, f, venue_at=clip.price, wanted=wanted, best=point.best or wanted, now=now
@@ -349,7 +345,7 @@ async def _fire_target(
     await runner._exec().create_market_order(
         market_index=st.market_index,
         side=runner._close_side(),
-        size=_fmt(qty),
+        size=fmt_decimal(qty),
         slippage=p.slippage,
         reduce_only=True,
         client_order_index=clip.client_order_index,
@@ -357,4 +353,4 @@ async def _fire_target(
     st.trail_fired.add(role)
     for c in live:
         await runner._cancel_clip(c)
-    st.reason = f"{role.upper()} fired at {_fmt(px)}"
+    st.reason = f"{role.upper()} fired at {fmt_decimal(px)}"

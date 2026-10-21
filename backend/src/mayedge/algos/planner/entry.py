@@ -9,12 +9,6 @@ from typing import TYPE_CHECKING
 from mayedge.algos.chase.config import ACK_WAIT_MS, MIN_REQUOTE_MS
 from mayedge.algos.chase.iceberg import Action, ChaseIcebergParams, decide
 from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.chase.util import (
-    _is_min_size,
-    _is_order_not_found,
-    _is_rate_limit,
-    _is_would_cross,
-)
 from mayedge.algos.ladder.plan import Rung, is_passive, sort_by_closeness
 from mayedge.algos.ledger import Clip
 from mayedge.algos.planner import venue
@@ -36,16 +30,13 @@ from mayedge.algos.trail import engine
 from mayedge.algos.trail.engine import Point
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
+from mayedge.lighter.errors import is_blocked, is_min_size, is_order_not_found, is_would_cross
 from mayedge.numbers import check_notional, fmt_decimal
 
 if TYPE_CHECKING:
     from mayedge.algos.planner.job import PlannerRunner
 
 ZERO = Decimal("0")
-
-
-def _fmt(d: Decimal | None) -> str | None:
-    return fmt_decimal(d)
 
 
 def _sign(side: str) -> int:
@@ -200,7 +191,7 @@ async def _work_chase(runner: PlannerRunner, now: int) -> None:
         await runner._rest_entry(quote.price, quote.qty, now)
         return
     if live.price == quote.price:
-        st.reason = f"entry resting at {_fmt(live.price)}"
+        st.reason = f"entry resting at {fmt_decimal(live.price)}"
         return
     if not live.seen_on_book and now - live.placed_at < ACK_WAIT_MS:
         return
@@ -222,8 +213,8 @@ async def _rest_entry(runner: PlannerRunner, price: Decimal, qty: Decimal, now: 
         await runner._exec().create_limit_order(
             market_index=st.market_index,
             side=p.side,
-            size=_fmt(qty),
-            price=_fmt(price),
+            size=fmt_decimal(qty),
+            price=fmt_decimal(price),
             time_in_force="post_only",
             reduce_only=False,
             client_order_index=clip.client_order_index,
@@ -231,12 +222,12 @@ async def _rest_entry(runner: PlannerRunner, price: Decimal, qty: Decimal, now: 
     except Exception as e:
         clip.status = "cancelled"
         clip.closed_at = now
-        if _is_would_cross(e) or _is_min_size(e):
+        if is_would_cross(e) or is_min_size(e):
             st.reason = f"entry waits: {e}"
-            return "min" if _is_min_size(e) else "cross"
+            return "min" if is_min_size(e) else "cross"
         raise
     runner._entry_moved_ms = now
-    st.reason = f"entry resting at {_fmt(price)}"
+    st.reason = f"entry resting at {fmt_decimal(price)}"
     return None
 
 
@@ -249,20 +240,20 @@ async def _amend_chase(runner: PlannerRunner, clip: Clip, price: Decimal, now: i
         await runner._exec().modify_order(
             market_index=runner._state.market_index,
             order_index=clip.order_index,
-            price=_fmt(price) or "0",
-            size=_fmt(clip.remaining if clip.remaining > 0 else clip.qty) or "0",
+            price=fmt_decimal(price) or "0",
+            size=fmt_decimal(clip.remaining if clip.remaining > 0 else clip.qty) or "0",
         )
     except Exception as e:
-        if _is_would_cross(e):
+        if is_would_cross(e):
             runner._entry_moved_ms = now  # keep the resting price; try again later
             return
-        if _is_order_not_found(e):
+        if is_order_not_found(e):
             clip.missing_since = clip.missing_since or now
             return
         raise
     runner._state.ledger.amend(clip, price=price, now=now)
     runner._entry_moved_ms = now
-    runner._state.reason = f"entry resting at {_fmt(price)}"
+    runner._state.reason = f"entry resting at {fmt_decimal(price)}"
 
 
 async def _work_ladder(runner: PlannerRunner, now: int) -> None:
@@ -341,7 +332,7 @@ async def _work_ladder(runner: PlannerRunner, now: int) -> None:
         try:
             refused = await runner._rest_entry(r.price, r.qty, now)
         except Exception as e:
-            if isinstance(e, BudgetRefused) or _is_rate_limit(e):
+            if isinstance(e, BudgetRefused) or is_blocked(e):
                 runner._backoff_until = now + RATE_LIMIT_COOLDOWN_MS
                 break
             raise
@@ -349,7 +340,7 @@ async def _work_ladder(runner: PlannerRunner, now: int) -> None:
             placed += 1
         elif refused == "min":
             # Under the venue minimum: the rung is as full as it gets.
-            runner._gave_up.add(f"rung {_fmt(r.price)}")
+            runner._gave_up.add(f"rung {fmt_decimal(r.price)}")
     resting = len(live) + placed
     waiting = len(pending) - placed
     st.reason = (
@@ -364,7 +355,7 @@ def _pending_rungs(
     ctx, _ = venue.market_context(runner._exec(), runner._state.market_index)
     out: list[Rung] = []
     for r in rungs:
-        if f"rung {_fmt(r.price)}" in runner._gave_up:
+        if f"rung {fmt_decimal(r.price)}" in runner._gave_up:
             continue
         mine = [c for c in clips if c.price == r.price]
         if any(c.status == "live" for c in mine):
@@ -436,4 +427,4 @@ async def _fire_entry(runner: PlannerRunner, px: Decimal) -> None:
         runner._end(f"entry did not fire: {e}")
         return
     await runner._send_entry()
-    st.reason = f"entry fired at {_fmt(px)}"
+    st.reason = f"entry fired at {fmt_decimal(px)}"

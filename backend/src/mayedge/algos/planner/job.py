@@ -13,15 +13,10 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from mayedge.algos.chase import util
+from mayedge.algos import common
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import MarketView
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import (
-    _is_invalid_nonce,
-    _is_order_not_found,
-    _is_rate_limit,
-)
 from mayedge.algos.ladder.plan import Rung
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.algos.planner import entry as entry_phase
@@ -55,16 +50,13 @@ from mayedge.algos.trail import engine
 from mayedge.algos.trail.engine import Follow, Point
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
+from mayedge.lighter.errors import is_blocked, is_invalid_nonce, is_order_not_found
 from mayedge.numbers import check_notional, fmt_decimal
 from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0")
-
-
-def _fmt(d: Decimal | None) -> str | None:
-    return fmt_decimal(d)
 
 
 def _sign(side: str) -> int:
@@ -118,18 +110,18 @@ class PlannerRunner:
             "symbol": st.symbol,
             "reduce_only": False,
             "side": p.side if p else None,
-            "qty": _fmt(plan.size) if plan else None,
+            "qty": fmt_decimal(plan.size) if plan else None,
             "display_qty": None,
             "offset_bps": None,
             # The stop and targets are on the chart as orders, not as a band.
-            "price_floor": _fmt(band.low) if band else None,
-            "price_ceiling": _fmt(band.high) if band else None,
-            "remaining": _fmt(max(ZERO, plan.size - st.entry_filled)) if plan else None,
-            "filled": _fmt(st.entry_filled),
+            "price_floor": fmt_decimal(band.low) if band else None,
+            "price_ceiling": fmt_decimal(band.high) if band else None,
+            "remaining": fmt_decimal(max(ZERO, plan.size - st.entry_filled)) if plan else None,
+            "filled": fmt_decimal(st.entry_filled),
             "quote_action": "rest" if st.status == ChaseStatus.RUNNING else "pause",
             "reason": st.reason,
-            "rest_price": _fmt(entry.price) if entry and entry.status == "live" else None,
-            "rest_qty": _fmt(entry.remaining) if entry and entry.status == "live" else None,
+            "rest_price": fmt_decimal(entry.price) if entry and entry.status == "live" else None,
+            "rest_qty": fmt_decimal(entry.remaining) if entry and entry.status == "live" else None,
             "working_coi": entry.client_order_index if entry and entry.status == "live" else None,
             "working_order_index": (
                 str(entry.order_index)
@@ -232,7 +224,7 @@ class PlannerRunner:
             client_order_index=self._book.alloc_coi(),
             price=price,
             qty=qty,
-            now=util.now_ms(),
+            now=common.now_ms(),
             side=self._side() if role == "entry" else self._close_side(),
         )
         st.roles[clip.seq] = role
@@ -280,7 +272,7 @@ class PlannerRunner:
                 await ex.create_market_order(
                     market_index=st.market_index,
                     side=p.side,
-                    size=_fmt(plan.size),
+                    size=fmt_decimal(plan.size),
                     slippage=p.slippage,
                     reduce_only=False,
                     client_order_index=clip.client_order_index,
@@ -289,15 +281,15 @@ class PlannerRunner:
                 await ex.create_limit_order(
                     market_index=st.market_index,
                     side=p.side,
-                    size=_fmt(plan.size),
-                    price=_fmt(plan.entry),
+                    size=fmt_decimal(plan.size),
+                    price=fmt_decimal(plan.entry),
                     time_in_force="gtt",
                     reduce_only=False,
                     client_order_index=clip.client_order_index,
                 )
         except Exception:
             clip.status = "cancelled"
-            clip.closed_at = util.now_ms()
+            clip.closed_at = common.now_ms()
             raise
 
     async def _send_trigger(
@@ -311,17 +303,17 @@ class PlannerRunner:
             await ex.create_trigger_leg(
                 self._state.market_index,
                 self._close_side(),
-                _fmt(size) or "0",
+                fmt_decimal(size) or "0",
                 role=role,
                 kind=kind,
-                trigger=_fmt(trigger) or "0",
-                price=_fmt(trigger) if kind == "limit" else None,
+                trigger=fmt_decimal(trigger) or "0",
+                price=fmt_decimal(trigger) if kind == "limit" else None,
                 slippage=p.slippage if p else 0.01,
                 client_order_index=clip.client_order_index,
             )
         except Exception:
             clip.status = "cancelled"
-            clip.closed_at = util.now_ms()
+            clip.closed_at = common.now_ms()
             raise
 
     async def _place_stop(self) -> None:
@@ -350,7 +342,7 @@ class PlannerRunner:
         await self._exec().create_market_order(
             market_index=st.market_index,
             side=self._close_side(),
-            size=_fmt(pos),
+            size=fmt_decimal(pos),
             slippage=p.slippage if p else 0.01,
             reduce_only=True,
             client_order_index=clip.client_order_index,
@@ -400,15 +392,15 @@ class PlannerRunner:
             await self._exec().create_limit_order(
                 market_index=st.market_index,
                 side=self._close_side(),
-                size=_fmt(qty),
-                price=_fmt(price),
+                size=fmt_decimal(qty),
+                price=fmt_decimal(price),
                 time_in_force="gtt",
                 reduce_only=True,
                 client_order_index=clip.client_order_index,
             )
         except Exception:
             clip.status = "cancelled"
-            clip.closed_at = util.now_ms()
+            clip.closed_at = common.now_ms()
             raise
 
     async def _await_order_index(self, clip: Clip) -> None:
@@ -416,7 +408,7 @@ class PlannerRunner:
         for _ in range(CANCEL_WAIT_TRIES):
             if clip.order_index or clip.status != "live":
                 return
-            self._sync_open(util.now_ms())
+            self._sync_open(common.now_ms())
             if clip.order_index or clip.status != "live":
                 return
             self._exec().kick_refresh()
@@ -434,10 +426,10 @@ class PlannerRunner:
         try:
             await self._exec().cancel_order(self._state.market_index, clip.order_index)
         except Exception as e:
-            if not _is_order_not_found(e):
+            if not is_order_not_found(e):
                 raise
         clip.status = "cancelled"
-        clip.closed_at = util.now_ms()
+        clip.closed_at = common.now_ms()
         return True
 
     async def _cancel_all(self) -> bool:
@@ -576,7 +568,7 @@ class PlannerRunner:
             market_index=market_index,
             symbol=symbol,
             algo_id=algo_id,
-            created_at=util.now_ms(),
+            created_at=common.now_ms(),
         )
         st = self._state
         try:
@@ -621,7 +613,7 @@ class PlannerRunner:
                     int(o.get("market_index") or 0), int(o.get("order_index") or 0)
                 )
             except Exception as e:
-                if not _is_order_not_found(e):
+                if not is_order_not_found(e):
                     logger.warning("planner: replaced order %s not cancelled: %s", o, e)
                     left += 1
         return left
@@ -644,13 +636,13 @@ class PlannerRunner:
                 self._wake.clear()
                 if self._stop.is_set():
                     break
-                if util.now_ms() < self._backoff_until:
+                if common.now_ms() < self._backoff_until:
                     continue
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
-                        self._backoff_until = util.now_ms() + RATE_LIMIT_COOLDOWN_MS
+                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
+                        self._backoff_until = common.now_ms() + RATE_LIMIT_COOLDOWN_MS
                         continue
                     # The stop stays on the venue. Planner stops acting, not protecting.
                     logger.exception("planner error on %s", self._state.algo_id)
@@ -671,7 +663,7 @@ class PlannerRunner:
             ex = self._exec()
             if not ex.orders_hydrated():
                 return
-            now = util.now_ms()
+            now = common.now_ms()
             self._drain_trades(now)
             self._sync_open(now)
             prices = self._prices()
@@ -843,7 +835,7 @@ class PlannerRunner:
                 self._close_side(),
                 role="sl",
                 kind="market",
-                trigger=_fmt(trigger) or "0",
+                trigger=fmt_decimal(trigger) or "0",
                 slippage=p.slippage if p else 0.01,
             )
         except ValueError as e:
@@ -968,7 +960,7 @@ class PlannerRunner:
                     self._close_side(),
                     role="sl",
                     kind="market",
-                    trigger=_fmt(stop) or "0",
+                    trigger=fmt_decimal(stop) or "0",
                     slippage=params.slippage,
                 )
                 live_stop.price = stop

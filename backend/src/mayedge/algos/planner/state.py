@@ -11,7 +11,7 @@ from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.ledger import Ledger
 from mayedge.algos.planner.plan import Plan, PlannerParams
 from mayedge.algos.trail.engine import Point
-from mayedge.numbers import fmt_decimal
+from mayedge.numbers import fmt_decimal, parse_decimal
 from mayedge.rows import is_obj, obj
 
 if TYPE_CHECKING:
@@ -95,8 +95,8 @@ class PlannerState:
         self.trails = {
             str(k): Point(
                 active=bool(v.get("active")),
-                best=_dec(v.get("best")),
-                trigger=_dec(v.get("trigger")),
+                best=parse_decimal(v["best"]) if v.get("best") not in (None, "") else None,
+                trigger=parse_decimal(v["trigger"]) if v.get("trigger") not in (None, "") else None,
             )
             for k, v in trails.items()
             if is_obj(v)
@@ -105,12 +105,6 @@ class PlannerState:
         self.trail_moves = {str(k): int(v) for k, v in moves.items()} if is_obj(moves) else {}
         self.trail_fired = {str(x) for x in raw.get("trail_fired") or ()}
         self.finish_entry = bool(raw.get("finish_entry"))
-
-
-def _dec(raw: object) -> Decimal | None:
-    if raw in (None, ""):
-        return None
-    return Decimal(str(raw))
 
 
 class PlannerBookView(Protocol):

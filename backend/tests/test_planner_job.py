@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import patch
 
-from mayedge.algos.chase import util
 from mayedge.algos.chase.config import MIN_REQUOTE_MS
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.planner import venue as planner_venue
@@ -62,7 +61,7 @@ LADDER = dataclasses.replace(
 class PlannerJobTests(IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.clock = FakeClock()
-        p = patch.object(util, "now_ms", self.clock)
+        p = patch("mayedge.algos.common.now_ms", self.clock)
         p.start()
         self.addCleanup(p.stop)
         self.venue = FakeVenue()
