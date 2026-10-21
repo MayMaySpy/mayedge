@@ -158,3 +158,20 @@ class CancelAllOrdersTests(IsolatedAsyncioTestCase):
         kw = svc._signer.cancel_all_orders.await_args.kwargs
         self.assertEqual(kw["timestamp_ms"], 0)
         self.assertEqual(kw["cancel_all_market_index"], 255)
+
+    async def test_a_high_index_is_sent_unchanged(self) -> None:
+        svc = OrderService()
+        svc._signer = self._signer()
+        await svc.cancel_all_orders(4099)
+        self.assertEqual(
+            svc._signer.cancel_all_orders.await_args.kwargs["cancel_all_market_index"], 4099
+        )
+        await svc.cancel_all_orders(4510)
+        self.assertEqual(
+            svc._signer.cancel_all_orders.await_args.kwargs["cancel_all_market_index"], 4510
+        )
+        await svc.cancel_all_orders(None)
+        self.assertEqual(
+            svc._signer.cancel_all_orders.await_args.kwargs["cancel_all_market_index"],
+            svc._signer.NIL_MARKET_INDEX,
+        )

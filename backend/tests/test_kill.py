@@ -124,6 +124,31 @@ class KillModuleTests(unittest.IsolatedAsyncioTestCase):
         orders.create_market_order.assert_awaited_once_with(1, "buy", "2", 0.02, True)
         self.assertTrue(result.flatten[0]["ok"])
 
+    async def test_kill_flattens_a_high_index_and_cancels_once(self) -> None:
+        orders = MagicMock()
+        orders.enabled = True
+        orders.cancel_all_orders = AsyncMock()
+        orders.create_market_order = AsyncMock()
+        summary = AccountSummary(
+            collateral="100",
+            available="50",
+            unrealized_pnl="0",
+            positions=[
+                Position(1, "BTC", "1", "100", "100", "0", 5, "cross"),
+                Position(4099, "DRV", "2", "10", "10", "0", 5, "cross"),
+            ],
+        )
+        result = await kill(
+            flatten=True,
+            algos=MagicMock(stop=AsyncMock()),
+            orders=orders,
+            get_account_summary=AsyncMock(return_value=summary),
+        )
+        self.assertEqual(result.status, "killed")
+        orders.cancel_all_orders.assert_awaited_once_with(None)
+        indexes = [call.args[0] for call in orders.create_market_order.await_args_list]
+        self.assertEqual(indexes, [1, 4099])
+
 
 class StopEveryBookTests(unittest.IsolatedAsyncioTestCase):
     async def test_desk_stops_the_other_books_when_one_fails(self) -> None:

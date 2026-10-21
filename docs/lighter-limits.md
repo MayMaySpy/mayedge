@@ -6,7 +6,9 @@ Cross-check against official docs before changing algo behavior:
 - [Trading / signing](https://apidocs.lighter.xyz/docs/trading)
 - [Data structures & errors](https://apidocs.lighter.xyz/docs/data-structures-constants-and-errors)
 
-Last reviewed: 2026-03-11.
+Last reviewed: 2026-10-21.
+
+Mayedge stays on **Standard** (0 fees). The send budget in `lighter/budget.py` is built for that tier. Nothing in the desk assumes Premium.
 
 ## Active orders (on book)
 
@@ -71,13 +73,32 @@ GTT limits: expiry between **5 minutes and 30 days** (ms timestamp). We use SDK 
 
 ## Transaction / API rate limits
 
-- **Standard REST:** 60 requests / rolling minute. Not weighted. `sendTx` and `sendTxBatch` count in that same bucket, over HTTP or WebSocket.
-- **All account types — default tx bucket:** 40 requests / minute (includes order create/cancel).
-- **429 / 405:** 60s firewall cooldown. When REST is limited, the WebSocket is limited too.
-- Mayedge keeps one shared limiter under both caps. Algo sends stop before the bucket is full so a manual order still fits: algos hold to 30 of the 38 transactions a minute.
-- Kill is never refused by the local limiter. It is sent through a full window and through the 60s cooldown.
+Reviewed against the venue's rate-limits and trading pages on 2026-10-21. Standard requests are unweighted, 60 per rolling minute. When `24000 / weight` is below 60, that lower number is the cap (`changeAccountTier`, weight 3000, is 8 per minute). The desk does not call `changeAccountTier`, `recentTrades` (weight 600, which would be 40 per minute), or `transferFeeInfo`.
 
-We do **not** use `sendTxBatch` today — each child is one transaction.
+Endpoints the desk calls, and the Standard cap that follows:
+
+| Endpoint | Weight | Standard cap |
+|----------|--------|----------------|
+| `sendTx`, `sendTxBatch`, `nextNonce` | 6 | 60 |
+| `accountActiveOrders` | 100 | 60 |
+| `trades` | 200 | 60 |
+| `orderBookDetails`, `candles`, `fundings`, `account`, `accountLimits`, `assetDetails`, `pnl`, `positionFunding` | 300 | 60 |
+
+`24000 / weight` is above 60 for every one of those, so each stays at 60. `sendTx` and `sendTxBatch` also sit in the 60 for a Standard account. Premium's separate send bucket does not apply.
+
+Transaction type limits apply on top of the 60. The default type, including order create and cancel, is 40 per minute. `L2UpdateLeverage` is also 40 per minute. The desk's own ceilings are 38 transactions and 54 requests, with algos held to 30 transactions so a manual order still fits.
+
+A grouped Stop plus Take Profit counts as one transaction. The desk already sends that pair as one grouped order.
+
+`sendTxBatch` takes up to 50 transactions with consecutive nonces on the same API key. About 15 is safe over REST; a larger body can be rejected at the edge. The docs do not say whether a batch counts as one or as N against the 40-per-minute type limit. That is measured later, on testnet. Until then the desk does not batch.
+
+`code: 200` means the transaction was accepted, not that it filled. The desk confirms from the account feed.
+
+A 429 or 405 is a 60 second firewall cooldown, and a limited REST window limits the WebSocket too. Kill is never refused by the local limiter. It is sent through a full window and through that cooldown.
+
+## Markets the desk skips
+
+`orderBookDetails` still has two lists, perps and spot. A binary option is a row in the perp list whose `market_type` is `binary_options` (lighter-sdk 1.1.8). The desk treats that, and any other type it does not know, as not a market it trades, and leaves the row out of the book, Scan, alerts, and the Funding backfill. A missing type stays a perp, because current perp rows may omit the field. Market indexes are int64 in the signer. The desk passes them through, including indexes past 4,000. Cancel all of every market still sends `NIL_MARKET_INDEX` (255).
 
 ## Nonce
 

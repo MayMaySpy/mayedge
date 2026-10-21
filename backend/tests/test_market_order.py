@@ -369,3 +369,49 @@ class AccountRestCooldownTests(IsolatedAsyncioTestCase):
             self.assertTrue(budget.try_acquire(lane="critical"))
         self.assertFalse(budget.try_acquire(lane="critical"))
         self.assertFalse(budget.cooling())
+
+
+class HighIndexTests(IsolatedAsyncioTestCase):
+    def tearDown(self) -> None:
+        from mayedge.lighter.budget import budget
+
+        budget.reset()
+
+    def _svc(self) -> OrderService:
+        svc = OrderService()
+        signer = MagicMock()
+        signer.create_market_order = AsyncMock(return_value=(None, "0xabc", None))
+        signer.create_order = AsyncMock(return_value=(None, "0xabc", None))
+        signer.create_sl_order = AsyncMock(return_value=(None, "0xabc", None))
+        signer.cancel_order = AsyncMock(
+            return_value=(None, SimpleNamespace(code=200, tx_hash="0xabc"), None)
+        )
+        signer.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME = 1
+        signer.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL = 0
+        signer.ORDER_TIME_IN_FORCE_POST_ONLY = 2
+        signer.ORDER_TYPE_LIMIT = 0
+        signer.ORDER_TYPE_STOP_LOSS = 2
+        signer.DEFAULT_28_DAY_ORDER_EXPIRY = 0
+        svc._signer = signer
+        svc._next_client_order_index = MagicMock(return_value=1_000_000_001)
+        return svc
+
+    async def test_create_and_cancel_send_4099(self) -> None:
+        svc = self._svc()
+        signer = svc._signer
+        self.assertIsInstance(signer, MagicMock)
+        assert isinstance(signer, MagicMock)
+        meta = _eth()
+        with (
+            patch.object(svc, "_market_meta", return_value=meta),
+            patch("mayedge.lighter.orders.gateway.best_bid_ask", return_value=("100", "100.10")),
+            patch("mayedge.lighter.orders.account_service.list_open_orders", return_value=[]),
+        ):
+            await svc.create_market_order(4099, "buy", "1", slippage=0.01)
+            await svc.create_limit_order(4099, "buy", "1", "100")
+            await svc.create_sl_tp(4099, "sell", "1", sl={"kind": "market", "trigger": "90"})
+            await svc.cancel_order(4099, 7)
+        self.assertEqual(signer.create_market_order.await_args.kwargs["market_index"], 4099)
+        self.assertEqual(signer.create_order.await_args.kwargs["market_index"], 4099)
+        self.assertEqual(signer.create_sl_order.await_args.kwargs["market_index"], 4099)
+        self.assertEqual(signer.cancel_order.await_args.kwargs["market_index"], 4099)

@@ -108,6 +108,7 @@ class LighterGateway:
         self._funding_backfill_task: asyncio.Task[None] | None = None
         self._scan_task: asyncio.Task[None] | None = None
         self._last_scan: dict[str, str] = {}
+        self._skipped_markets = ""
 
     async def start(self) -> None:
         self._client = lighter.ApiClient(Configuration(host=settings.base_url))
@@ -225,6 +226,7 @@ class LighterGateway:
         rows = list(getattr(detail_resp, "order_book_details", None) or [])
         rows.extend(getattr(detail_resp, "spot_order_book_details", None) or [])
         seen: set[int] = set()
+        skipped: list[str] = []
         self._symbol_to_index.clear()
         self._perp_by_symbol.clear()
         self._spot_by_symbol.clear()
@@ -234,6 +236,10 @@ class LighterGateway:
                 continue
             idx = int(book.market_id)
             symbol = str(getattr(book, "symbol", None) or f"M{idx}")
+            raw_type = _detail_field(book, "market_type")
+            if normalize_market_type(raw_type) == "other":
+                skipped.append(f"{symbol} ({raw_type})")
+                continue
             price_dec = _detail_field(book, "price_decimals", "supported_price_decimals")
             size_dec = _detail_field(book, "size_decimals", "supported_size_decimals")
             last = to_float(_detail_field(book, "last_trade_price"))
@@ -288,6 +294,10 @@ class LighterGateway:
         for idx in list(self._markets):
             if idx not in seen:
                 del self._markets[idx]
+        text = ", ".join(skipped)
+        if text and text != self._skipped_markets:
+            logger.info("skipped markets: %s", text)
+        self._skipped_markets = text
 
     async def _market_refresh_loop(self) -> None:
         while True:

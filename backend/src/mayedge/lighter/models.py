@@ -2,17 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
-from typing import Any
+from typing import Any, Literal
 
 from mayedge.numbers import fmt_decimal
 
 
-def normalize_market_type(raw: Any) -> str:
-    """Map Lighter market_type strings / enums to ``perp`` or ``spot``."""
-    text = str(raw or "perp").strip().lower()
+def normalize_market_type(raw: Any) -> Literal["perp", "spot", "other"]:
+    """Map a venue market type. Missing or empty stays perp. Anything else is other."""
+    text = str(raw or "").strip().lower()
+    if not text or text in {"perp", "perps", "perpetual"}:
+        return "perp"
     if "spot" in text:
         return "spot"
-    return "perp"
+    return "other"
 
 
 def funding_apr(hourly_pct: float | None) -> float | None:
@@ -64,7 +66,7 @@ class MarketMeta:
 
     @property
     def is_perp(self) -> bool:
-        return normalize_market_type(self.market_type) != "spot"
+        return normalize_market_type(self.market_type) == "perp"
 
     @property
     def max_leverage(self) -> int:
