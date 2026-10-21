@@ -1,5 +1,12 @@
+from mayedge.algos.common import in_coi_range
+
 LADDER_COI_BASE = 9_000_000_000
 LADDER_COI_END = 10_000_000_000
+
+
+def is_ladder_client_order(coi: int | None) -> bool:
+    return in_coi_range(coi, LADDER_COI_BASE, LADDER_COI_END)
+
 
 MIN_RUNGS = 2
 MAX_RUNGS = 100

@@ -6,23 +6,15 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from mayedge.algos import common
 from mayedge.algos.chase.config import AUTO_RESUME_ERRORS, STOP_CANCEL_GAP_S, STOP_CANCEL_TRIES
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.fills import may_invent_fill
 from mayedge.algos.chase.iceberg import Action, leftover_is_dust
 from mayedge.algos.chase.place import ChasePlaceMixin
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
-from mayedge.algos.chase.util import (
-    _dec,
-    _fmt,
-    _is_invalid_nonce,
-    _is_min_size,
-    _is_order_not_found,
-    _is_rate_limit,
-    _is_would_cross,
-)
-from mayedge.algos.ladder import util as ladder_util
-from mayedge.algos.ladder.config import MIN_PLACE_GAP_MS
+from mayedge.algos.common import venue_order_keys
+from mayedge.algos.ladder.config import MIN_PLACE_GAP_MS, is_ladder_client_order
 from mayedge.algos.ladder.plan import (
     ALGO_ID,
     ALGO_VERSION,
@@ -32,11 +24,17 @@ from mayedge.algos.ladder.plan import (
     sort_by_closeness,
 )
 from mayedge.algos.ladder.state import LadderBookView, LadderState
-from mayedge.algos.ladder.util import _ladder_order_keys
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.config import settings
 from mayedge.lighter.budget import BudgetRefused, budget
-from mayedge.numbers import check_notional
+from mayedge.lighter.errors import (
+    is_blocked,
+    is_invalid_nonce,
+    is_min_size,
+    is_order_not_found,
+    is_would_cross,
+)
+from mayedge.numbers import check_notional, fmt_decimal, to_decimal
 from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
@@ -68,7 +66,12 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
         return self._state
 
     def _orders_cancel_keys(self, orders: Any) -> set[tuple[int, int]]:
-        return set(_ladder_order_keys(orders, self._cois))
+        return set(
+            venue_order_keys(
+                orders,
+                lambda coi: is_ladder_client_order(coi) and coi in self._cois,
+            )
+        )
 
     async def _sync_fills(self) -> None:
         self._drain_trades()
@@ -101,17 +104,17 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             "symbol": st.symbol,
             "reduce_only": st.reduce_only,
             "side": p.side if p else None,
-            "qty": _fmt(p.qty) if p else None,
-            "display_qty": _fmt(per_rung) if per_rung is not None else None,
+            "qty": fmt_decimal(p.qty) if p else None,
+            "display_qty": fmt_decimal(per_rung) if per_rung is not None else None,
             "offset_bps": None,
-            "price_floor": _fmt(lo) if lo is not None else None,
-            "price_ceiling": _fmt(hi) if hi is not None else None,
-            "remaining": _fmt(st.remaining),
-            "filled": _fmt(st.filled),
+            "price_floor": fmt_decimal(lo) if lo is not None else None,
+            "price_ceiling": fmt_decimal(hi) if hi is not None else None,
+            "remaining": fmt_decimal(st.remaining),
+            "filled": fmt_decimal(st.filled),
             "quote_action": st.quote_action,
             "reason": st.reason,
-            "rest_price": _fmt(st.rest_price),
-            "rest_qty": _fmt(st.rest_qty),
+            "rest_price": fmt_decimal(st.rest_price),
+            "rest_qty": fmt_decimal(st.rest_qty),
             "working_coi": live[-1].client_order_index if live else None,
             "working_order_index": (
                 str(live[-1].order_index) if live and live[-1].order_index else None
@@ -153,9 +156,9 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
         params = LadderParams.from_json(
             raw,
             side=side,
-            qty=_dec(row.get("qty") or raw.get("qty") or "0"),
-            price_from=_dec(raw.get("price_from") or row.get("price_floor") or "0"),
-            price_to=_dec(raw.get("price_to") or row.get("price_ceiling") or "0"),
+            qty=to_decimal(row.get("qty") or raw.get("qty") or "0"),
+            price_from=to_decimal(raw.get("price_from") or row.get("price_floor") or "0"),
+            price_to=to_decimal(raw.get("price_to") or row.get("price_ceiling") or "0"),
             rungs=int(raw.get("rungs") or 0),
             window=int(raw.get("window") or 10),
         )
@@ -179,12 +182,12 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             market_index=int(row.get("market_index") or 0),
             symbol=str(row.get("symbol") or ""),
             reduce_only=bool(row.get("reduce_only")),
-            remaining=_dec(row.get("remaining") or "0"),
-            filled=_dec(row.get("filled") or "0"),
+            remaining=to_decimal(row.get("remaining") or "0"),
+            filled=to_decimal(row.get("filled") or "0"),
             quote_action=str(row.get("quote_action") or Action.PAUSE.value),
             reason=row.get("reason"),
-            rest_price=_dec(row["rest_price"]) if row.get("rest_price") is not None else None,
-            rest_qty=_dec(row["rest_qty"]) if row.get("rest_qty") is not None else None,
+            rest_price=to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None,
+            rest_qty=to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None,
             error=row.get("error"),
             algo_id=str(row.get("algo_id") or ""),
             created_at=int(row.get("created_at") or 0),
@@ -349,7 +352,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             reduce_only=reduce_only,
             remaining=params.qty,
             algo_id=algo_id,
-            created_at=ladder_util.now_ms(),
+            created_at=common.now_ms(),
         )
         self._cois.clear()
         self._stop.clear()
@@ -435,7 +438,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 try:
                     await self._evaluate()
                 except Exception as e:
-                    if isinstance(e, BudgetRefused) or _is_rate_limit(e) or _is_invalid_nonce(e):
+                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
                         self._handle_tx_err(e)
                         continue
                     logger.exception("ladder error")
@@ -461,7 +464,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
         if clip.status != "live":
             return
         if not self._exec().enabled:
-            self._state.ledger.close_missing(clip, canceling=True, now=ladder_util.now_ms())
+            self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
             self._reconcile_master()
             return
         coi = clip.client_order_index
@@ -471,7 +474,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 if await self._coi_open_on_venue(coi):
                     self._reconcile_master()
                     return
-                now = ladder_util.now_ms()
+                now = common.now_ms()
                 if may_invent_fill(
                     clip,
                     now,
@@ -489,9 +492,9 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             try:
                 try:
                     await self._exec().cancel_order(mi, oid)
-                    self._last_tx_ms = ladder_util.now_ms()
+                    self._last_tx_ms = common.now_ms()
                 except Exception as e:
-                    if _is_order_not_found(e) or _is_min_size(e):
+                    if is_order_not_found(e) or is_min_size(e):
                         pass
                     elif self._handle_tx_err(e):
                         return
@@ -504,7 +507,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             finally:
                 self._canceling = False
             if not await self._coi_open_on_venue(coi):
-                self._state.ledger.close_missing(clip, canceling=True, now=ladder_util.now_ms())
+                self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
                 self._reconcile_master()
                 return
             if attempt + 1 < STOP_CANCEL_TRIES:
@@ -520,32 +523,32 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             await self._exec().create_limit_order(
                 market_index=self._state.market_index,
                 side=params.side,
-                size=_fmt(rung.qty) or "0",
-                price=_fmt(rung.price) or "0",
+                size=fmt_decimal(rung.qty) or "0",
+                price=fmt_decimal(rung.price) or "0",
                 time_in_force="post_only",
                 reduce_only=self._state.reduce_only,
                 client_order_index=coi,
             )
         except Exception as e:
             # The venue's own refusal, so the blotter says why and not a guess.
-            if _is_min_size(e):
+            if is_min_size(e):
                 self._place_refused = "below_min_qty"
                 return False
-            if _is_would_cross(e):
+            if is_would_cross(e):
                 self._place_refused = "would_cross"
                 return False
             if self._handle_tx_err(e):
                 return False
             raise
         self._place_refused = None
-        self._last_tx_ms = ladder_util.now_ms()
+        self._last_tx_ms = common.now_ms()
         found = self._find_open(coi)
         idx = int(found["order_index"]) if found and found.get("order_index") else None
         self._state.ledger.place(
             client_order_index=coi,
             price=rung.price,
             qty=rung.qty,
-            now=ladder_util.now_ms(),
+            now=common.now_ms(),
             order_index=idx,
             side=params.side,
         )
@@ -572,7 +575,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
                 await self._finish_done()
                 return
 
-            now = ladder_util.now_ms()
+            now = common.now_ms()
             if self._unproven_retry_at:
                 if self._state.ledger.live_clips():
                     self._unproven_retry_at = 0
@@ -631,7 +634,7 @@ class LadderRunner(ChasePlaceMixin[LadderBookView, LadderState]):
             placed_any = False
             self._place_refused = None
             for rung in to_place:
-                now = ladder_util.now_ms()
+                now = common.now_ms()
                 if now < self._backoff_until:
                     break
                 if self._last_tx_ms > 0 and now - self._last_tx_ms < MIN_PLACE_GAP_MS:

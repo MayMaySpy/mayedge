@@ -224,7 +224,7 @@ class RestartTests(IsolatedAsyncioTestCase):
         )
         again: object | None = None
         with (
-            patch("mayedge.algos.ladder.util.now_ms", clock),
+            patch("mayedge.algos.common.now_ms", clock),
             patch.object(util, "now_ms", clock),
         ):
             await book.start(market_index=1, params=params)
