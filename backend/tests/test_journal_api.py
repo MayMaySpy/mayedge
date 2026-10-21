@@ -16,6 +16,7 @@ from mayedge import db as store
 from mayedge.api.app import create_app
 from mayedge.api.routes import journal as journal_routes
 from mayedge.config import settings
+from mayedge.journal_build import imports_gateway
 from mayedge.lighter.account import account_service
 from mayedge.lighter.models import AccountSummary, Position
 from mayedge.persist_journal import (
@@ -25,6 +26,7 @@ from mayedge.persist_journal import (
     journal_put_note,
 )
 from mayedge.tone_compute import call as real_call
+from mayedge.tone_compute import close as close_pool
 
 try:
     from test_loop_free import assert_loop_free
@@ -175,3 +177,10 @@ class JournalApiTests(IsolatedAsyncioTestCase):
         with patch("mayedge.api.routes.journal.build_off_loop", _hold_the_gil):
             await assert_loop_free(journal_routes.get_trips(), max_gap_ms=20)
         self.assertGreaterEqual(time.perf_counter() - started, 0.08)
+
+    async def test_rebuild_does_not_import_the_gateway(self) -> None:
+        store.init_db()
+        close_pool(wait=True)
+        journal_routes._ready = None
+        loaded = await real_call(imports_gateway, settings.db_path, {})
+        self.assertIs(loaded, False)
