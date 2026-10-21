@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { JournalState } from "@/hooks/useJournal";
-import type { JournalSide, JournalSummaryGroup, JournalTrip } from "@/lib/api";
+import { api, type JournalExcursion, type JournalSide, type JournalSummaryGroup, type JournalTrip } from "@/lib/api";
 import {
   JOURNAL_ALGOS,
   JOURNAL_RANGES,
@@ -21,6 +21,7 @@ import {
   magnitude,
   money,
   pct,
+  pctPoints,
   pnlClass,
   ratio,
   rValue,
@@ -31,7 +32,7 @@ import {
 } from "@/lib/journalFormat";
 import { marketPrice } from "@/lib/marketFormat";
 import { cn, formatUsdCompact } from "@/lib/utils";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export function JournalControls({ journal, className }: { journal: JournalState; className?: string }) {
   return (
@@ -316,6 +317,52 @@ export function JournalTrips({ journal }: { journal: JournalState }) {
   );
 }
 
+/** journal-rules, Excursion: read when a trip is opened; a closed trip's is read once and kept. */
+function ExcursionRow({ tripKey }: { tripKey: string }) {
+  const [found, setFound] = useState<JournalExcursion | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.journalExcursion(tripKey).then(
+      (out) => {
+        if (live) setFound(out);
+      },
+      (e: unknown) => {
+        if (live) setError(e instanceof Error ? e.message : "Excursion unavailable");
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [tripKey]);
+  let body: ReactNode;
+  if (error) body = error;
+  else if (!found) body = "Reading candles…";
+  else if (!found.resolution) body = "No candles cover this trip";
+  else
+    body = (
+      <>
+        <span title="Furthest against the average entry">
+          MAE <span className={pnlClass(found.mae_usd)}>{pctPoints(found.mae_pct)} ({money(found.mae_usd)})</span>
+        </span>
+        {" · "}
+        <span title="Furthest for the average entry">
+          MFE <span className={pnlClass(found.mfe_usd)}>{pctPoints(found.mfe_pct)} ({money(found.mfe_usd)})</span>
+        </span>
+        <span className="ml-1.5">
+          at {found.resolution} bars{found.open ? ", so far" : ""}
+        </span>
+      </>
+    );
+  return (
+    <TableRow className="text-muted-foreground">
+      <TableCell className="pl-2.5" colSpan={10}>
+        Excursion: {body}
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function TripRows({
   trip,
   open,
@@ -367,6 +414,7 @@ function TripRows({
           ) : null}
         </TableCell>
       </TableRow>
+      {open ? <ExcursionRow tripKey={trip.trip_key} /> : null}
       {open
         ? trip.fills.map((fill) => (
             <TableRow key={fill.trade_id} className="text-muted-foreground">

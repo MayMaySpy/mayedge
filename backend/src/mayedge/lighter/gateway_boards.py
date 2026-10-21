@@ -66,6 +66,7 @@ class GatewayBoards:
         count: int = 500,
         *,
         lane: str = "read",
+        end_ms: int | None = None,
     ) -> list[Candle]:
         raise NotImplementedError
 

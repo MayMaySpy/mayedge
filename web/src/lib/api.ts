@@ -1,5 +1,6 @@
 import type {
   AutoKillRequest,
+  JournalExcursion,
   JournalNote,
   JournalSummary,
   JournalSync,
@@ -14,6 +15,7 @@ import type {
 } from "@/lib/api.gen";
 
 export type {
+  JournalExcursion,
   JournalFill,
   JournalSide,
   JournalSummaryGroup,
@@ -740,6 +742,8 @@ export const api = {
       `/journal/summary?${q.toString()}`,
     );
   },
+  journalExcursion: (tripKey: string) =>
+    request<JournalExcursion>(`/journal/trips/${encodeURIComponent(tripKey)}/excursion`),
   journalNote: (tripKey: string, body: { note: string; tags: string[] }) =>
     request<JournalNote>(
       `/journal/trips/${encodeURIComponent(tripKey)}/note`,

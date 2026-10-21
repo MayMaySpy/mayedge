@@ -14,7 +14,7 @@ Desk language is [CONTEXT.md](CONTEXT.md). Every word in bold below means what i
 
 The desk shows UTC everywhere, never local time: every clock, date and chart axis.
 
-Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout edit is opt-in. Positions has a Journal tab: each Market from flat to flat, net of fees and funding. **Open page** takes it to its own page at `/journal`, with the full summary and a breakdown by Market and by algo.
+Resizable mosaic: Chart, Book, Trades, Order, Alerts, Liqs, Positions. Layout edit is opt-in. Positions has a Journal tab: each Market from flat to flat, net of fees and funding. Opening a trip shows its fills and its **Excursion** (MAE and MFE from the average entry). **Open page** takes it to its own page at `/journal`, with the full summary and a breakdown by Market and by algo.
 
 **Header.** Next to MARGIN, **Today** is the **Portfolio**'s change since 00:00 UTC: Perps, Spot, LLP and LIT staking, net of deposits and withdrawals, from the venue's own PnL. It opens `/portfolio`: the total, allocation, value over time with each **Flow** marked, daily change, and what each Holding is made of. Rules: [docs/portfolio-rules.md](docs/portfolio-rules.md).
 

@@ -20,17 +20,21 @@ from mayedge.config import settings
 from mayedge.journal import Fill, FundingPayment, GroupBy, RoundTrip, seconds_of, summary
 from mayedge.journal import round_trips as build_trips
 from mayedge.journal_build import build as build_off_loop
+from mayedge.journal_excursion import excursion, resolution_for
 from mayedge.journal_sync import run_sync
 from mayedge.lighter.account import account_service
+from mayedge.lighter.gateway import gateway
 from mayedge.numbers import fmt_decimal
 from mayedge.persist_journal import (
     journal_generation,
+    journal_load_excursion,
     journal_load_fills,
     journal_load_funding,
     journal_load_links,
     journal_load_notes,
     journal_load_planner_risk,
     journal_oldest_ts,
+    journal_put_excursion,
     journal_put_note,
 )
 from mayedge.tone_compute import call
@@ -203,6 +207,53 @@ async def warm() -> None:
     _last_open = payload
     if _open_emit is not None:
         _open_emit(payload)
+
+
+@router.get(
+    "/api/journal/trips/{trip_key}/excursion",
+    response_model=None,
+    responses=documents(responses.JournalExcursion),
+)
+async def get_excursion(trip_key: str) -> dict[str, Any]:
+    """A Round trip's Excursion (journal-rules, Excursion). Read once for a closed trip, then kept."""
+    trip = next((t for t in await _shared_trips(_upnl()) if t.trip_key == trip_key), None)
+    if trip is None:
+        raise HTTPException(404, "No such Round trip")
+    out: dict[str, Any] = {
+        "trip_key": trip_key,
+        "open": trip.open,
+        "resolution": None,
+        "mae_pct": None,
+        "mfe_pct": None,
+        "mae_usd": None,
+        "mfe_usd": None,
+    }
+    if trip.avg_in is None:
+        return out
+    sig = f"{trip.close_ts}:{trip.avg_in}:{trip.size}"
+    if not trip.open:
+        kept = await asyncio.to_thread(journal_load_excursion, trip_key, sig)
+        if kept is not None:
+            return {**out, **kept}
+    open_s = seconds_of(trip.open_ts)
+    close_s = seconds_of(trip.close_ts) if trip.close_ts else int(time.time())
+    name, step, count = resolution_for(open_s, close_s)
+    candles = await gateway.get_candles(
+        trip.market_index, name, count, end_ms=(close_s + step) * 1000
+    )
+    found = excursion(trip.side, trip.avg_in, trip.size, candles, open_s, close_s, name, step)
+    if found is None:
+        return out
+    read = {
+        "resolution": found.resolution,
+        "mae_pct": _num(found.mae_pct),
+        "mfe_pct": _num(found.mfe_pct),
+        "mae_usd": _num(found.mae_usd),
+        "mfe_usd": _num(found.mfe_usd),
+    }
+    if not trip.open:
+        await asyncio.to_thread(journal_put_excursion, trip_key, sig, read)
+    return {**out, **read}
 
 
 @router.get("/api/journal/open", response_model=None, responses=documents(responses.JournalOpen))

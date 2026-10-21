@@ -147,6 +147,32 @@ describe("JournalTab", () => {
     expect(screen.getByText("buy")).toBeTruthy();
     expect(screen.getByText("sell")).toBeTruthy();
   });
+
+  it("reads a trip's Excursion when it is opened", async () => {
+    vi.spyOn(api, "journalTrips").mockResolvedValue({ trips: [trip] });
+    vi.spyOn(api, "journalSummary").mockImplementation(async (opts) => ({
+      range: opts.range,
+      group: opts.group,
+      groups: [strip],
+    }));
+    const read = vi.spyOn(api, "journalExcursion").mockResolvedValue({
+      trip_key: "1:a",
+      open: false,
+      resolution: "1m",
+      mae_pct: "-3",
+      mfe_pct: "12",
+      mae_usd: "-3",
+      mfe_usd: "12",
+    });
+
+    render(<JournalTab active />);
+    await userEvent.click(await screen.findByText("ETH"));
+
+    expect(read).toHaveBeenCalledWith("1:a");
+    expect(await screen.findByText("-3.00% (-3.00)")).toBeTruthy();
+    expect(screen.getByText("+12.00% (+12.00)")).toBeTruthy();
+    expect(screen.getByText("at 1m bars")).toBeTruthy();
+  });
 });
 
 describe("JournalPage", () => {

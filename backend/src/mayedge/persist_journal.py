@@ -237,3 +237,42 @@ def journal_load_notes() -> dict[str, dict[str, Any]]:
             "updated_at": int(row["updated_at"]),
         }
     return out
+
+
+def journal_load_excursion(trip_key: str, sig: str) -> dict[str, Any] | None:
+    """A stored Excursion, only while the trip still has the signature it was read for."""
+    with reading() as conn:
+        row = conn.execute(
+            "SELECT * FROM journal_excursions WHERE trip_key = ? AND sig = ?", (trip_key, sig)
+        ).fetchone()
+    if row is None:
+        return None
+    return {k: row[k] for k in ("resolution", "mae_pct", "mfe_pct", "mae_usd", "mfe_usd")}
+
+
+def journal_put_excursion(trip_key: str, sig: str, found: dict[str, Any]) -> None:
+    with _lock:
+        conn = _connect()
+        conn.execute(
+            """
+            INSERT INTO journal_excursions
+                (trip_key, sig, resolution, mae_pct, mfe_pct, mae_usd, mfe_usd, computed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(trip_key) DO UPDATE SET
+                sig=excluded.sig, resolution=excluded.resolution,
+                mae_pct=excluded.mae_pct, mfe_pct=excluded.mfe_pct,
+                mae_usd=excluded.mae_usd, mfe_usd=excluded.mfe_usd,
+                computed_at=excluded.computed_at
+            """,
+            (
+                trip_key,
+                sig,
+                found["resolution"],
+                found["mae_pct"],
+                found["mfe_pct"],
+                found["mae_usd"],
+                found["mfe_usd"],
+                int(time.time()),
+            ),
+        )
+        conn.commit()

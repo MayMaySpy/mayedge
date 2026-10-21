@@ -44,6 +44,18 @@ Each fill may name an `algo_id` (`PL-`, `CH-`, `CG-`, `LD-`, `TW-`, `TR-`). The 
 
 **R** is Net divided by `|entry − stop| × size`. Entry and stop are the plan that Planner run holds (`plan.entry`, `plan.stop`): the actual average entry once it filled (planner-rules P1), and the stop it was planned with. A Re-plan replaces that stop; Stop steps and a Trail stop do not. Size is the size this Round trip opened. A Planner run with no stored stop, a zero risk, or any other family has no R.
 
+## Excursion
+
+A Round trip's **Excursion** is how far price went against it (MAE) and for it (MFE) while it was open, from its average entry. Opening a trip in the Journal reads it.
+
+- Candles come through the desk's own read lane, one request, at the smallest bar size of 1m, 5m, 15m, 1h, 4h or 1d that covers the trip in at most 500 bars. Every bar that overlaps the trip's open to its close counts.
+- For a long, MAE is the lowest low less the average entry and MFE the highest high less it; a short is the mirror. MAE is never above zero and MFE never below.
+- Both are shown in percent of the average entry and in USD at the trip's size. The first and last bars can reach a little before the entry or after the exit, so each is a bound at that bar size, named beside it.
+- A closed trip's Excursion is read once and kept in `journal_excursions`, keyed by the trip and its close, average entry and size; a trip that changes is read again. An open trip's is read each time, up to now, and kept nowhere.
+- A trip with no average entry, or no bar over it, has no Excursion.
+
+Pinned by `tests/test_journal_excursion.py` and `test_a_closed_trip_reads_its_excursion_once` in `tests/test_journal_api.py`.
+
 ## Summary
 
 Headline stats use closed Round trips that are not partial.

@@ -43,6 +43,16 @@ export interface JournalCurvePoint {
   net: string;
 }
 
+export interface JournalExcursion {
+  trip_key: string;
+  open: boolean;
+  resolution: string | null;
+  mae_pct: string | null;
+  mfe_pct: string | null;
+  mae_usd: string | null;
+  mfe_usd: string | null;
+}
+
 export interface JournalFill {
   trade_id: string;
   ts: number;

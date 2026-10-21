@@ -128,6 +128,18 @@ class JournalNote(_Shape):
     tags: list[str]
 
 
+class JournalExcursion(_Shape):
+    """MAE and MFE from the average entry, at a bar size; all None when no bar covers the trip."""
+
+    trip_key: str
+    open: bool
+    resolution: str | None
+    mae_pct: str | None
+    mfe_pct: str | None
+    mae_usd: str | None
+    mfe_usd: str | None
+
+
 class JournalSync(_Shape):
     started: bool
     last_synced_at: int | None

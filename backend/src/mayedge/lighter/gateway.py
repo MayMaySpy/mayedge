@@ -463,6 +463,7 @@ class LighterGateway(GatewayBoards):
         count: int = 500,
         *,
         lane: str = "read",
+        end_ms: int | None = None,
     ) -> list[Candle]:
         if resolution == "1s":
             series = self._candles_1s.get(market_index)
@@ -473,7 +474,7 @@ class LighterGateway(GatewayBoards):
         count = min(max(int(count), 1), _REST_CANDLE_CAP)
         await budget.take(lane, wait=lane == "background")
         candle_api = lighter.CandlestickApi(self.client)
-        end = int(time.time()) * 1000
+        end = end_ms if end_ms is not None else int(time.time()) * 1000
         resolution_seconds = {
             "1m": 60,
             "5m": 300,

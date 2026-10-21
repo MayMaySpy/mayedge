@@ -270,6 +270,10 @@ _Avoid_: trade (a Lighter trade is one fill), position (that is the live thing)
 What a live Position's open Round trip has closed so far: the venue's PnL on its closing fills, less its fees. Funding is apart.
 _Avoid_: closed PnL, banked, the venue's per-position `realized_pnl`
 
+**Excursion**:
+How far price went against a Round trip (MAE) and for it (MFE) while it was open, from its average entry, at a named bar size. A bound, not a fill. The rules are in [docs/journal-rules.md](docs/journal-rules.md#excursion).
+_Avoid_: drawdown (that is the Summary's), runup, heat
+
 **Net**:
 Realized PnL less fees, plus funding received (or less funding paid).
 _Avoid_: PnL (unqualified), equity, a limit for Auto kill

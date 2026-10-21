@@ -20,7 +20,7 @@ from mayedge.api.routes import journal as journal_routes
 from mayedge.config import settings
 from mayedge.journal_build import imports_gateway
 from mayedge.lighter.account import account_service
-from mayedge.lighter.models import AccountSummary, Position
+from mayedge.lighter.models import AccountSummary, Candle, Position
 from mayedge.persist_journal import (
     journal_generation,
     journal_insert_fills,
@@ -118,6 +118,33 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             for algo, count in (("", 1), ("manual", 1), ("algos", 0)):
                 got = await client.get("/api/journal/trips", params={"algo": algo})
                 self.assertEqual(len(got.json()["trips"]), count, algo)
+
+    async def test_a_closed_trip_reads_its_excursion_once(self) -> None:
+        journal_insert_fills([_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")])
+        bars = [
+            Candle(time=1_699_999_980, open=100, high=104, low=97, close=103, volume=1),
+            Candle(time=1_700_000_040, open=103, high=112, low=101, close=110, volume=1),
+        ]
+        candles = AsyncMock(return_value=bars)
+        app = create_app()
+        transport = ASGITransport(app=app)
+        with patch("mayedge.api.routes.journal.gateway.get_candles", candles):
+            async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+                first = await client.get("/api/journal/trips/1:a/excursion")
+                again = await client.get("/api/journal/trips/1:a/excursion")
+                missing = await client.get("/api/journal/trips/9:z/excursion")
+        self.assertEqual(first.status_code, 200)
+        body = responses.JournalExcursion.model_validate(first.json())
+        self.assertEqual(body.resolution, "1m")
+        self.assertEqual(body.mae_pct, "-3")
+        self.assertEqual(body.mfe_pct, "12")
+        self.assertEqual(body.mfe_usd, "24")
+        self.assertEqual(again.json(), first.json())
+        candles.assert_awaited_once()
+        args = candles.await_args
+        assert args is not None
+        self.assertEqual(args.kwargs["end_ms"], (1_700_000_100 + 60) * 1000)
+        self.assertEqual(missing.status_code, 404)
 
     @patch("mayedge.api.routes.journal.run_sync", new_callable=AsyncMock)
     async def test_sync_starts_without_reading_the_venue_here(self, run_sync: AsyncMock) -> None:

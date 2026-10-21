@@ -318,6 +318,25 @@ def _v14(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v15(conn: sqlite3.Connection) -> None:
+    # A closed Round trip's Excursion, read once from candles (docs/journal-rules.md).
+    _run(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS journal_excursions (
+            trip_key TEXT PRIMARY KEY,
+            sig TEXT NOT NULL,
+            resolution TEXT NOT NULL,
+            mae_pct TEXT,
+            mfe_pct TEXT,
+            mae_usd TEXT,
+            mfe_usd TEXT,
+            computed_at INTEGER NOT NULL
+        )
+        """,
+    )
+
+
 STEPS: tuple[Step, ...] = (
     Step(1, "liquidation columns, algo venue", _v1),
     Step(2, "algo type, params and clip side", _v2),
@@ -333,6 +352,7 @@ STEPS: tuple[Step, ...] = (
     Step(12, "funding days", _v12),
     Step(13, "journal", _v13),
     Step(14, "portfolio pnl buckets", _v14),
+    Step(15, "journal excursions", _v15),
 )
 
 LATEST = STEPS[-1].version
