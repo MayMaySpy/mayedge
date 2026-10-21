@@ -11,8 +11,10 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from mayedge.config import settings
 from mayedge.journal import Fill, FundingPayment, GroupBy, RoundTrip, seconds_of, summary
 from mayedge.journal import round_trips as build_trips
+from mayedge.journal_build import build as build_off_loop
 from mayedge.journal_sync import run_sync
 from mayedge.lighter.account import account_service
 from mayedge.numbers import fmt_decimal
@@ -26,6 +28,7 @@ from mayedge.persist_journal import (
     journal_oldest_ts,
     journal_put_note,
 )
+from mayedge.tone_compute import call
 
 router = APIRouter()
 
@@ -40,6 +43,9 @@ _Inputs = tuple[
 ]
 _cache_lock = threading.Lock()
 _cache: tuple[int, _Inputs] | None = None
+_ready: tuple[tuple[str, int, tuple[tuple[int, str], ...]], list[RoundTrip]] | None = None
+_build_lock: asyncio.Lock | None = None
+_lock_loop: asyncio.AbstractEventLoop | None = None
 
 
 class NoteBody(BaseModel):
@@ -56,25 +62,14 @@ async def get_trips(
     limit: int = 200,
 ) -> dict[str, Any]:
     upnl = _upnl()
-    return await asyncio.to_thread(_trip_page, upnl, since, until, market, algo, limit)
-
-
-def _trip_page(
-    upnl: dict[int, Decimal],
-    since: int | None,
-    until: int | None,
-    market: str | None,
-    algo: str | None,
-    limit: int,
-) -> dict[str, Any]:
-    notes = journal_load_notes()
     trips = [
         trip
-        for trip in _trips(upnl)
+        for trip in await _shared_trips(upnl)
         if _market_ok(trip, market) and _algo_ok(trip, algo) and _span_ok(trip, since, until)
     ]
     trips.sort(key=lambda trip: trip.close_ts or trip.open_ts, reverse=True)
     capped = trips[: max(1, min(limit, 500))]
+    notes = journal_load_notes()
     return {"trips": [_trip_json(trip, notes) for trip in capped]}
 
 
@@ -92,20 +87,9 @@ async def get_summary(
     days = _RANGES[range]
     since = None if days is None else int(time.time()) - days * 86_400
     upnl = _upnl()
-    return await asyncio.to_thread(_summary_page, upnl, since, market, algo, range, group)
-
-
-def _summary_page(
-    upnl: dict[int, Decimal],
-    since: int | None,
-    market: str | None,
-    algo: str | None,
-    range: str,
-    group: str,
-) -> dict[str, Any]:
     chosen = [
         trip
-        for trip in _trips(upnl)
+        for trip in await _shared_trips(upnl)
         if _closed_since(trip, since) and _market_ok(trip, market) and _algo_ok(trip, algo)
     ]
     rows = summary(chosen, cast(GroupBy, group))
@@ -148,6 +132,33 @@ def _inputs() -> _Inputs:
         if journal_generation() == gen:
             _cache = (gen, data)
         return data
+
+
+def _build_lock_for() -> asyncio.Lock:
+    global _build_lock, _lock_loop
+    loop = asyncio.get_running_loop()
+    if _build_lock is None or _lock_loop is not loop:
+        _build_lock = asyncio.Lock()
+        _lock_loop = loop
+    return _build_lock
+
+
+def _upnl_sig(upnl: dict[int, Decimal]) -> tuple[tuple[int, str], ...]:
+    return tuple(sorted((market, str(pnl)) for market, pnl in upnl.items()))
+
+
+async def _shared_trips(upnl: dict[int, Decimal]) -> list[RoundTrip]:
+    """One rebuild per database generation and live uPnL. The rest of a page waits."""
+    global _ready
+    sig = (settings.db_path, journal_generation(), _upnl_sig(upnl))
+    if _ready is not None and _ready[0] == sig:
+        return _ready[1]
+    async with _build_lock_for():
+        if _ready is not None and _ready[0] == sig:
+            return _ready[1]
+        trips = await call(build_off_loop, settings.db_path, upnl)
+        _ready = (sig, trips)
+        return trips
 
 
 def _trips(upnl: dict[int, Decimal] | None = None) -> list[RoundTrip]:

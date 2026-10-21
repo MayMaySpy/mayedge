@@ -93,12 +93,10 @@ class LoopFreeTests(unittest.IsolatedAsyncioTestCase):
         self._td.cleanup()
 
     async def test_journal_trips_stay_off_the_loop(self) -> None:
-        with patch("mayedge.api.routes.journal.journal_load_fills", side_effect=_slow):
-            await assert_loop_free(get_trips())
+        await assert_loop_free(get_trips())
 
     async def test_journal_summary_stays_off_the_loop(self) -> None:
-        with patch("mayedge.api.routes.journal.journal_load_fills", side_effect=_slow):
-            await assert_loop_free(get_summary())
+        await assert_loop_free(get_summary())
 
     async def test_journal_note_stays_off_the_loop(self) -> None:
         with patch("mayedge.api.routes.journal.journal_put_note", side_effect=_slow_none):

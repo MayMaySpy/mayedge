@@ -21,9 +21,9 @@ from mayedge.persist_journal import (
     journal_generation,
     journal_insert_fills,
     journal_insert_funding,
-    journal_load_fills,
     journal_put_note,
 )
+from mayedge.tone_compute import call as real_call
 
 
 def _fill(trade_id: str, side: str, ts: int, pnl: str = "0") -> dict[str, object]:
@@ -113,13 +113,14 @@ class JournalApiTests(IsolatedAsyncioTestCase):
             [_fill("a", "buy", 1_700_000_000), _fill("b", "sell", 1_700_000_100, "20")]
         )
         journal_routes._cache = None
+        journal_routes._ready = None
         calls = {"n": 0}
 
-        def counting() -> list[dict[str, object]]:
+        async def counting(fn: Any, *args: Any) -> Any:
             calls["n"] += 1
-            return journal_load_fills()
+            return await real_call(fn, *args)
 
-        with patch("mayedge.api.routes.journal.journal_load_fills", counting):
+        with patch("mayedge.api.routes.journal.call", counting):
             await journal_routes.get_trips()
             await journal_routes.get_trips()
             self.assertEqual(calls["n"], 1)
@@ -132,15 +133,8 @@ class JournalApiTests(IsolatedAsyncioTestCase):
     async def test_upnl_is_fresh_on_every_request(self) -> None:
         journal_insert_fills([_fill("a", "buy", 1_700_000_000)])
         journal_routes._cache = None
-        seen: list[dict[int, Decimal]] = []
-        real = journal_routes.build_trips
+        journal_routes._ready = None
         previous = account_service._summary
-
-        def capture(*args: Any, **kwargs: Any) -> Any:
-            upnl = kwargs.get("upnl")
-            if isinstance(upnl, dict):
-                seen.append(upnl)
-            return real(*args, **kwargs)
 
         def summary(pnl: str) -> AccountSummary:
             return AccountSummary(
@@ -152,11 +146,10 @@ class JournalApiTests(IsolatedAsyncioTestCase):
 
         account_service._summary = summary("1.5")
         try:
-            with patch("mayedge.api.routes.journal.build_trips", capture):
-                await journal_routes.get_trips()
-                account_service._summary = summary("4")
-                await journal_routes.get_trips()
+            first = await journal_routes.get_trips()
+            account_service._summary = summary("4")
+            second = await journal_routes.get_trips()
         finally:
             account_service._summary = previous
-        self.assertEqual(seen[0][1], Decimal("1.5"))
-        self.assertEqual(seen[1][1], Decimal("4"))
+        self.assertEqual(Decimal(first["trips"][0]["upnl"]), Decimal("1.5"))
+        self.assertEqual(Decimal(second["trips"][0]["upnl"]), Decimal("4"))

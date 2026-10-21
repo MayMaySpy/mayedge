@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from typing import Any
 
 from mayedge.lighter.models import Candle
 from mayedge.mayrekt import candle_tones
@@ -40,12 +41,16 @@ def close(*, wait: bool = False) -> None:
         pool.shutdown(wait=wait, cancel_futures=not wait)
 
 
-async def tones(bars: Sequence[Candle]) -> list[str | None]:
+async def call(fn: Callable[..., Any], *args: Any) -> Any:
+    """Run ``fn(*args)`` in the worker. A broken worker is replaced once."""
     loop = asyncio.get_running_loop()
-    payload = list(bars)
     try:
-        found: list[str | None] = await loop.run_in_executor(_executor(), candle_tones, payload)
+        return await loop.run_in_executor(_executor(), fn, *args)
     except BrokenProcessPool:
         close()
-        found = await loop.run_in_executor(_executor(), candle_tones, payload)
+        return await loop.run_in_executor(_executor(), fn, *args)
+
+
+async def tones(bars: Sequence[Candle]) -> list[str | None]:
+    found: list[str | None] = await call(candle_tones, list(bars))
     return found
