@@ -1,14 +1,10 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type {
-  IChartApiBase,
   IPrimitivePaneRenderer,
   IPrimitivePaneView,
-  ISeriesApi,
   ISeriesPrimitive,
-  ISeriesPrimitiveAxisView,
-  SeriesAttachedParameter,
-  SeriesType,
 } from "lightweight-charts";
+import { AttachedPrimitive, measureText, PriceAxisLabel } from "@/lib/chartPrimitive";
 import type { TopOfBook } from "@/lib/liveData";
 import { theme } from "@/lib/theme";
 import { formatSize } from "@/lib/utils";
@@ -42,18 +38,6 @@ type SideGeom = {
   color: string;
 };
 
-let measureCtx: CanvasRenderingContext2D | null = null;
-
-function measure(text: string, font: string): number {
-  if (!measureCtx) {
-    const c = document.createElement("canvas");
-    measureCtx = c.getContext("2d");
-  }
-  if (!measureCtx) return text.length * 6.6;
-  measureCtx.font = font;
-  return measureCtx.measureText(text).width;
-}
-
 function sideColor(side: Side): string {
   return side === "bid" ? theme.bid : theme.ask;
 }
@@ -68,67 +52,6 @@ function parseLevel(level: { price: string; size: string } | null): {
   const sizeText = formatSize(level.size);
   if (sizeText === "—") return null;
   return { price, sizeText };
-}
-
-class PriceAxisLabel implements ISeriesPrimitiveAxisView {
-  private _source: TopOfBookPrimitive;
-  private _side: Side;
-  private _y = 0;
-  private _visible = false;
-  private _text = "";
-  private _color: string = theme.muted;
-
-  constructor(source: TopOfBookPrimitive, side: Side) {
-    this._source = source;
-    this._side = side;
-  }
-
-  update() {
-    const series = this._source.series();
-    const level = this._source.top()?.[this._side] ?? null;
-    const parsed = parseLevel(level);
-    if (!series || !parsed) {
-      this._visible = false;
-      return;
-    }
-    const y = series.priceToCoordinate(parsed.price);
-    if (y == null) {
-      this._visible = false;
-      return;
-    }
-    this._y = y;
-    this._visible = true;
-    this._color = sideColor(this._side);
-    this._text = series.priceFormatter().format(parsed.price);
-  }
-
-  coordinate() {
-    return -10000;
-  }
-
-  fixedCoordinate() {
-    return this._y;
-  }
-
-  text() {
-    return this._text;
-  }
-
-  textColor() {
-    return "#ffffff";
-  }
-
-  backColor() {
-    return this._color;
-  }
-
-  visible() {
-    return this._visible;
-  }
-
-  tickVisible() {
-    return this._visible;
-  }
 }
 
 class PaneRenderer implements IPrimitivePaneRenderer {
@@ -166,7 +89,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
       ctx.textBaseline = "middle";
       ctx.textAlign = "right";
       for (const g of this._geoms) {
-        const textW = measure(g.sizeText, FONT);
+        const textW = measureText(g.sizeText, FONT);
         const w = textW + SIZE_PAD_X * 2;
         const x = paneW - RIGHT - w;
         const y = g.labelY - SIZE_H / 2;
@@ -236,40 +159,17 @@ class PaneView implements IPrimitivePaneView {
   }
 }
 
-export class TopOfBookPrimitive implements ISeriesPrimitive {
-  private _series: ISeriesApi<SeriesType> | undefined;
-  private _chart: IChartApiBase<unknown> | undefined;
-  private _requestUpdate: (() => void) | undefined;
+export class TopOfBookPrimitive extends AttachedPrimitive implements ISeriesPrimitive {
   private _top: TopOfBook | null = null;
   private readonly _paneView = new PaneView(this);
-  private readonly _priceAxisViews = [
-    new PriceAxisLabel(this, "bid"),
-    new PriceAxisLabel(this, "ask"),
-  ];
+  private readonly _priceAxisViews = [this._axisLabel("bid"), this._axisLabel("ask")];
 
-  attached(param: SeriesAttachedParameter) {
-    this._series = param.series;
-    this._chart = param.chart as IChartApiBase<unknown>;
-    this._requestUpdate = param.requestUpdate;
-    this._requestUpdate();
-  }
-
-  detached() {
-    this._series = undefined;
-    this._chart = undefined;
-    this._requestUpdate = undefined;
-  }
-
-  series() {
-    return this._series;
-  }
-
-  paneWidth() {
-    try {
-      return this._chart?.paneSize()?.width ?? 0;
-    } catch {
-      return 0;
-    }
+  private _axisLabel(side: Side) {
+    return new PriceAxisLabel(() => {
+      const series = this._series;
+      const parsed = parseLevel(this._top?.[side] ?? null);
+      return series && parsed ? { series, price: parsed.price, color: sideColor(side) } : null;
+    });
   }
 
   top() {

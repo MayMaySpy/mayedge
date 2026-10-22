@@ -1,5 +1,4 @@
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
+import { FieldGroup } from "@/components/ui/field";
 import {
   formatTwapRuntime,
   twapDurationSeconds,
@@ -14,7 +13,7 @@ import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import { parseDecimal } from "@/lib/numbers";
 import { formatPrice } from "@/lib/utils";
 import { trimQty } from "../math";
-import { TicketChips, TicketField } from "../ui";
+import { TicketChips, TicketField, ToggleRow } from "../ui";
 
 const digits = (raw: string) => raw.replace(/[^\d]/g, "");
 const STYLES: { value: TwapStyle; label: string }[] = [
@@ -40,32 +39,6 @@ function TwapRow({ label, value }: { label: string; value: string }) {
       <span className="whitespace-nowrap text-muted-foreground">{label}</span>
       <span className="font-mono tabular-nums text-foreground">{value}</span>
     </div>
-  );
-}
-
-function ToggleRow({
-  id,
-  label,
-  checked,
-  onCheckedChange,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  onCheckedChange: (on: boolean) => void;
-}) {
-  return (
-    <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
-      <FieldLabel htmlFor={id} className="text-base font-normal text-muted-foreground">
-        {label}
-      </FieldLabel>
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(v === true)}
-        aria-label={label}
-      />
-    </Field>
   );
 }
 

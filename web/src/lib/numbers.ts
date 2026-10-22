@@ -4,6 +4,11 @@ export function decimalInput(raw: string): string {
   return raw.replace(/[^\d.,]/g, "");
 }
 
+/** Digits and a dot only, for a basis-point field. */
+export function bpInput(raw: string): string {
+  return raw.replace(/[^\d.]/g, "");
+}
+
 export function canonicalDecimal(raw: string): string | null {
   let s = raw.trim().replace(/[\s\u00a0\u202f]/g, "");
   if (!s) return null;

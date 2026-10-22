@@ -6,6 +6,7 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn, formatPrice } from "@/lib/utils";
 import { SLIP_PRESETS } from "./math";
@@ -179,5 +180,32 @@ export function SlipControl({
         ) : null
       }
     />
+  );
+}
+
+/** A labelled on/off switch, the label on the left. */
+export function ToggleRow({
+  id,
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onCheckedChange: (on: boolean) => void;
+}) {
+  return (
+    <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
+      <FieldLabel htmlFor={id} className="text-base font-normal text-muted-foreground">
+        {label}
+      </FieldLabel>
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={(v) => onCheckedChange(v === true)}
+        aria-label={label}
+      />
+    </Field>
   );
 }

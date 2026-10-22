@@ -1,16 +1,12 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type {
   DrawingUtils,
-  IChartApiBase,
   IPrimitivePaneRenderer,
   IPrimitivePaneView,
-  ISeriesApi,
   ISeriesPrimitive,
-  ISeriesPrimitiveAxisView,
-  SeriesAttachedParameter,
-  SeriesType,
 } from "lightweight-charts";
 import { LineStyle } from "lightweight-charts";
+import { AttachedPrimitive, measureText, PriceAxisLabel } from "@/lib/chartPrimitive";
 import { theme } from "@/lib/theme";
 import { formatUsd } from "@/lib/utils";
 
@@ -77,18 +73,6 @@ type LineGeom = {
   hideQty: boolean;
 };
 
-let measureCtx: CanvasRenderingContext2D | null = null;
-
-function measure(text: string, font: string): number {
-  if (!measureCtx) {
-    const c = document.createElement("canvas");
-    measureCtx = c.getContext("2d");
-  }
-  if (!measureCtx) return text.length * 6.6;
-  measureCtx.font = font;
-  return measureCtx.measureText(text).width;
-}
-
 function formatSignedPnl(n: number): string {
   return n > 0 ? `+${formatUsd(n)}` : formatUsd(n);
 }
@@ -141,66 +125,6 @@ function drawCloseIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
   ctx.stroke();
 }
 
-class PriceAxisLabel implements ISeriesPrimitiveAxisView {
-  private _source: TradingLinesPrimitive;
-  private _id: string;
-  private _y = 0;
-  private _visible = false;
-  private _text = "";
-  private _color: string = theme.muted;
-
-  constructor(source: TradingLinesPrimitive, id: string) {
-    this._source = source;
-    this._id = id;
-  }
-
-  update() {
-    const line = this._source.lineById(this._id);
-    const series = this._source.series();
-    if (!line || !series) {
-      this._visible = false;
-      return;
-    }
-    const y = series.priceToCoordinate(line.price);
-    if (y == null) {
-      this._visible = false;
-      return;
-    }
-    this._y = y;
-    this._visible = true;
-    this._color = line.color;
-    this._text = series.priceFormatter().format(line.price);
-  }
-
-  coordinate() {
-    return -10000;
-  }
-
-  fixedCoordinate() {
-    return this._y;
-  }
-
-  text() {
-    return this._text;
-  }
-
-  textColor() {
-    return "#ffffff";
-  }
-
-  backColor() {
-    return this._color;
-  }
-
-  visible() {
-    return this._visible;
-  }
-
-  tickVisible() {
-    return this._visible;
-  }
-}
-
 class PaneRenderer implements IPrimitivePaneRenderer {
   private _geoms: LineGeom[];
 
@@ -246,10 +170,10 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     const y = g.pillY;
     const x = g.pillX;
     const labelW = g.qtyText
-      ? measure(`${g.prefixText} `, FONT) + measure(g.qtyText, FONT)
-      : measure(g.label, FONT);
+      ? measureText(`${g.prefixText} `, FONT) + measureText(g.qtyText, FONT)
+      : measureText(g.label, FONT);
     let inner = PAD_X + labelW + PAD_X;
-    if (g.pnlText) inner += 2 + measure(g.pnlText, FONT) + PAD_X;
+    if (g.pnlText) inner += 2 + measureText(g.pnlText, FONT) + PAD_X;
     if (g.showActions) inner += BTN + BTN + 4;
     if (g.showCancel) inner += BTN;
 
@@ -269,9 +193,9 @@ class PaneRenderer implements IPrimitivePaneRenderer {
     let tx = x + PAD_X;
     if (g.qtyText) {
       ctx.fillText(`${g.prefixText} `, tx, y + PILL_H / 2);
-      tx += measure(`${g.prefixText} `, FONT);
+      tx += measureText(`${g.prefixText} `, FONT);
       if (!g.hideQty) ctx.fillText(g.qtyText, tx, y + PILL_H / 2);
-      tx += measure(g.qtyText, FONT) + PAD_X;
+      tx += measureText(g.qtyText, FONT) + PAD_X;
     } else {
       ctx.fillText(g.label, tx, y + PILL_H / 2);
       tx += labelW + PAD_X;
@@ -282,7 +206,7 @@ class PaneRenderer implements IPrimitivePaneRenderer {
       ctx.fillRect(tx - PAD_X + 2, y + 3, 1, PILL_H - 6);
       ctx.fillStyle = g.pnlColor;
       ctx.fillText(g.pnlText, tx, y + PILL_H / 2);
-      tx += measure(g.pnlText, FONT) + PAD_X;
+      tx += measureText(g.pnlText, FONT) + PAD_X;
     }
 
     if (g.showActions) {
@@ -339,14 +263,14 @@ class PaneView implements IPrimitivePaneView {
 
 function labelWidth(line: ChartOverlay): number {
   if (line.qtyEditable && line.prefixLabel && line.qtyLabel) {
-    return measure(`${line.prefixLabel} `, FONT) + measure(line.qtyLabel, FONT);
+    return measureText(`${line.prefixLabel} `, FONT) + measureText(line.qtyLabel, FONT);
   }
-  return measure(line.label, FONT);
+  return measureText(line.label, FONT);
 }
 
 function pillWidth(line: ChartOverlay, pnlText: string | null, showActions: boolean, showCancel: boolean): number {
   let inner = PAD_X + labelWidth(line) + PAD_X;
-  if (pnlText) inner += 2 + measure(pnlText, FONT) + PAD_X;
+  if (pnlText) inner += 2 + measureText(pnlText, FONT) + PAD_X;
   if (showActions) inner += BTN + BTN + 4;
   if (showCancel) inner += BTN;
   return inner;
@@ -374,7 +298,7 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number, hideQty: boole
   if (line.kind !== "band") {
     const labelW = labelWidth(line);
     let tx = pillX + PAD_X + labelW + PAD_X;
-    if (pnlText) tx += measure(pnlText, FONT) + PAD_X;
+    if (pnlText) tx += measureText(pnlText, FONT) + PAD_X;
     if (showActions) {
       hits.push({ x: tx, y: pillY, w: BTN, h: PILL_H, id: line.id, action: "reverse" });
       tx += BTN;
@@ -384,8 +308,8 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number, hideQty: boole
     }
     if (interactive && (line.kind === "order" || line.kind === "draft")) {
       if (splitQty) {
-        const prefixW = measure(`${prefixText} `, FONT);
-        const qtyW = measure(qtyText!, FONT);
+        const prefixW = measureText(`${prefixText} `, FONT);
+        const qtyW = measureText(qtyText!, FONT);
         hits.push({
           x: pillX + PAD_X + prefixW,
           y: pillY,
@@ -434,10 +358,7 @@ function layoutLine(line: ChartOverlay, y: number, paneW: number, hideQty: boole
   };
 }
 
-export class TradingLinesPrimitive implements ISeriesPrimitive {
-  private _series: ISeriesApi<SeriesType> | undefined;
-  private _chart: IChartApiBase<unknown> | undefined;
-  private _requestUpdate: (() => void) | undefined;
+export class TradingLinesPrimitive extends AttachedPrimitive implements ISeriesPrimitive {
   private _lines: ChartOverlay[] = [];
   private _hits: HitBox[] = [];
   private _geoms: LineGeom[] = [];
@@ -446,31 +367,6 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
   private _paneViews: PaneView[] = [this._paneView];
   private _priceAxisViews: PriceAxisLabel[] = [];
   private _axisKey = "";
-
-  attached(param: SeriesAttachedParameter) {
-    this._series = param.series;
-    this._chart = param.chart as IChartApiBase<unknown>;
-    this._requestUpdate = param.requestUpdate;
-    this._requestUpdate();
-  }
-
-  detached() {
-    this._series = undefined;
-    this._chart = undefined;
-    this._requestUpdate = undefined;
-  }
-
-  series() {
-    return this._series;
-  }
-
-  paneWidth() {
-    try {
-      return this._chart?.paneSize()?.width ?? 0;
-    } catch {
-      return 0;
-    }
-  }
 
   lines() {
     return this._lines;
@@ -503,7 +399,14 @@ export class TradingLinesPrimitive implements ISeriesPrimitive {
     const key = lines.map((l) => l.id).join("\0");
     if (key !== this._axisKey) {
       this._axisKey = key;
-      this._priceAxisViews = lines.map((l) => new PriceAxisLabel(this, l.id));
+      this._priceAxisViews = lines.map(
+        (l) =>
+          new PriceAxisLabel(() => {
+            const line = this.lineById(l.id);
+            const series = this._series;
+            return line && series ? { series, price: line.price, color: line.color } : null;
+          })
+      );
       this._paneViews = [this._paneView];
     }
     this._requestUpdate?.();

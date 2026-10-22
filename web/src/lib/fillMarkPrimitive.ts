@@ -1,13 +1,10 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type {
-  IChartApiBase,
   IPrimitivePaneRenderer,
   IPrimitivePaneView,
-  ISeriesApi,
   ISeriesPrimitive,
-  SeriesAttachedParameter,
-  SeriesType,
 } from "lightweight-charts";
+import { AttachedPrimitive } from "@/lib/chartPrimitive";
 import { theme } from "@/lib/theme";
 
 const RADIUS = 7;
@@ -94,33 +91,9 @@ class PaneView implements IPrimitivePaneView {
   }
 }
 
-export class FillMarksPrimitive implements ISeriesPrimitive {
-  private _series: ISeriesApi<SeriesType> | undefined;
-  private _chart: IChartApiBase<unknown> | undefined;
-  private _requestUpdate: (() => void) | undefined;
+export class FillMarksPrimitive extends AttachedPrimitive implements ISeriesPrimitive {
   private _marks: FillSpot[] = [];
   private readonly _paneView = new PaneView(this);
-
-  attached(param: SeriesAttachedParameter) {
-    this._series = param.series;
-    this._chart = param.chart as IChartApiBase<unknown>;
-    this._requestUpdate = param.requestUpdate;
-    this._requestUpdate();
-  }
-
-  detached() {
-    this._series = undefined;
-    this._chart = undefined;
-    this._requestUpdate = undefined;
-  }
-
-  series() {
-    return this._series;
-  }
-
-  chart() {
-    return this._chart;
-  }
 
   marks() {
     return this._marks;

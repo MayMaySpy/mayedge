@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Switch } from "@/components/ui/switch";
+import { FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import { parseDecimal, decimalInput, stripFractionalZeros } from "@/lib/numbers";
 import { buildLadderPlan } from "@/lib/ladderPlan";
 import { makerMinSize } from "../math";
-import { TicketChips, TicketField } from "../ui";
+import { TicketChips, TicketField, ToggleRow } from "../ui";
 import { LadderPreviewDialog } from "./LadderPreviewDialog";
 
 const ORDER_PRESETS = [10, 20, 50];
@@ -43,32 +42,6 @@ function ladderPreview(state: LadderParamsState, sizeNum: number): string {
     if (state.sizeSkew === "high") parts.push("skew high");
   }
   return parts.join(" · ");
-}
-
-function ToggleRow({
-  id,
-  label,
-  checked,
-  onCheckedChange,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  onCheckedChange: (on: boolean) => void;
-}) {
-  return (
-    <Field orientation="horizontal" className="w-full items-center justify-between gap-2">
-      <FieldLabel htmlFor={id} className="text-base font-normal text-muted-foreground">
-        {label}
-      </FieldLabel>
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={(v) => onCheckedChange(v === true)}
-        aria-label={label}
-      />
-    </Field>
-  );
 }
 
 export function LadderParamsSheet({
