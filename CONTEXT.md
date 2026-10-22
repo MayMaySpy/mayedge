@@ -252,6 +252,52 @@ _Avoid_: safety stop, hard stop
 Emergency stop: halt algos and cancel all working orders. Flatten is optional, not implied. Each step is sent whatever the one before it did, and none waits on the rate budget.
 _Avoid_: panic, shutdown, flatten (as a synonym for Kill)
 
+### Ideas
+
+**Idea**:
+A Market the operator wants to trade, with a Thesis and, once written, a Plan. One side: long or short. It never sends an order. The rules are in [docs/idea-rules.md](docs/idea-rules.md).
+_Avoid_: Watchlist (that is a Watch Set's Markets), setup, signal, call, trade (a trade is a fill)
+
+**Thesis**:
+Why the Idea should work: the narrative in the operator's words, its Catalysts and its tags. Required to save an Idea.
+_Avoid_: reason, note (unqualified; a Round trip's note is the Journal's), narrative (for the whole of it)
+
+**Catalyst**:
+A dated event the Thesis leans on: an unlock, a listing, a mainnet, a vote. Date in UTC, optional.
+_Avoid_: event (unqualified), news
+
+**Plan**:
+An Idea's Entry, Stop and Targets, and the Trigger that says when to enter. Prices only. Size is the Planner's job.
+_Avoid_: plan (lowercase, unqualified: that is the Planner algo), Draft (that is the chart's), setup, bracket
+
+**Entry zone**:
+The price range the Plan enters in, low to high. A single price is a zone with low equal to high. Its plan entry is the midpoint: R, R multiples and the Draft all use it.
+_Avoid_: entry (unqualified, that's the Planner's), buy zone, area
+
+**Trigger**:
+The operator's words for what must happen before entering ("4h close back above 2.30"). The desk does not read it.
+_Avoid_: condition, signal, Activation (that is a Trail's)
+
+**Invalidation**:
+What proves the Thesis wrong. The Plan's stop price is the price part of it; the text says the rest ("unlock moved earlier", "BTC loses 58k").
+_Avoid_: stop (for the text), stop loss
+
+**In zone**:
+An Idea whose Market's Last is inside its Entry zone. A fact on the page. It raises nothing.
+_Avoid_: triggered, ready, hit
+
+**Past stop**:
+A Watching Idea whose Last is at or beyond its stop. The page flags it. The operator drops it or moves the stop; the desk never does.
+_Avoid_: invalidated (only the operator invalidates), stopped out (that is a fill)
+
+**Idea log**:
+The Idea's timestamped lines: the operator's updates, and one line each time the Plan or the status changes, with Last at that moment. Append only.
+_Avoid_: history, journal (that is the Journal page), comments
+
+**Review**:
+How an Idea ended, written when it is Closed or Dropped: an outcome and what the operator learned.
+_Avoid_: post-mortem, result (that is the Round trips' Net)
+
 ### Account
 
 **Account index**:

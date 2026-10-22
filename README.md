@@ -122,6 +122,7 @@ docker compose up -d
 | [docs/alert-rules.md](docs/alert-rules.md) | Every alert, the funding strip and the Scan boards: rule, knob and the test that pins it. |
 | [docs/push-rules.md](docs/push-rules.md) | Every Telegram push: event, text, debounce and knob. |
 | [docs/journal-rules.md](docs/journal-rules.md) | How fills become Round trips, and how Net and R are counted. |
+| [docs/idea-rules.md](docs/idea-rules.md) | An Idea: Thesis, Plan, status, and the Draft hand-off. No orders. |
 | [docs/planner-rules.md](docs/planner-rules.md) | What Planner does, start to finish. |
 | [docs/trail-rules.md](docs/trail-rules.md) | What a Trail does, start to finish. |
 | [docs/trail-scope.md](docs/trail-scope.md) | The reasoning behind Trail. Where it and the rules differ, the rules win. |
