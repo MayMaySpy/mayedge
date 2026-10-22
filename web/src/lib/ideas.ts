@@ -381,6 +381,13 @@ function catalystRank(idea: Idea): number {
   return next == null ? Number.POSITIVE_INFINITY : next.days;
 }
 
+/** The listed symbol a typed one names, whatever its case. Null when none is listed. */
+export function listedSymbol(listed: string[], typed: string): string | null {
+  const want = typed.trim().toUpperCase();
+  if (!want) return null;
+  return listed.find((symbol) => symbol.toUpperCase() === want) ?? null;
+}
+
 export type PlanInput = {
   side: Idea["side"];
   low: string;

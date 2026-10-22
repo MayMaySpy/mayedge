@@ -168,9 +168,11 @@ describe("IdeasPage", () => {
     render(<IdeasPage />);
     await screen.findByText("No Ideas yet");
     await user.click(screen.getAllByRole("button", { name: "New idea" })[0]);
-    expect(screen.getByText(/A Thesis needs at least 10 characters/)).toBeTruthy();
+    expect(screen.getByText("Pick a market.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(screen.getByLabelText("Market"), "zro");
     await user.type(screen.getByLabelText("Why"), "no");
+    expect(screen.getByText("Why needs at least 10 characters (2 so far).")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
