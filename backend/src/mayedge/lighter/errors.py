@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 WAF_MSG = "Lighter blocked this IP (WAF captcha). Wait a minute — too many REST calls."
 RATE_MSG = "Lighter rate limit — retry shortly"
@@ -51,33 +52,56 @@ _CODE_REASONS: tuple[tuple[str, Reject], ...] = (
     ("21728", Reject.DUPLICATE_COI),
 )
 # Exact phrases only. Bare "post", "cross", and "min " are not reasons.
-_PHRASES: tuple[tuple[str, Reject], ...] = (
-    ("invalid nonce", Reject.INVALID_NONCE),
-    ("order not found", Reject.ORDER_NOT_FOUND),
-    ("base or quote amount", Reject.MIN_SIZE),
-    ("post-only", Reject.WOULD_CROSS),
-    ("would cross", Reject.WOULD_CROSS),
+_PHRASES: tuple[tuple[re.Pattern[str], Reject], ...] = (
+    (re.compile(r"invalid nonce"), Reject.INVALID_NONCE),
+    (re.compile(r"order not found"), Reject.ORDER_NOT_FOUND),
+    (re.compile(r"base or quote amount"), Reject.MIN_SIZE),
+    (re.compile(r"post[-_ ]?only"), Reject.WOULD_CROSS),
+    (re.compile(r"would cross"), Reject.WOULD_CROSS),
 )
+
+# The one header that is read: CloudFront's WAF names its captcha or block here.
+_WAF_HEADER = "x-amzn-waf-action"
 
 
 def _is_http_error(err: BaseException) -> bool:
-    """ApiException-shaped: status and body, plus headers that must not be read."""
+    """ApiException-shaped: status, reason and body, plus headers that must not be read."""
     return hasattr(err, "body") or hasattr(err, "headers")
 
 
-def _body_text(err: BaseException) -> str:
+def _waf_action(err: BaseException) -> str | None:
+    headers = getattr(err, "headers", None)
+    if not isinstance(headers, Mapping):
+        return None
+    for key, value in cast(Mapping[object, object], headers).items():
+        if str(key).lower() == _WAF_HEADER:
+            return str(value)
+    return None
+
+
+def _http_text(err: BaseException) -> str:
+    """Status, reason and body, and the WAF action if there is one. No other header."""
     body = getattr(err, "body", None)
     data = getattr(err, "data", None)
     text = body if isinstance(body, str) and body else ("" if data is None else str(data))
+    parts: list[str] = []
     status = getattr(err, "status", None)
     if isinstance(status, int):
-        return f"({status}) {text}"
-    return text
+        parts.append(f"({status})")
+    reason = getattr(err, "reason", None)
+    if isinstance(reason, str) and reason:
+        parts.append(reason)
+    if text:
+        parts.append(text)
+    waf = _waf_action(err)
+    if waf is not None:
+        parts.append(f"{_WAF_HEADER}: {waf}")
+    return " ".join(parts)
 
 
 def _scan_text(err: object) -> str:
     if isinstance(err, BaseException) and _is_http_error(err):
-        return _body_text(err)
+        return _http_text(err)
     return str(err or "")
 
 
@@ -98,6 +122,8 @@ def code_of(err: object) -> int | None:
 
 
 def _from_text(text: str) -> Reject | None:
+    if venue_client_error(text):
+        return Reject.BLOCKED
     for code, reason in _CODE_REASONS:
         if has_code(text, code):
             return reason
@@ -105,10 +131,8 @@ def _from_text(text: str) -> Reject | None:
         return Reject.WOULD_CROSS
     low = text.lower()
     for phrase, reason in _PHRASES:
-        if phrase in low:
+        if phrase.search(low):
             return reason
-    if venue_client_error(text):
-        return Reject.BLOCKED
     return None
 
 
@@ -144,7 +168,7 @@ def reject_reason(err: object) -> Reject | None:
         if _is_http_error(err):
             if getattr(err, "status", None) == 429:
                 return Reject.BLOCKED
-            return _from_text(_body_text(err))
+            return _from_text(_http_text(err))
         if isinstance(err, VenueBlocked):
             return Reject.BLOCKED
     if err is None or err == "":

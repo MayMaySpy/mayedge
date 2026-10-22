@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from lighter.exceptions import ApiException
+from urllib3 import HTTPHeaderDict
 
 from mayedge.lighter.budget import BudgetRefused
 from mayedge.lighter.errors import (
@@ -27,6 +28,24 @@ def _http(status: int, body: str) -> ApiException:
     return err
 
 
+class _Resp:
+    """Just enough of a urllib3 response for ApiException to read status, reason and headers."""
+
+    def __init__(self, status: int, reason: str, headers: dict[str, str], body: str) -> None:
+        self.status = status
+        self.reason = reason
+        self.data = body.encode()
+        self._headers = HTTPHeaderDict(headers)
+
+    def getheaders(self) -> HTTPHeaderDict:
+        return self._headers
+
+
+def _sdk(status: int, reason: str, headers: dict[str, str], body: str = "") -> ApiException:
+    """An ApiException built the way the SDK builds one, from the response."""
+    return ApiException(http_resp=_Resp(status, reason, headers, body), body=body)
+
+
 class RejectReasonTests(unittest.TestCase):
     def test_blocked(self) -> None:
         for err in (
@@ -39,6 +58,36 @@ class RejectReasonTests(unittest.TestCase):
         ):
             self.assertIs(reject_reason(err), Reject.BLOCKED, err)
         self.assertIsNone(reject_reason(BudgetRefused(429, "local")))
+
+    def test_waf_is_blocked(self) -> None:
+        """The WAF header and the HTTP reason are read; no other header is."""
+        for err in (
+            _sdk(405, "Not Allowed", {"x-amzn-waf-action": "captcha", **_HEADER}),
+            _sdk(405, "Not Allowed", {}, "<html><script src='challenge.js'></script></html>"),
+            _sdk(403, "Forbidden", {"X-Amzn-Waf-Action": "block"}, "Request blocked."),
+            _sdk(
+                403,
+                "Forbidden",
+                {"x-amzn-waf-action": "captcha"},
+                '{"code":21104,"message":"invalid nonce"}',
+            ),
+        ):
+            self.assertIs(reject_reason(err), Reject.BLOCKED, err)
+
+    def test_other_headers_are_not_read(self) -> None:
+        exposed = {"Access-Control-Expose-Headers": "x-amzn-waf-action, too many requests"}
+        self.assertIsNone(reject_reason(_sdk(403, "Forbidden", exposed)))
+        nonce = _sdk(400, "Bad Request", exposed, '{"code":21104,"message":"invalid nonce"}')
+        self.assertIs(reject_reason(nonce), Reject.INVALID_NONCE)
+
+    def test_blocked_comes_first(self) -> None:
+        for err in (
+            "code=21702 rate limit",
+            "invalid nonce: too many requests",
+            RuntimeError("order not found (429)"),
+            _http(400, '{"code":23000,"message":"post-only would cross"}'),
+        ):
+            self.assertIs(reject_reason(err), Reject.BLOCKED, err)
 
     def test_invalid_nonce(self) -> None:
         poisoned = _http(400, '{"code":21104,"message":"invalid nonce"}')
@@ -95,6 +144,9 @@ class RejectReasonTests(unittest.TestCase):
             RuntimeError("rejected (21702)"),
             RuntimeError("post-only order would cross"),
             "post-only",
+            "post only order rejected",
+            "PostOnly order would take liquidity",
+            "POST_ONLY",
             "would cross",
             21700,
             21709,
@@ -105,6 +157,7 @@ class RejectReasonTests(unittest.TestCase):
             "order price 64290.5 is too far from mark",
             "order 8000021706 rejected",
             "Access-Control-Allow-Methods: GET, POST",
+            "POST https://mainnet.zklighter.elliot.ai/api/v1/sendTx only failed",
             "cross-origin",
             21701,
             21706,
