@@ -21,7 +21,7 @@ import {
 } from "@/lib/liquidationHeat";
 import { useSelectedRowInView } from "@/lib/scanScroll";
 import { useStoredSort, type SortCol } from "@/lib/tableSort";
-import { cn, formatUsdCompact } from "@/lib/utils";
+import { cn, formatUsdCompact, signClass } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-scan-liq-sort";
 
@@ -57,12 +57,6 @@ function formatNet(n: number): string {
   if (n > 0) return `+${core}`;
   if (n < 0) return `-${core}`;
   return core;
-}
-
-function netClass(n: number) {
-  if (n > 0) return "text-bid";
-  if (n < 0) return "text-ask";
-  return "text-muted-foreground";
 }
 
 function formatWindowShare(share: number): string {
@@ -122,7 +116,7 @@ function LiqMetricCells({
       <TableCell hideBelow="lg" className="text-right text-muted-foreground">{formatSharePct(windowShare)}</TableCell>
       <TableCell hideBelow="md" className="text-right">{formatUsd(largestUsd)}</TableCell>
       <TableCell hideBelow="md" className="text-right text-muted-foreground">{formatSharePct(shareOfOi)}</TableCell>
-      <TableCell className={cn("text-right", netClass(netUsd))}>{formatNet(netUsd)}</TableCell>
+      <TableCell className={cn("text-right", signClass(netUsd))}>{formatNet(netUsd)}</TableCell>
       <TableCell hideBelow="lg">
         <HeatBar longUsd={longUsd} shortUsd={shortUsd} totalUsd={totalUsd} maxTotal={maxTotal} />
       </TableCell>

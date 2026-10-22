@@ -20,7 +20,7 @@ import {
   type AssetSort,
   type AssetSortKey,
 } from "@/lib/assetsTable";
-import { cn, formatPrice, formatSigned, formatSize, formatUsd } from "@/lib/utils";
+import { cn, formatPrice, formatSigned, formatSize, formatUsd, signClass } from "@/lib/utils";
 
 function n(value: string | undefined) {
   const x = parseFloat(value ?? "");
@@ -36,12 +36,6 @@ function formatLtv(raw: string): string {
 function formatAssetUsd(value: number): string {
   if (!(value > 0)) return "—";
   return formatUsd(value);
-}
-
-function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
 }
 
 function SortHead({
@@ -160,7 +154,7 @@ export function AssetsTab({
                     {formatSize(a.margin_balance)}
                   </TableCell>
                   <TableCell hideBelow="xl" className="text-right">{formatSize(a.available)}</TableCell>
-                  <TableCell hideBelow="sm" className={cn("text-right", pnlClass(n(a.unrealized_pnl)))}>
+                  <TableCell hideBelow="sm" className={cn("text-right", signClass(n(a.unrealized_pnl)))}>
                     {formatSigned(a.unrealized_pnl)}
                   </TableCell>
                   <TableCell className="text-right">{formatAssetUsd(n(a.usd))}</TableCell>

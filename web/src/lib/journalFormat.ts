@@ -1,6 +1,6 @@
 import type { JournalTrip } from "@/lib/api";
 import { DESK_DATE_LOCALE } from "@/lib/utcTime";
-import { formatNumber, formatPrice, formatSigned } from "@/lib/utils";
+import { formatNumber, formatPrice, formatSigned, signClass } from "@/lib/utils";
 
 /** Journal numbers come as full-precision decimal strings. These cut them to what a person reads. */
 
@@ -128,10 +128,7 @@ export function size(value: string | null | undefined): string {
 }
 
 export function pnlClass(value: string | null | undefined): string {
-  const n = num(value) ?? 0;
-  if (n > 0) return "text-bid";
-  if (n < 0) return "text-ask";
-  return "text-muted-foreground";
+  return signClass(num(value));
 }
 
 export function inRange(trip: JournalTrip, range: JournalRange): boolean {

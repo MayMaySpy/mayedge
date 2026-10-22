@@ -1,9 +1,9 @@
-import { ChevronDown, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { algoCanResume, algoIsWorking } from "@/lib/algos";
+import { ClipLine, RowButton, RowFrame, RowNote, RowToggle } from "@/components/widgets/algo/RowParts";
+import { algoCanResume, algoIsWorking, algoNoteTone } from "@/lib/algos";
 import type { AlgoState } from "@/lib/api";
 import {
   canProtectNow,
@@ -50,26 +50,8 @@ export function PlannerRow({
     algo.status === "error" ? "ask" : algo.status === "paused" ? "warn" : long ? "bid" : "ask";
 
   return (
-    <div
-      className={cn(
-        "border-t border-rule px-2 py-2",
-        emphasize &&
-          (long
-            ? "shadow-[inset_2px_0_0_0_var(--color-bid)]"
-            : "shadow-[inset_2px_0_0_0_var(--color-ask)]")
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full min-w-0 items-center gap-2 text-left"
-      >
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            !expanded && "-rotate-90"
-          )}
-        />
+    <RowFrame emphasize={emphasize} long={long}>
+      <RowToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)}>
         <span className={cn("font-mono text-base font-semibold", long ? "text-bid" : "text-ask")}>
           {long ? "LONG" : "SHORT"}
         </span>
@@ -78,7 +60,7 @@ export function PlannerRow({
         <Badge variant={tone} className="ml-auto shrink-0">
           {phase}
         </Badge>
-      </button>
+      </RowToggle>
 
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <div className="min-w-0 font-mono text-sm tabular-nums text-muted-foreground">
@@ -99,44 +81,33 @@ export function PlannerRow({
         {tradingEnabled && working && (
           <div className="flex shrink-0 items-center gap-0.5">
             {algoCanResume(algo.status) && onResume && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
+              <RowButton
+                busy={busy}
                 onClick={onResume}
-                className="h-6 gap-1 px-1.5"
+                icon={<Play data-icon="inline-start" />}
                 title="Accept the Position as it is now and carry on"
               >
-                <Play data-icon="inline-start" />
                 Resume
-              </Button>
+              </RowButton>
             )}
             {onProtect && canProtectNow(algo) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
+              <RowButton
+                busy={busy}
                 onClick={onProtect}
-                className="h-6 px-1.5"
                 title="Ends the entry: what is left comes off, and the targets go on for what filled"
               >
                 Protect now
-              </Button>
+              </RowButton>
             )}
             {onStop && (
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                disabled={busy}
+              <RowButton
+                busy={busy}
                 onClick={onStop}
-                className="h-6 px-1.5"
+                danger
                 title="Cancels the stop and the targets. The Position is left with no stop."
               >
                 Stop
-              </Button>
+              </RowButton>
             )}
           </div>
         )}
@@ -157,41 +128,32 @@ export function PlannerRow({
         {algo.algo_id && <span>{algo.algo_id}</span>}
       </div>
 
-      {(algo.reason || algo.error) && (
-        <div
-          className={cn(
-            "mt-1 truncate font-mono text-sm",
-            algo.status === "error" ? "text-ask" : algo.status === "paused" ? "text-warn" : "text-muted-foreground"
-          )}
-        >
-          {algo.error || algo.reason}
-        </div>
-      )}
+      <RowNote text={algo.error || algo.reason} tone={algoNoteTone(algo.status)} />
 
       {expanded && (
         <div className="mt-2 flex flex-col gap-1 pt-1">
           <Separator />
           {live.length === 0 && <div className="font-mono text-xs text-muted-foreground">Nothing on the venue</div>}
           {live.map((c) => (
-            <div key={c.seq} className="flex items-baseline gap-2 font-mono text-xs">
-              <span className={c.side === "buy" ? "text-bid" : "text-ask"}>
-                {plannerClipLabel(algo, c.client_order_index) ?? "clip"}
-              </span>
+            <ClipLine
+              key={c.seq}
+              label={plannerClipLabel(algo, c.client_order_index) ?? "clip"}
+              labelClass={c.side === "buy" ? "text-bid" : "text-ask"}
+            >
               <span className="text-muted-foreground">
                 {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {marketPrice(c.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           ))}
           {(algo.fills ?? []).map((f) => (
-            <div key={`f-${f.seq}`} className="flex items-baseline gap-2 font-mono text-xs">
-              <span className="text-text">fill</span>
+            <ClipLine key={`f-${f.seq}`} label="fill" labelClass="text-text">
               <span className="text-text">
                 {formatSize(f.qty)} @ {marketPrice(f.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           ))}
         </div>
       )}
-    </div>
+    </RowFrame>
   );
 }

@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AlgoRow } from "@/components/widgets/algo/AlgoRow";
 import { PlannerRow } from "@/components/widgets/planner/PlannerRow";
 import { TrailRow } from "@/components/widgets/trail/TrailRow";
+import { ScopeToggle } from "@/components/widgets/ListControls";
 import { algoBlotter, algoResumeNotice } from "@/lib/algos";
 import { api, type AlgoState } from "@/lib/api";
 import { setAlgo, useLiveAlgos } from "@/lib/liveData";
@@ -209,21 +209,7 @@ export function AlgoOrdersPanel({ symbol, tradingEnabled }: AlgoOrdersPanelProps
             </TabsTrigger>
           </TabsList>
           <div className="ml-auto flex items-center gap-1">
-            <ToggleGroup
-              type="single"
-              variant="seg"
-              size="sm"
-              spacing={0}
-              value={scope}
-              onValueChange={(v) => {
-                if (v === "all" || v === "pair") setScope(v);
-              }}
-            >
-              <ToggleGroupItem value="all">All</ToggleGroupItem>
-              <ToggleGroupItem value="pair" disabled={!symbol}>
-                {symbol ?? "Pair"}
-              </ToggleGroupItem>
-            </ToggleGroup>
+            <ScopeToggle scope={scope} onScopeChange={setScope} pair={symbol} />
             {tradingEnabled && working.length > 0 ? (
               <Button
                 variant="danger"

@@ -1,9 +1,9 @@
-import { ChevronDown, Pause, Play } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { useState } from "react";
 import { notifyOk } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { ClipLine, RowButton, RowFrame, RowNote, RowToggle } from "@/components/widgets/algo/RowParts";
 import { algoLabelForType } from "@/lib/algoPlugins";
 import {
   algoAvgFillPrice,
@@ -15,15 +15,9 @@ import {
   algoReasonLabel,
 } from "@/lib/algos";
 import type { AlgoClip, AlgoFill, AlgoState } from "@/lib/api";
-import { cn, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatSigned, formatSize, signClass } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
-
-function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
 
 function venueRef(row: {
   order_index?: string | number | null;
@@ -118,27 +112,13 @@ export function AlgoRow({
           : "muted";
 
   return (
-    <div
-      className={cn(
-        "border-t border-rule px-2 py-2",
-        emphasize &&
-          (buy
-            ? "shadow-[inset_2px_0_0_0_var(--color-bid)]"
-            : "shadow-[inset_2px_0_0_0_var(--color-ask)]")
-      )}
-    >
+    <RowFrame emphasize={emphasize} long={buy}>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
+        <RowToggle
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <ChevronDown
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              !expanded && "-rotate-90"
-            )}
-          />
           <span className={cn("font-mono text-base font-semibold", buy ? "text-bid" : "text-ask")}>
             {(algo.side ?? "—").toUpperCase()}
           </span>
@@ -149,7 +129,7 @@ export function AlgoRow({
           <Badge variant={badgeVariant} className="ml-auto shrink-0">
             {phase.label}
           </Badge>
-        </button>
+        </RowToggle>
       </div>
 
       <div className="mt-2 h-1 overflow-hidden rounded-[1px] bg-elevated">
@@ -171,7 +151,7 @@ export function AlgoRow({
               className="ml-2 text-xs text-muted-foreground"
               title="Realized from closed lots, before fees"
             >
-              pnl <span className={pnlClass(capturedPnl)}>{formatSigned(capturedPnl)}</span>
+              pnl <span className={signClass(capturedPnl)}>{formatSigned(capturedPnl)}</span>
             </span>
           )}
         </div>
@@ -179,42 +159,19 @@ export function AlgoRow({
           <div className="flex shrink-0 items-center gap-0.5">
             {canResume
               ? onResume && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={onResume}
-                    className="h-6 gap-1 px-1.5"
-                  >
-                    <Play data-icon="inline-start" />
+                  <RowButton busy={busy} onClick={onResume} icon={<Play data-icon="inline-start" />}>
                     Resume
-                  </Button>
+                  </RowButton>
                 )
               : onPause && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={onPause}
-                    className="h-6 gap-1 px-1.5"
-                  >
-                    <Pause data-icon="inline-start" />
+                  <RowButton busy={busy} onClick={onPause} icon={<Pause data-icon="inline-start" />}>
                     Pause
-                  </Button>
+                  </RowButton>
                 )}
             {onStop && (
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                disabled={busy}
-                onClick={onStop}
-                className="h-6 px-1.5"
-              >
+              <RowButton busy={busy} onClick={onStop} danger>
                 Stop
-              </Button>
+              </RowButton>
             )}
           </div>
         )}
@@ -263,16 +220,10 @@ export function AlgoRow({
         )}
       </div>
 
-      {status && (
-        <div
-          className={cn(
-            "mt-1 truncate font-mono text-sm",
-            algo.status === "error" ? "text-ask" : phase.tone === "warn" ? "text-warn" : "text-muted-foreground"
-          )}
-        >
-          {status}
-        </div>
-      )}
+      <RowNote
+        text={status}
+        tone={algo.status === "error" ? "error" : phase.tone === "warn" ? "warn" : undefined}
+      />
 
       {expanded && (
         <div className="mt-2 flex flex-col gap-1 pt-1">
@@ -291,54 +242,49 @@ export function AlgoRow({
             </div>
           )}
           {twoSided && liveBid && (
-            <div className="flex items-baseline gap-2 font-mono text-xs">
-              <span className="text-bid">bid</span>
+            <ClipLine label="bid" labelClass="text-bid">
               <span className="text-muted-foreground">
                 {formatSize(liveBid.remaining)} @ {marketPrice(liveBid.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           )}
           {twoSided && liveAsk && (
-            <div className="flex items-baseline gap-2 font-mono text-xs">
-              <span className="text-ask">ask</span>
+            <ClipLine label="ask" labelClass="text-ask">
               <span className="text-muted-foreground">
                 {formatSize(liveAsk.remaining)} @ {marketPrice(liveAsk.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           )}
           {liveTps.map((clip) => (
-            <div key={clip.seq} className="flex items-baseline gap-2 font-mono text-xs">
-              <span className={clip.side === "buy" ? "text-bid" : "text-ask"}>profit</span>
+            <ClipLine key={clip.seq} label="profit" labelClass={clip.side === "buy" ? "text-bid" : "text-ask"}>
               <span className="text-muted-foreground">
                 {formatSize(clip.remaining)} @ {marketPrice(clip.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           ))}
           {!twoSided && live && (
-            <div className="flex items-baseline gap-2 font-mono text-xs">
-              <span className={buy ? "text-bid" : "text-ask"}>live</span>
+            <ClipLine label="live" labelClass={buy ? "text-bid" : "text-ask"}>
               <span className="text-text">{venueRef(live)}</span>
               <span className="text-muted-foreground">
                 {formatSize(live.remaining)} @ {marketPrice(live.price, algo.symbol)}
               </span>
               <span className="ml-auto text-muted-foreground" title="Placed, UTC">{utcClock(live.placed_at)}</span>
-            </div>
+            </ClipLine>
           )}
           {fills.length === 0 && !live && !liveBid && !liveAsk && liveTps.length === 0 && (
             <div className="font-mono text-xs text-muted-foreground">No clips yet</div>
           )}
           {fills.map((f) => (
-            <div key={`f-${f.seq}`} className="flex items-baseline gap-2 font-mono text-xs">
-              <span className="text-text">fill</span>
+            <ClipLine key={`f-${f.seq}`} label="fill" labelClass="text-text">
               <span className="text-muted-foreground">{venueRef(f)}</span>
               <span className="text-text">
                 {formatSize(f.qty)} @ {marketPrice(f.price, algo.symbol)}
               </span>
               <span className="ml-auto text-muted-foreground" title="Filled, UTC">{utcClock(f.ts)}</span>
-            </div>
+            </ClipLine>
           ))}
         </div>
       )}
-    </div>
+    </RowFrame>
   );
 }

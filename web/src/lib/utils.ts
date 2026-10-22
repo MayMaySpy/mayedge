@@ -71,6 +71,13 @@ export function formatUsdCompact(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 
+/** Green for a gain, red for a loss, muted for flat or unknown. */
+export function signClass(value: number | null | undefined): string {
+  if (value != null && value > 0) return "text-bid";
+  if (value != null && value < 0) return "text-ask";
+  return "text-muted-foreground";
+}
+
 export function formatSigned(value: string | number | null | undefined, decimals = 2): string {
   if (value == null || value === "") return "—";
   const n = typeof value === "string" ? parseFloat(value) : value;

@@ -98,6 +98,13 @@ export function algoIsPaused(status: string | null | undefined): boolean {
   return status === "paused";
 }
 
+/** How an algo row colours its reason line: red for an error, amber while paused. */
+export function algoNoteTone(status: string | null | undefined): "error" | "warn" | undefined {
+  if (status === "error") return "error";
+  if (status === "paused") return "warn";
+  return undefined;
+}
+
 export function algoCanResume(status: string | null | undefined): boolean {
   return status === "paused" || status === "error";
 }

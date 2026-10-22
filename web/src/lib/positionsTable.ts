@@ -214,13 +214,6 @@ export function roePct(p: Position, pnl: number): number | null {
   return null;
 }
 
-/** Green for a gain, red for a loss, muted for flat. */
-export function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
-
 /**
  * Next funding: what a Position receives (+) or pays (−) when the hour in progress settles,
  * at its notional at mark times the Funding estimate. Positive funding is longs paying.

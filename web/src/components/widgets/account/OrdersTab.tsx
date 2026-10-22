@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableName, TableRow } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ScopeToggle } from "@/components/widgets/ListControls";
 import { api, type Market, type OpenOrder } from "@/lib/api";
 import { algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
 import { protectOrderLabel, stopTakeKind } from "@/lib/positionsTable";
@@ -145,21 +145,7 @@ export function OrdersTab({
   return (
           <ScrollArea className="h-full">
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <ToggleGroup
-                type="single"
-                variant="seg"
-                size="sm"
-                spacing={0}
-                value={orderScope}
-                onValueChange={(v) => {
-                  if (v === "all" || v === "pair") setOrderScope(v);
-                }}
-              >
-                <ToggleGroupItem value="all">All</ToggleGroupItem>
-                <ToggleGroupItem value="pair" disabled={!market}>
-                  {market?.symbol ?? "Pair"}
-                </ToggleGroupItem>
-              </ToggleGroup>
+              <ScopeToggle scope={orderScope} onScopeChange={setOrderScope} pair={market?.symbol} />
               <div className="ml-auto flex gap-1">
                 <Button
                   variant="outline"

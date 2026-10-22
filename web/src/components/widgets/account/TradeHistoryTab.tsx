@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { notifyErr } from "@/lib/notify";
-import { Button } from "@/components/ui/button";
+import { useMemo, useState } from "react";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -12,12 +10,13 @@ import {
   TableName,
   TableRow,
 } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { LoadingRows, LoadMore, ScopeToggle, type Scope } from "@/components/widgets/ListControls";
 import { api, type AccountTrade, type Market } from "@/lib/api";
 import { useLiveAccountTrades } from "@/lib/liveData";
-import { cn, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatSigned, formatSize, signClass } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
+import { usePagedHistory } from "./usePagedHistory";
 
 function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[] {
   const byId = new Map<string, AccountTrade>();
@@ -46,13 +45,8 @@ function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[]
   return [...byId.values()].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 }
 
-function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
-
-const EMPTY_TRADES: AccountTrade[] = [];
+const FETCH = (q: Parameters<typeof api.accountTrades>[0]) =>
+  api.accountTrades(q).then((r) => ({ rows: r.trades, next_cursor: r.next_cursor }));
 
 interface TradeHistoryTabProps {
   market: Market | null;
@@ -68,66 +62,13 @@ export function TradeHistoryTab({
   onSymbolChange,
 }: TradeHistoryTabProps) {
   const live = useLiveAccountTrades();
-  const [scope, setScope] = useState<"all" | "pair">("all");
-  const [page, setPage] = useState<{
-    key: string | null;
-    rows: AccountTrade[];
-    cursor: string | null;
-  }>({ key: null, rows: [], cursor: null });
-  const [loadingMore, setLoadingMore] = useState(false);
-
+  const [scope, setScope] = useState<Scope>("all");
   const marketIndex = scope === "pair" && market ? market.market_index : undefined;
-  const queryKey = String(marketIndex ?? "all");
-  const rows = page.key === queryKey ? page.rows : EMPTY_TRADES;
-  const cursor = page.key === queryKey ? page.cursor : null;
-  const loading = active && page.key !== queryKey;
-
-  const loadMore = useCallback(async () => {
-    if (!cursor) return;
-    setLoadingMore(true);
-    try {
-      const result = await api.accountTrades({
-        market_index: marketIndex ?? null,
-        cursor,
-        limit: 50,
-      });
-      setPage((prev) => ({
-        key: queryKey,
-        rows: prev.key === queryKey ? [...prev.rows, ...result.trades] : result.trades,
-        cursor: result.next_cursor,
-      }));
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Failed to load trades");
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [cursor, marketIndex, queryKey]);
-
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await api.accountTrades({
-          market_index: marketIndex ?? null,
-          limit: 50,
-        });
-        if (cancelled) return;
-        setPage({
-          key: queryKey,
-          rows: result.trades,
-          cursor: result.next_cursor,
-        });
-      } catch (e) {
-        if (cancelled) return;
-        notifyErr(e instanceof Error ? e.message : "Failed to load trades");
-        setPage({ key: queryKey, rows: [], cursor: null });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active, marketIndex, queryKey]);
+  const { rows, cursor, loading, loadingMore, loadMore } = usePagedHistory(FETCH, {
+    active,
+    marketIndex,
+    what: "trades",
+  });
 
   const merged = useMemo(() => {
     const filteredLive =
@@ -137,29 +78,10 @@ export function TradeHistoryTab({
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <ToggleGroup
-        type="single"
-        variant="seg"
-        size="sm"
-        spacing={0}
-        value={scope}
-        onValueChange={(v) => {
-          if (v === "all" || v === "pair") setScope(v);
-        }}
-        className="mb-1.5"
-      >
-        <ToggleGroupItem value="all">All</ToggleGroupItem>
-        <ToggleGroupItem value="pair" disabled={!market}>
-          {market?.symbol ?? "Pair"}
-        </ToggleGroupItem>
-      </ToggleGroup>
+      <ScopeToggle scope={scope} onScopeChange={setScope} pair={market?.symbol} className="mb-1.5" />
 
       {loading && merged.length === 0 ? (
-        <div className="flex flex-col gap-1 p-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-5 animate-pulse bg-elevated" />
-          ))}
-        </div>
+        <LoadingRows />
       ) : !merged.length ? (
         <Empty className="rounded-none border-0 p-4">
           <EmptyDescription>
@@ -211,10 +133,10 @@ export function TradeHistoryTab({
                     </TableCell>
                     <TableCell hideBelow="sm" className="text-right">{formatSize(t.size)}</TableCell>
                     <TableCell className="text-right">{marketPrice(t.price, t.symbol)}</TableCell>
-                    <TableCell hideBelow="lg" className={cn("text-right", pnlClass(-fee))}>
+                    <TableCell hideBelow="lg" className={cn("text-right", signClass(-fee))}>
                       {formatSigned(-fee)}
                     </TableCell>
-                    <TableCell className={cn("text-right", pnlClass(pnl))}>
+                    <TableCell className={cn("text-right", signClass(pnl))}>
                       {formatSigned(t.pnl)}
                     </TableCell>
                     <TableCell hideBelow="xl" className="text-right text-muted-foreground">
@@ -225,18 +147,7 @@ export function TradeHistoryTab({
               })}
             </TableBody>
           </Table>
-          {cursor && (
-            <div className="flex justify-center pt-2 pb-3">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={loadingMore}
-                onClick={() => void loadMore()}
-              >
-                {loadingMore ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          )}
+          <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
         </>
       )}
     </ScrollArea>

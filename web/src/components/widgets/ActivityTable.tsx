@@ -13,7 +13,7 @@ import { useScanActivity } from "@/lib/liveData";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { ACTIVITY_SORTS, rankActivity, type ActivitySort } from "@/lib/scanActivity";
 import { useStoredSort, type SortCol } from "@/lib/tableSort";
-import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
+import { cn, formatPct, formatUsdCompact, signClass } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-activity-sort";
 
@@ -26,11 +26,6 @@ const COLS: readonly SortCol<ActivitySort>[] = [
   { key: "funding", label: "Funding", align: "end", title: "Hourly rate, and sigmas from its own 24h median", hideBelow: "md" },
   { key: "premium", label: "Premium", align: "end", title: "Mark over index, and sigmas from its own 24h median", hideBelow: "md" },
 ];
-
-function signedClass(value: number | null | undefined) {
-  if (value == null || value === 0) return "text-muted-foreground";
-  return value > 0 ? "text-bid" : "text-ask";
-}
 
 function sigmas(z: number | null): string {
   return z == null ? "" : `${Math.abs(z).toFixed(1)}σ`;
@@ -77,7 +72,7 @@ export const ActivityTable = memo(function ActivityTable({ symbol, onSymbolChang
                     {row.held && <span className="text-xs text-warn">held</span>}
                   </div>
                 </TableCell>
-                <TableCell className={cn("text-right", signedClass(row.move_5m))}>
+                <TableCell className={cn("text-right", signClass(row.move_5m))}>
                   {formatPct(row.move_5m)}
                 </TableCell>
                 <TableCell hideBelow="lg" className="text-right text-muted-foreground">
@@ -86,7 +81,7 @@ export const ActivityTable = memo(function ActivityTable({ symbol, onSymbolChang
                 <TableCell hideBelow="sm" className="text-right">
                   {row.vol_x == null ? "—" : `${row.vol_x.toFixed(1)}×`}
                 </TableCell>
-                <TableCell hideBelow="sm" className={cn("text-right", signedClass(row.oi_5m))}>
+                <TableCell hideBelow="sm" className={cn("text-right", signClass(row.oi_5m))}>
                   {row.oi_5m == null ? "—" : formatPct(row.oi_5m)}
                   {row.oi_usd_5m ? (
                     <span className="ml-1 text-muted-foreground">
@@ -94,11 +89,11 @@ export const ActivityTable = memo(function ActivityTable({ symbol, onSymbolChang
                     </span>
                   ) : null}
                 </TableCell>
-                <TableCell hideBelow="md" className={cn("text-right", signedClass(-row.funding))}>
+                <TableCell hideBelow="md" className={cn("text-right", signClass(-row.funding))}>
                   {formatFundingPct(row.funding)}
                   <span className="ml-1 text-muted-foreground">{sigmas(row.funding_z)}</span>
                 </TableCell>
-                <TableCell hideBelow="md" className={cn("text-right", signedClass(row.premium))}>
+                <TableCell hideBelow="md" className={cn("text-right", signClass(row.premium))}>
                   {formatPct(row.premium)}
                   <span className="ml-1 text-muted-foreground">{sigmas(row.premium_z)}</span>
                 </TableCell>

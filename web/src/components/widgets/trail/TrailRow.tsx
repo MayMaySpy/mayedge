@@ -8,7 +8,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { algoCanResume, algoIsWorking } from "@/lib/algos";
+import { ClipLine, RowButton, RowFrame, RowNote, RowToggle } from "@/components/widgets/algo/RowParts";
+import { algoCanResume, algoIsWorking, algoNoteTone } from "@/lib/algos";
 import type { AlgoState } from "@/lib/api";
 import {
   TRAIL_KIND_LABEL,
@@ -76,26 +77,12 @@ export function TrailRow({
   const moved = agoLabel(rt?.last_move_ms);
 
   return (
-    <div
-      className={cn(
-        "border-t border-rule px-2 py-2",
-        emphasize &&
-          (long
-            ? "shadow-[inset_2px_0_0_0_var(--color-bid)]"
-            : "shadow-[inset_2px_0_0_0_var(--color-ask)]")
-      )}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
+    <RowFrame emphasize={emphasize} long={long}>
+      <RowToggle
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
         className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-left"
       >
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            !expanded && "-rotate-90"
-          )}
-        />
         <span className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
           {TRAIL_KIND_LABEL[kind]}
         </span>
@@ -115,7 +102,7 @@ export function TrailRow({
         >
           {phase}
         </Badge>
-      </button>
+      </RowToggle>
 
       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 font-mono text-sm tabular-nums text-muted-foreground">
@@ -136,17 +123,9 @@ export function TrailRow({
         {tradingEnabled && working && (
           <div className="flex shrink-0 items-center gap-0.5">
             {algoCanResume(algo.status) && onResume && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={onResume}
-                className="h-6 gap-1 px-1.5"
-              >
-                <Play data-icon="inline-start" />
+              <RowButton busy={busy} onClick={onResume} icon={<Play data-icon="inline-start" />}>
                 Resume
-              </Button>
+              </RowButton>
             )}
             {onStop &&
               (kind === "stop" ? (
@@ -167,48 +146,35 @@ export function TrailRow({
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => onStop(false)}
-                  className="h-6 px-1.5"
-                >
+                <RowButton busy={busy} onClick={() => onStop(false)} danger>
                   Stop
-                </Button>
+                </RowButton>
               ))}
           </div>
         )}
       </div>
 
-      {(algo.reason || algo.error) && (
-        <div
-          className={cn(
-            "mt-1 truncate font-mono text-sm",
-            algo.status === "error" ? "text-ask" : "text-muted-foreground"
-          )}
-        >
-          {algo.error || algo.reason}
-        </div>
-      )}
+      <RowNote text={algo.error || algo.reason} tone={algoNoteTone(algo.status)} />
 
       {expanded && (
         <div className="mt-2 flex flex-col gap-1 border-t border-rule pt-1.5 font-mono text-xs">
           {live.length === 0 && <div className="text-muted-foreground">Nothing on the venue</div>}
           {live.map((c) => (
-            <div key={c.seq} className="flex items-baseline gap-2">
-              <span className={c.side === "buy" ? "text-bid" : "text-ask"}>
-                {rt?.clip_roles?.[String(c.client_order_index)] === "fire"
+            <ClipLine
+              key={c.seq}
+              label={
+                rt?.clip_roles?.[String(c.client_order_index)] === "fire"
                   ? "Market"
                   : rt?.backstop
                     ? "Backstop"
-                    : "Stop"}
-              </span>
+                    : "Stop"
+              }
+              labelClass={c.side === "buy" ? "text-bid" : "text-ask"}
+            >
               <span className="text-muted-foreground">
                 {parseFloat(c.qty) > 0 ? formatSize(c.remaining) : "Position"} @ {marketPrice(c.price, algo.symbol)}
               </span>
-            </div>
+            </ClipLine>
           ))}
           {(algo.fills ?? []).map((f) => (
             <div key={`f-${f.seq}`} className="flex items-baseline gap-2 text-text">
@@ -220,6 +186,6 @@ export function TrailRow({
           </div>
         </div>
       )}
-    </div>
+    </RowFrame>
   );
 }

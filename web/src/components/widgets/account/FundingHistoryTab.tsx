@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import { notifyErr } from "@/lib/notify";
-import { Button } from "@/components/ui/button";
+import { useState } from "react";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -12,17 +10,15 @@ import {
   TableName,
   TableRow,
 } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { api, type AccountFunding, type Market } from "@/lib/api";
+import { LoadingRows, LoadMore, ScopeToggle, type Scope } from "@/components/widgets/ListControls";
+import { api, type Market } from "@/lib/api";
 import { formatFundingPct } from "@/lib/marketPicker";
-import { cn, formatSigned, formatSize } from "@/lib/utils";
+import { cn, formatSigned, formatSize, signClass } from "@/lib/utils";
 import { utcDateTime } from "@/lib/utcTime";
+import { usePagedHistory } from "./usePagedHistory";
 
-function pnlClass(value: number) {
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
+const FETCH = (q: Parameters<typeof api.accountFunding>[0]) =>
+  api.accountFunding(q).then((r) => ({ rows: r.fundings, next_cursor: r.next_cursor }));
 
 interface FundingHistoryTabProps {
   market: Market | null;
@@ -37,92 +33,20 @@ export function FundingHistoryTab({
   active,
   onSymbolChange,
 }: FundingHistoryTabProps) {
-  const [scope, setScope] = useState<"all" | "pair">("all");
-  const [page, setPage] = useState<{
-    key: string | null;
-    rows: AccountFunding[];
-    cursor: string | null;
-  }>({ key: null, rows: [], cursor: null });
-  const [loadingMore, setLoadingMore] = useState(false);
-
+  const [scope, setScope] = useState<Scope>("all");
   const marketIndex = scope === "pair" && market ? market.market_index : undefined;
-  const queryKey = String(marketIndex ?? "all");
-  const rows = page.key === queryKey ? page.rows : [];
-  const cursor = page.key === queryKey ? page.cursor : null;
-  const loading = active && page.key !== queryKey;
-
-  const loadMore = useCallback(async () => {
-    if (!cursor) return;
-    setLoadingMore(true);
-    try {
-      const result = await api.accountFunding({
-        market_index: marketIndex ?? null,
-        cursor,
-        limit: 50,
-      });
-      setPage((prev) => ({
-        key: queryKey,
-        rows: prev.key === queryKey ? [...prev.rows, ...result.fundings] : result.fundings,
-        cursor: result.next_cursor,
-      }));
-    } catch (e) {
-      notifyErr(e instanceof Error ? e.message : "Failed to load funding");
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [cursor, marketIndex, queryKey]);
-
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await api.accountFunding({
-          market_index: marketIndex ?? null,
-          limit: 50,
-        });
-        if (cancelled) return;
-        setPage({
-          key: queryKey,
-          rows: result.fundings,
-          cursor: result.next_cursor,
-        });
-      } catch (e) {
-        if (cancelled) return;
-        notifyErr(e instanceof Error ? e.message : "Failed to load funding");
-        setPage({ key: queryKey, rows: [], cursor: null });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active, marketIndex, queryKey]);
+  const { rows, cursor, loading, loadingMore, loadMore } = usePagedHistory(FETCH, {
+    active,
+    marketIndex,
+    what: "funding",
+  });
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <ToggleGroup
-        type="single"
-        variant="seg"
-        size="sm"
-        spacing={0}
-        value={scope}
-        onValueChange={(v) => {
-          if (v === "all" || v === "pair") setScope(v);
-        }}
-        className="mb-1.5"
-      >
-        <ToggleGroupItem value="all">All</ToggleGroupItem>
-        <ToggleGroupItem value="pair" disabled={!market}>
-          {market?.symbol ?? "Pair"}
-        </ToggleGroupItem>
-      </ToggleGroup>
+      <ScopeToggle scope={scope} onScopeChange={setScope} pair={market?.symbol} className="mb-1.5" />
 
       {loading && rows.length === 0 ? (
-        <div className="flex flex-col gap-1 p-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-5 animate-pulse bg-elevated" />
-          ))}
-        </div>
+        <LoadingRows />
       ) : !rows.length ? (
         <Empty className="rounded-none border-0 p-4">
           <EmptyDescription>
@@ -175,7 +99,7 @@ export function FundingHistoryTab({
                     <TableCell hideBelow="lg" className="text-right text-muted-foreground">
                       {formatFundingPct(ratePct)}
                     </TableCell>
-                    <TableCell className={cn("text-right", pnlClass(change))}>
+                    <TableCell className={cn("text-right", signClass(change))}>
                       {formatSigned(f.change, 4)}
                     </TableCell>
                   </TableRow>
@@ -183,18 +107,7 @@ export function FundingHistoryTab({
               })}
             </TableBody>
           </Table>
-          {cursor && (
-            <div className="flex justify-center pt-2 pb-3">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={loadingMore}
-                onClick={() => void loadMore()}
-              >
-                {loadingMore ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          )}
+          <LoadMore cursor={cursor} loading={loadingMore} onLoad={() => void loadMore()} />
         </>
       )}
     </ScrollArea>

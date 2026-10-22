@@ -14,7 +14,7 @@ import { formatFundingPct } from "@/lib/marketPicker";
 import { rankRelativeStrength, type RsSort } from "@/lib/relativeStrength";
 import { useSelectedRowInView } from "@/lib/scanScroll";
 import { useStoredSort, type SortCol } from "@/lib/tableSort";
-import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
+import { cn, formatPct, formatUsdCompact, signClass } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-rs-sort";
 
@@ -29,13 +29,6 @@ const COLS: readonly SortCol<RsSort>[] = [
   { key: "oi", label: "OI", align: "end", hideBelow: "md" },
   { key: null, label: "Funding", align: "end", hideBelow: "md" },
 ];
-
-function signedClass(value: number | null | undefined) {
-  if (value == null) return "text-muted-foreground";
-  if (value > 0) return "text-bid";
-  if (value < 0) return "text-ask";
-  return "text-muted-foreground";
-}
 
 function fundingClass(rate: number | null | undefined) {
   if (rate == null || rate === 0) return "text-muted-foreground";
@@ -100,10 +93,10 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
                       </TableName>
                     </div>
                   </TableCell>
-                  <TableCell className={cn("text-right", signedClass(row.change24h))}>
+                  <TableCell className={cn("text-right", signClass(row.change24h))}>
                     {formatPct(row.change24h)}
                   </TableCell>
-                  <TableCell className={cn("text-right", signedClass(row.relativeStrength))}>
+                  <TableCell className={cn("text-right", signClass(row.relativeStrength))}>
                     {formatPct(row.relativeStrength)}
                   </TableCell>
                   <TableCell hideBelow="sm" className="text-right text-muted-foreground">

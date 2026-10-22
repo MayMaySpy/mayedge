@@ -16,20 +16,20 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToolbarFold } from "@/hooks/useToolbarFold";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { trimQty } from "@/components/widgets/orderTicket/math";
+import { LoadingRows } from "@/components/widgets/ListControls";
 import { api, isLongPosition, type Market, type Position } from "@/lib/api";
 import { algoBlotter } from "@/lib/algos";
 import { useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
 import {
   positionNotional,
   exposure,
-  pnlClass,
   positionsForClose,
   roePct,
   sortPositionRows,
   type CloseFilter,
   type PosSort,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatSigned, formatUsd } from "@/lib/utils";
+import { cn, formatPctAbs, formatSigned, formatUsd, signClass } from "@/lib/utils";
 
 const TradeHistoryTab = lazy(() =>
   import("@/components/widgets/account/TradeHistoryTab").then((m) => ({
@@ -46,16 +46,6 @@ const JournalTab = lazy(() =>
     default: m.JournalTab,
   })),
 );
-
-function HistoryTabFallback() {
-  return (
-    <div className="flex flex-col gap-1 p-2">
-      {Array.from({ length: 4 }, (_, i) => (
-        <div key={i} className="h-5 animate-pulse bg-elevated" />
-      ))}
-    </div>
-  );
-}
 
 interface PositionsPanelProps {
   market: Market | null;
@@ -275,7 +265,7 @@ export function PositionsPanel({
     `${winners.length}:${losers.length}:${liveRows.length}:${formatSigned(totalPnl).length}:${formatSigned(exp.net).length}`
   );
   const pnlReadout = (
-    <span className={cn("font-mono text-sm tabular-nums", pnlClass(totalPnl))}>
+    <span className={cn("font-mono text-sm tabular-nums", signClass(totalPnl))}>
       {formatSigned(totalPnl)}
       {accountRoe != null && <span className="ml-1 text-xs">({formatPctAbs(accountRoe)})</span>}
     </span>
@@ -496,7 +486,7 @@ export function PositionsPanel({
             <ToggleGroupItem value="trades">Trades</ToggleGroupItem>
             <ToggleGroupItem value="funding">Funding</ToggleGroupItem>
           </ToggleGroup>
-          <Suspense fallback={<HistoryTabFallback />}>
+          <Suspense fallback={<LoadingRows />}>
             {historyKind === "trades" ? (
               <TradeHistoryTab
                 market={market}
@@ -516,7 +506,7 @@ export function PositionsPanel({
         </TabsContent>
 
         <TabsContent value="journal" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <Suspense fallback={<HistoryTabFallback />}>
+          <Suspense fallback={<LoadingRows />}>
             <JournalTab active={tab === "journal"} />
           </Suspense>
         </TabsContent>

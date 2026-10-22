@@ -24,13 +24,12 @@ import {
   equityShare,
   nextFunding,
   nextPosSort,
-  pnlClass,
   realizedFor,
   realizedTitle,
   type PosSort,
   type PosSortKey,
 } from "@/lib/positionsTable";
-import { cn, formatPctAbs, formatSigned, formatSize, formatUsd } from "@/lib/utils";
+import { cn, formatPctAbs, formatSigned, formatSize, formatUsd, signClass } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 
 function n(value: string | undefined) {
@@ -250,7 +249,7 @@ export function PositionsTable({
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className={cn("text-right font-medium", pnlClass(pnl))}>
+                        <TableCell className={cn("text-right font-medium", signClass(pnl))}>
                           {formatSigned(pnl)}
                           {roe != null && (
                             <span className="ml-1 text-xs font-normal">({formatPctAbs(roe)})</span>
@@ -258,7 +257,7 @@ export function PositionsTable({
                         </TableCell>
                         <TableCell
                           hideBelow="lg"
-                          className={cn("text-right", realized ? pnlClass(realizedNum) : "text-muted-foreground")}
+                          className={cn("text-right", realized ? signClass(realizedNum) : "text-muted-foreground")}
                           title={realized ? realizedTitle(realized, (x) => formatSigned(x)) : "Not in the Journal yet"}
                         >
                           {realized ? (
@@ -270,12 +269,12 @@ export function PositionsTable({
                             "—"
                           )}
                         </TableCell>
-                        <TableCell hideBelow="2xl" className={cn("text-right", pnlClass(fund))}>
+                        <TableCell hideBelow="2xl" className={cn("text-right", signClass(fund))}>
                           {formatSigned(p.funding_paid)}
                         </TableCell>
                         <TableCell
                           hideBelow="xl"
-                          className={cn("text-right", next != null ? pnlClass(next) : "text-muted-foreground")}
+                          className={cn("text-right", next != null ? signClass(next) : "text-muted-foreground")}
                           title={
                             next != null
                               ? `${formatFundingPct(rate)}/h at ${utcClock(settleAt, false)} UTC`
