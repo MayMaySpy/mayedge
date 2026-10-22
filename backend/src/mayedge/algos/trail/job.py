@@ -8,17 +8,16 @@ The Position on the account feed is the evidence for every fill (ADR 0003).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
 from decimal import Decimal
 from typing import Any
 
 from mayedge.algos import common
-from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.algos.planner import venue
+from mayedge.algos.role_job import RoleJob
 from mayedge.algos.trail import engine
 from mayedge.algos.trail.config import (
     ACK_GRACE_MS,
@@ -28,7 +27,7 @@ from mayedge.algos.trail.config import (
     MISSING_GRACE_MS,
     RATE_LIMIT_COOLDOWN_MS,
 )
-from mayedge.algos.trail.engine import Follow, Point
+from mayedge.algos.trail.engine import Follow, Point, Side
 from mayedge.algos.trail.plan import (
     ALGO_ID,
     ALGO_VERSION,
@@ -40,11 +39,9 @@ from mayedge.algos.trail.plan import (
 )
 from mayedge.algos.trail.state import TrailBookView, TrailState
 from mayedge.config import settings
-from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.coi import next_manual_client_order_index
-from mayedge.lighter.errors import is_blocked, is_invalid_nonce, is_order_not_found
 from mayedge.numbers import check_notional, fmt_decimal
-from mayedge.rows import is_obj, items, obj
+from mayedge.rows import is_obj, obj
 
 logger = logging.getLogger(__name__)
 
@@ -55,23 +52,16 @@ def _wrong_side(e: Exception) -> bool:
     return "wrong side of mark" in str(e)
 
 
-class TrailRunner:
-    def __init__(self, book: TrailBookView) -> None:
-        self._book = book
-        self._state = TrailState()
-        self._task: asyncio.Task[None] | None = None
-        self._stop = asyncio.Event()
-        self._wake = asyncio.Event()
-        self._lock = asyncio.Lock()
-        self._pending_trades: list[dict[str, Any]] = []
-        # F9: every print since the last evaluate, oldest first.
-        self._prints: list[Decimal] = []
-        self._backoff_until = 0
-        self._flat_since: int | None = None
+class TrailRunner(RoleJob[TrailBookView, TrailState]):
+    LABEL = "trail"
+    CANCEL_WAIT_TRIES = CANCEL_WAIT_TRIES
+    CANCEL_WAIT_S = CANCEL_WAIT_S
+    ACK_GRACE_MS = ACK_GRACE_MS
+    MISSING_GRACE_MS = MISSING_GRACE_MS
+    RATE_LIMIT_COOLDOWN_MS = RATE_LIMIT_COOLDOWN_MS
 
-    @property
-    def state(self) -> TrailState:
-        return self._state
+    def __init__(self, book: TrailBookView) -> None:
+        super().__init__(book, TrailState())
 
     @property
     def kind(self) -> str:
@@ -151,31 +141,10 @@ class TrailRunner:
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def _exec(self) -> ChaseExecution:
-        return self._book.execution()
-
     def _follow(self) -> Follow:
         st = self._state
         assert st.params is not None
         return follow_of(st.params, st.side, self._tick(), floor=st.floor)
-
-    def _tick(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return ZERO
-        return Decimal(10) ** -meta.price_decimals
-
-    def _qty_step(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return ZERO
-        return Decimal(10) ** -meta.size_decimals
-
-    def _mark(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return ZERO
-        return venue.dec(meta.mark_price) or venue.dec(meta.last_trade_price) or ZERO
 
     def _held(self) -> Decimal:
         """The Position on the side this Trail closes (or opens), negative when the other way."""
@@ -192,79 +161,15 @@ class TrailRunner:
             return True
         return health().get("market_ws") == "live"
 
-    def _prices(self) -> list[Decimal]:
-        """The Reference's prices since the last look (F9). Mark is read as it is now."""
-        p = self._state.params
-        assert p is not None
-        if p.reference == "last":
-            prints, self._prints = self._prints, []
-            return prints
-        mark = self._mark()
-        return [mark] if mark > 0 else []
-
     # ── clips ────────────────────────────────────────────────────────────
 
-    def _role(self, clip: Clip) -> str:
-        return self._state.roles.get(clip.seq, "")
+    def _clip_side(self, role: str) -> Side:
+        del role
+        return self._state.side
 
-    def _latest(self, role: str) -> Clip | None:
-        for c in reversed(self._state.ledger.clips):
-            if self._role(c) == role:
-                return c
-        return None
-
-    def _live(self, role: str) -> Clip | None:
-        c = self._latest(role)
-        return c if c is not None and c.status == "live" else None
-
-    def _place(self, role: str, *, price: Decimal, qty: Decimal) -> Clip:
-        st = self._state
-        clip = st.ledger.place(
-            client_order_index=self._book.alloc_coi(),
-            price=price,
-            qty=qty,
-            now=common.now_ms(),
-            side=st.side,
-        )
-        st.roles[clip.seq] = role
-        return clip
-
-    async def _await_order_index(self, clip: Clip) -> None:
-        for _ in range(CANCEL_WAIT_TRIES):
-            if clip.order_index or clip.status != "live":
-                return
-            self._sync_open(common.now_ms())
-            if clip.order_index or clip.status != "live":
-                return
-            self._exec().kick_refresh()
-            await asyncio.sleep(CANCEL_WAIT_S)
-
-    async def _cancel_clip(self, clip: Clip) -> bool:
-        if clip.status != "live":
-            return True
-        await self._await_order_index(clip)
-        if clip.status != "live":
-            return True
-        if not clip.order_index:
-            return False
-        try:
-            await self._exec().cancel_order(self._state.market_index, clip.order_index)
-        except Exception as e:
-            if not is_order_not_found(e):
-                raise
-        clip.status = "cancelled"
-        clip.closed_at = common.now_ms()
-        return True
-
-    async def _cancel_all(self) -> bool:
-        complete = True
-        for clip in list(self._state.ledger.live_clips()):
-            try:
-                complete = await self._cancel_clip(clip) and complete
-            except Exception:
-                logger.exception("trail cancel failed for %s", self._state.algo_id)
-                complete = False
-        return complete
+    def _trade_counts(self, clip: Clip) -> bool:
+        """Only a fired Market order fills from the tape. The Stop is read off the Position."""
+        return self._role(clip) == "fire"
 
     # ── sends ────────────────────────────────────────────────────────────
 
@@ -366,94 +271,7 @@ class TrailRunner:
             raise
         st.reason = why
 
-    # ── evidence ─────────────────────────────────────────────────────────
-
-    def _sync_open(self, now: int) -> None:
-        st = self._state
-        cois = {c.client_order_index: c for c in st.ledger.live_clips()}
-        rows: dict[int, dict[str, Any]] = {}
-        for o in venue.open_orders(self._exec()):
-            try:
-                coi = int(o.get("client_order_index") or 0)
-            except (TypeError, ValueError):
-                continue
-            if coi in cois:
-                rows[coi] = o
-        for coi, clip in cois.items():
-            row = rows.get(coi)
-            if row is not None:
-                clip.seen_on_book = True
-                clip.missing_since = None
-                oid = int(row.get("order_index") or 0) or None
-                if oid:
-                    clip.order_index = oid
-                continue
-            if clip.missing_since is None:
-                clip.missing_since = now
-
-    @staticmethod
-    def _gone(clip: Clip, now: int) -> bool:
-        if clip.missing_since is None or now - clip.missing_since < MISSING_GRACE_MS:
-            return False
-        return clip.seen_on_book or now - clip.placed_at >= ACK_GRACE_MS
-
-    def _drain_trades(self, now: int) -> None:
-        trades, self._pending_trades = self._pending_trades, []
-        st = self._state
-        for t in trades:
-            if int(t.get("market_index") or 0) not in (0, st.market_index):
-                continue
-            qty = venue.dec(t.get("size")) or ZERO
-            if qty <= 0:
-                continue
-            for key, oid_key in (("bid_client_id", "bid_id"), ("ask_client_id", "ask_id")):
-                coi = int(t.get(key) or 0)
-                if not coi:
-                    continue
-                clip = st.ledger.find_clip(client_order_index=coi)
-                if clip is None or self._role(clip) != "fire":
-                    continue
-                st.ledger.apply_trade(
-                    clip,
-                    qty,
-                    now=now,
-                    price=venue.dec(t.get("price")),
-                    trade_id=int(t.get("trade_id") or 0) or None,
-                    order_index=int(t.get(oid_key) or 0) or None,
-                )
-
     # ── loop ─────────────────────────────────────────────────────────────
-
-    def on_gateway(self, msg: dict[str, Any]) -> None:
-        st = self._state
-        if st.status not in ACTIVE_STATUSES:
-            return
-        kind = msg.get("type")
-        if kind == "account_trades":
-            trades = items(msg.get("trades"))
-            if trades:
-                self._pending_trades.extend(t for t in trades if is_obj(t))
-                self._wake.set()
-            return
-        if kind == "account":
-            self._wake.set()
-            return
-        if kind == "prints":
-            if venue.market_of(msg) != st.market_index:
-                return
-            if st.params is None or st.params.reference != "last":
-                return
-            for raw in msg.get("prices") or ():
-                px = venue.dec(raw)
-                if px and px > 0:
-                    self._prints.append(px)
-            self._wake.set()
-            return
-        if kind == "market_stats":
-            for m in msg.get("markets") or ():
-                if is_obj(m) and venue.market_of(m) == st.market_index:
-                    self._wake.set()
-                    return
 
     async def start(
         self,
@@ -498,57 +316,6 @@ class TrailRunner:
             raise
         self._publish()
         self._task = asyncio.create_task(self._run())
-
-    async def _pull_tickets(self, orders: list[dict[str, Any]]) -> int:
-        left = 0
-        for o in orders:
-            try:
-                await self._exec().cancel_order(
-                    int(o.get("market_index") or 0), int(o.get("order_index") or 0)
-                )
-            except Exception as e:
-                if not is_order_not_found(e):
-                    logger.warning("trail: replaced order %s not cancelled: %s", o, e)
-                    left += 1
-        return left
-
-    async def resume(self) -> None:
-        """V4: carry on from the saved best price."""
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        await self._evaluate()
-        self._publish()
-        if self._state.status in ACTIVE_STATUSES:
-            self._task = asyncio.create_task(self._run())
-
-    async def _run(self) -> None:
-        token = budget.enter_lane("algo")
-        try:
-            while not self._stop.is_set():
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
-                self._wake.clear()
-                if self._stop.is_set():
-                    break
-                if common.now_ms() < self._backoff_until:
-                    continue
-                try:
-                    await self._evaluate()
-                except Exception as e:
-                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
-                        self._backoff_until = common.now_ms() + RATE_LIMIT_COOLDOWN_MS
-                        continue
-                    # A venue Stop stays where it is. The Trail stops moving it.
-                    logger.exception("trail error on %s", self._state.algo_id)
-                    self._state.status = ChaseStatus.ERROR
-                    self._state.error = str(e) or type(e).__name__
-                    self._publish()
-                if self._state.status not in ACTIVE_STATUSES:
-                    break
-        except asyncio.CancelledError:
-            raise
-        finally:
-            budget.leave_lane(token)
 
     async def _evaluate(self) -> None:
         async with self._lock:
@@ -698,15 +465,6 @@ class TrailRunner:
 
     # ── operator ─────────────────────────────────────────────────────────
 
-    def _publish(self) -> None:
-        self._book.publish()
-
-    async def pause(self) -> None:
-        if self._state.status == ChaseStatus.RUNNING:
-            self._state.status = ChaseStatus.PAUSED
-            self._state.reason = "paused"
-            self._publish()
-
     async def unpause(self) -> None:
         st = self._state
         if st.status not in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
@@ -714,10 +472,7 @@ class TrailRunner:
         st.status = ChaseStatus.RUNNING
         st.error = None
         st.reason = "following" if st.point.active else "waiting for the Activation"
-        self._publish()
-        self._wake.set()
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
+        self._running_again()
 
     async def edit(self, params: TrailParams) -> None:
         """F4: a new distance or Activation. The trigger never moves back."""
@@ -752,15 +507,6 @@ class TrailRunner:
         self._publish()
         self._wake.set()
 
-    async def _halt(self) -> None:
-        self._stop.set()
-        self._wake.set()
-        task, self._task = self._task, None
-        if task and task is not asyncio.current_task():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
     async def stop(self, *, keep_stop: bool = False) -> None:
         """S5: every Clip comes off. With keep_stop, a plain Stop Ticket goes on first."""
         await self._halt()
@@ -771,14 +517,7 @@ class TrailRunner:
         if keep_stop and self.kind == "stop" and self._held() > 0:
             kept = await self._keep_stop()
         complete = await self._cancel_all()
-        if complete:
-            st.status = ChaseStatus.STOPPED
-            st.reason = "stopped, Stop Ticket kept" if kept else "stopped"
-            self._book.finish(self)
-        else:
-            st.status = ChaseStatus.ERROR
-            st.error = "stop: cancel incomplete"
-            self._publish()
+        self._end_stop(complete, "stopped, Stop Ticket kept" if kept else "stopped")
 
     async def _keep_stop(self) -> bool:
         st = self._state

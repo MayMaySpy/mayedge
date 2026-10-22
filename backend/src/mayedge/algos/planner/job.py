@@ -7,14 +7,12 @@ exit: Planner never treats a quiet book as a fill on its own (E7).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
 from decimal import Decimal
 from typing import Any
 
 from mayedge.algos import common
-from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.iceberg import MarketView
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ladder.plan import Rung
@@ -46,13 +44,12 @@ from mayedge.algos.planner.plan import (
     stop_price,
 )
 from mayedge.algos.planner.state import PlannerBookView, PlannerState
+from mayedge.algos.role_job import RoleJob
 from mayedge.algos.trail import engine
 from mayedge.algos.trail.engine import Follow, Point
 from mayedge.config import settings
-from mayedge.lighter.budget import BudgetRefused, budget
-from mayedge.lighter.errors import is_blocked, is_invalid_nonce, is_order_not_found
 from mayedge.numbers import check_notional, fmt_decimal
-from mayedge.rows import is_obj, items, obj
+from mayedge.rows import is_obj, obj
 
 logger = logging.getLogger(__name__)
 
@@ -63,30 +60,23 @@ def _sign(side: str) -> int:
     return 1 if side == "buy" else -1
 
 
-class PlannerRunner:
+class PlannerRunner(RoleJob[PlannerBookView, PlannerState]):
+    LABEL = "planner"
+    CANCEL_WAIT_TRIES = CANCEL_WAIT_TRIES
+    CANCEL_WAIT_S = CANCEL_WAIT_S
+    ACK_GRACE_MS = ACK_GRACE_MS
+    MISSING_GRACE_MS = MISSING_GRACE_MS
+    RATE_LIMIT_COOLDOWN_MS = RATE_LIMIT_COOLDOWN_MS
+
     def __init__(self, book: PlannerBookView) -> None:
-        self._book = book
-        self._state = PlannerState()
-        self._task: asyncio.Task[None] | None = None
-        self._stop = asyncio.Event()
-        self._wake = asyncio.Event()
-        self._lock = asyncio.Lock()
-        self._pending_trades: list[dict[str, Any]] = []
-        # Trail F9: every print since the last evaluate, for a plan that trails on Last.
-        self._prints: list[Decimal] = []
-        self._backoff_until = 0
+        super().__init__(book, PlannerState())
         self._mismatch_since: int | None = None
-        self._flat_since: int | None = None
         # Roles Planner gave up placing after a refusal, so it does not resend every tick.
         self._gave_up: set[str] = set()
         # E10: when a Chase entry's Clip last moved.
         self._entry_moved_ms = 0
         # E13, EL1: when a Chase entry's Clip or a Ladder rung last left the book unexplained.
         self._entry_vanished_ms = 0
-
-    @property
-    def state(self) -> PlannerState:
-        return self._state
 
     # ── shape ────────────────────────────────────────────────────────────
 
@@ -177,21 +167,24 @@ class PlannerRunner:
 
     # ── clips ────────────────────────────────────────────────────────────
 
-    def _exec(self) -> ChaseExecution:
-        return self._book.execution()
+    def _clip_side(self, role: str) -> Side:
+        return self._side() if role == "entry" else self._close_side()
 
-    def _role(self, clip: Clip) -> str:
-        return self._state.roles.get(clip.seq, "")
+    def _follows_prices(self) -> bool:
+        p = self._state.params
+        return p is not None and p.trails()
 
-    def _latest(self, role: str) -> Clip | None:
-        for c in reversed(self._state.ledger.clips):
-            if self._role(c) == role:
-                return c
-        return None
+    def _trade_counts(self, clip: Clip) -> bool:
+        """The stop fills off the Position, so the tape counts for every other Clip."""
+        return self._role(clip) != "stop"
 
-    def _live(self, role: str) -> Clip | None:
-        c = self._latest(role)
-        return c if c is not None and c.status == "live" else None
+    def _book_fills(self, clip: Clip) -> bool:
+        return self._role(clip) != "stop"
+
+    def _absence_counts(self, clip: Clip) -> bool:
+        """An entry is judged gone only once it was seen. A target or stop may
+        fill before the feed ever shows it, so its absence counts from now."""
+        return self._role(clip) != "entry" or clip.seen_on_book
 
     def _tp_clips(self) -> list[Clip]:
         return [c for c in self._state.ledger.clips if self._role(c).startswith("tp")]
@@ -205,47 +198,6 @@ class PlannerRunner:
 
     def _close_side(self) -> Side:
         return "sell" if self._side() == "buy" else "buy"
-
-    def _place(self, role: str, *, price: Decimal, qty: Decimal) -> Clip:
-        st = self._state
-        clip = st.ledger.place(
-            client_order_index=self._book.alloc_coi(),
-            price=price,
-            qty=qty,
-            now=common.now_ms(),
-            side=self._side() if role == "entry" else self._close_side(),
-        )
-        st.roles[clip.seq] = role
-        return clip
-
-    def _qty_step(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return Decimal("0")
-        return Decimal(10) ** -meta.size_decimals
-
-    def _mark(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return ZERO
-        return venue.dec(meta.mark_price) or venue.dec(meta.last_trade_price) or ZERO
-
-    def _tick(self) -> Decimal:
-        meta = self._exec().get_market_by_index(self._state.market_index)
-        if not meta:
-            return ZERO
-        return Decimal(10) ** -meta.price_decimals
-
-    def _prices(self) -> list[Decimal]:
-        """What the plan's trailing parts follow since the last look (Trail F9)."""
-        p = self._state.params
-        if p is None or not p.trails():
-            return []
-        if p.reference == "last":
-            prints, self._prints = self._prints, []
-            return prints
-        mark = self._mark()
-        return [mark] if mark > 0 else []
 
     # ── sends ────────────────────────────────────────────────────────────
 
@@ -391,114 +343,7 @@ class PlannerRunner:
             clip.closed_at = common.now_ms()
             raise
 
-    async def _await_order_index(self, clip: Clip) -> None:
-        """The venue's order_index, which a cancel or an Amend needs, once the feed shows it."""
-        for _ in range(CANCEL_WAIT_TRIES):
-            if clip.order_index or clip.status != "live":
-                return
-            self._sync_open(common.now_ms())
-            if clip.order_index or clip.status != "live":
-                return
-            self._exec().kick_refresh()
-            await asyncio.sleep(CANCEL_WAIT_S)
-
-    async def _cancel_clip(self, clip: Clip) -> bool:
-        """True once the venue has the cancel, or the order is already gone."""
-        if clip.status != "live":
-            return True
-        await self._await_order_index(clip)
-        if clip.status != "live":
-            return True
-        if not clip.order_index:
-            return False
-        try:
-            await self._exec().cancel_order(self._state.market_index, clip.order_index)
-        except Exception as e:
-            if not is_order_not_found(e):
-                raise
-        clip.status = "cancelled"
-        clip.closed_at = common.now_ms()
-        return True
-
-    async def _cancel_all(self) -> bool:
-        complete = True
-        for clip in list(self._state.ledger.live_clips()):
-            try:
-                complete = await self._cancel_clip(clip) and complete
-            except Exception:
-                logger.exception("planner cancel failed for %s", self._state.algo_id)
-                complete = False
-        return complete
-
     # ── evidence ─────────────────────────────────────────────────────────
-
-    def _sync_open(self, now: int) -> None:
-        st = self._state
-        cois = {c.client_order_index: c for c in st.ledger.live_clips()}
-        rows: dict[int, dict[str, Any]] = {}
-        for o in venue.open_orders(self._exec()):
-            try:
-                coi = int(o.get("client_order_index") or 0)
-            except (TypeError, ValueError):
-                continue
-            if coi in cois:
-                rows[coi] = o
-        for coi, clip in cois.items():
-            row = rows.get(coi)
-            if row is not None:
-                oid = int(row.get("order_index") or 0) or None
-                if self._role(clip) == "stop":
-                    clip.seen_on_book = True
-                    clip.missing_since = None
-                    if oid:
-                        clip.order_index = oid
-                    continue
-                st.ledger.apply_open(
-                    clip,
-                    venue.dec(row.get("remaining")) or ZERO,
-                    now=now,
-                    order_index=oid,
-                    book_filled=venue.dec(row.get("filled")),
-                )
-                continue
-            # An entry is judged gone only once it was seen. A target or stop may
-            # fill before the feed ever shows it, so its absence counts from now.
-            if self._role(clip) == "entry" and not clip.seen_on_book:
-                continue
-            if clip.missing_since is None:
-                clip.missing_since = now
-
-    @staticmethod
-    def _gone(clip: Clip, now: int) -> bool:
-        """Off the book long enough to believe, and not merely unacknowledged."""
-        if clip.missing_since is None or now - clip.missing_since < MISSING_GRACE_MS:
-            return False
-        return clip.seen_on_book or now - clip.placed_at >= ACK_GRACE_MS
-
-    def _drain_trades(self, now: int) -> None:
-        trades, self._pending_trades = self._pending_trades, []
-        st = self._state
-        for t in trades:
-            if int(t.get("market_index") or 0) not in (0, st.market_index):
-                continue
-            qty = venue.dec(t.get("size")) or ZERO
-            if qty <= 0:
-                continue
-            for key, oid_key in (("bid_client_id", "bid_id"), ("ask_client_id", "ask_id")):
-                coi = int(t.get(key) or 0)
-                if not coi:
-                    continue
-                clip = st.ledger.find_clip(client_order_index=coi)
-                if clip is None or self._role(clip) == "stop":
-                    continue
-                st.ledger.apply_trade(
-                    clip,
-                    qty,
-                    now=now,
-                    price=venue.dec(t.get("price")),
-                    trade_id=int(t.get("trade_id") or 0) or None,
-                    order_index=int(t.get(oid_key) or 0) or None,
-                )
 
     def _held(self) -> tuple[Decimal, Decimal | None]:
         """Position size on Planner's side (negative when the other way), and its entry."""
@@ -506,37 +351,6 @@ class PlannerRunner:
         return held.size * _sign(self._side()), held.entry
 
     # ── loop ─────────────────────────────────────────────────────────────
-
-    def on_gateway(self, msg: dict[str, Any]) -> None:
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        kind = msg.get("type")
-        if kind == "account_trades":
-            trades = items(msg.get("trades"))
-            if trades:
-                self._pending_trades.extend(t for t in trades if is_obj(t))
-                self._wake.set()
-            return
-        if kind == "account":
-            self._wake.set()
-            return
-        p = self._state.params
-        if p is None or not p.trails():
-            return
-        if kind == "prints":
-            if p.reference != "last" or venue.market_of(msg) != self._state.market_index:
-                return
-            for raw in msg.get("prices") or ():
-                px = venue.dec(raw)
-                if px and px > 0:
-                    self._prints.append(px)
-            self._wake.set()
-            return
-        if kind == "market_stats":
-            for m in msg.get("markets") or ():
-                if is_obj(m) and venue.market_of(m) == self._state.market_index:
-                    self._wake.set()
-                    return
 
     async def start(
         self,
@@ -592,57 +406,6 @@ class PlannerRunner:
             raise
         self._publish()
         self._task = asyncio.create_task(self._run())
-
-    async def _pull_tickets(self, orders: list[dict[str, Any]]) -> int:
-        left = 0
-        for o in orders:
-            try:
-                await self._exec().cancel_order(
-                    int(o.get("market_index") or 0), int(o.get("order_index") or 0)
-                )
-            except Exception as e:
-                if not is_order_not_found(e):
-                    logger.warning("planner: replaced order %s not cancelled: %s", o, e)
-                    left += 1
-        return left
-
-    async def resume(self) -> None:
-        """M7: the stop and targets held on the venue; catch up from the feed, then run."""
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        await self._evaluate()
-        self._publish()
-        if self._state.status in ACTIVE_STATUSES:
-            self._task = asyncio.create_task(self._run())
-
-    async def _run(self) -> None:
-        token = budget.enter_lane("algo")
-        try:
-            while not self._stop.is_set():
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
-                self._wake.clear()
-                if self._stop.is_set():
-                    break
-                if common.now_ms() < self._backoff_until:
-                    continue
-                try:
-                    await self._evaluate()
-                except Exception as e:
-                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
-                        self._backoff_until = common.now_ms() + RATE_LIMIT_COOLDOWN_MS
-                        continue
-                    # The stop stays on the venue. Planner stops acting, not protecting.
-                    logger.exception("planner error on %s", self._state.algo_id)
-                    self._state.status = ChaseStatus.ERROR
-                    self._state.error = str(e) or type(e).__name__
-                    self._publish()
-                if self._state.status not in ACTIVE_STATUSES:
-                    break
-        except asyncio.CancelledError:
-            raise
-        finally:
-            budget.leave_lane(token)
 
     async def _evaluate(self) -> None:
         async with self._lock:
@@ -862,15 +625,6 @@ class PlannerRunner:
 
     # ── operator ─────────────────────────────────────────────────────────
 
-    def _publish(self) -> None:
-        self._book.publish()
-
-    async def pause(self) -> None:
-        if self._state.status == ChaseStatus.RUNNING:
-            self._state.status = ChaseStatus.PAUSED
-            self._state.reason = "paused"
-            self._publish()
-
     async def unpause(self) -> None:
         """Resume accepts the Position as it is now (M6)."""
         st = self._state
@@ -890,10 +644,7 @@ class PlannerRunner:
             st.reason = None
             self._mismatch_since = None
             self._gave_up.clear()
-        self._publish()
-        self._wake.set()
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
+        self._running_again()
 
     async def finish_entry(self) -> None:
         """E14: Protect now. The rest of the entry comes off and what filled is managed."""
@@ -905,8 +656,7 @@ class PlannerRunner:
             st.status = ChaseStatus.RUNNING
         await self._evaluate()
         self._publish()
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
+        self._ensure_task()
 
     async def replan(self, params: PlannerParams) -> None:
         """M5: change the stop and the targets of a managed Position, checked as if new."""
@@ -975,17 +725,7 @@ class PlannerRunner:
             self._gave_up.clear()
             await self._place_targets()
         self._publish()
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
-
-    async def _halt(self) -> None:
-        self._stop.set()
-        self._wake.set()
-        task, self._task = self._task, None
-        if task and task is not asyncio.current_task():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        self._ensure_task()
 
     async def stop(self) -> None:
         """N4: every Clip comes off, the stop with them."""
@@ -994,14 +734,7 @@ class PlannerRunner:
         st = self._state
         if st.status not in ACTIVE_STATUSES:
             return
-        if complete:
-            st.status = ChaseStatus.STOPPED
-            st.reason = "stopped"
-            self._book.finish(self)
-        else:
-            st.status = ChaseStatus.ERROR
-            st.error = "stop: cancel incomplete"
-            self._publish()
+        self._end_stop(complete)
 
     async def drain_for_shutdown(self) -> None:
         """M7: the stop and targets stay on the venue while the desk is down.
