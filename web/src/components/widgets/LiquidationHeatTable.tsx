@@ -1,15 +1,14 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { TokenMark } from "@/components/desk/TokenMark";
+import { SortableHeads } from "@/components/widgets/SortableHeads";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableName,
   TableRow,
-  type HideBelow,
 } from "@/components/ui/table";
 import { api, type LiquidationSummaryHours, type Market } from "@/lib/api";
 import { uniqueSymbolMarkets } from "@/lib/algos";
@@ -17,18 +16,18 @@ import { LIQ_HOURS, persistLiqHours } from "@/lib/liqHours";
 import {
   foldLiquidationWindow,
   rankLiquidationHeat,
-  type LiqHeatDir,
   type LiqHeatSort,
   type LiquidationHeatInput,
 } from "@/lib/liquidationHeat";
-import { alignRowToTop } from "@/lib/scanScroll";
+import { useSelectedRowInView } from "@/lib/scanScroll";
+import { useStoredSort, type SortCol } from "@/lib/tableSort";
 import { cn, formatUsdCompact } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-scan-liq-sort";
 
-type PersistedSort = { key: LiqHeatSort; dir: LiqHeatDir };
+const SORTS: readonly LiqHeatSort[] = ["total", "long", "short", "net", "share", "largest"];
 
-const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end"; hideBelow?: HideBelow }[] = [
+const COLS: readonly SortCol<LiqHeatSort>[] = [
   { key: null, label: "Market", align: "start" },
   { key: "long", label: "Long", align: "end", hideBelow: "sm" },
   { key: "short", label: "Short", align: "end", hideBelow: "sm" },
@@ -39,36 +38,6 @@ const COLS: { key: LiqHeatSort | null; label: string; align: "start" | "end"; hi
   { key: "net", label: "Net", align: "end" },
   { key: null, label: "", align: "start", hideBelow: "lg" },
 ];
-
-function loadSort(): PersistedSort {
-  try {
-    const raw = localStorage.getItem(SORT_KEY);
-    if (!raw) return { key: "total", dir: "desc" };
-    const parsed = JSON.parse(raw) as PersistedSort;
-    if (
-      (parsed?.key === "total" ||
-        parsed?.key === "long" ||
-        parsed?.key === "short" ||
-        parsed?.key === "net" ||
-        parsed?.key === "share" ||
-        parsed?.key === "largest") &&
-      (parsed?.dir === "asc" || parsed?.dir === "desc")
-    ) {
-      return parsed;
-    }
-  } catch {
-    /* ignore */
-  }
-  return { key: "total", dir: "desc" };
-}
-
-function persistSort(next: PersistedSort) {
-  try {
-    localStorage.setItem(SORT_KEY, JSON.stringify(next));
-  } catch {
-    /* ignore */
-  }
-}
 
 function formatUsd(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "$0";
@@ -176,10 +145,8 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
   symbol,
   onSymbolChange,
 }: LiquidationHeatTableProps) {
-  const [sort, setSort] = useState<PersistedSort>(loadSort);
+  const [sort, setSortMode] = useStoredSort(SORT_KEY, SORTS, "total");
   const [raw, setRaw] = useState<LiquidationHeatInput[]>([]);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const selected = symbol.toUpperCase();
 
   useEffect(() => {
@@ -227,23 +194,10 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
   );
   const maxTotal = fold.totalUsd;
 
-  const selectedOnBoard = rows.some((r) => r.symbol.toUpperCase() === selected);
-
-  useEffect(() => {
-    const container = scrollerRef.current;
-    const row = rowRefs.current.get(selected);
-    if (!container || !row) return;
-    const head = container.querySelector("thead");
-    const stickyPx = head ? head.getBoundingClientRect().height : 24;
-    alignRowToTop(container, row, stickyPx);
-  }, [selected, selectedOnBoard]);
-
-  const setSortMode = (key: LiqHeatSort) => {
-    const next: PersistedSort =
-      sort.key === key ? { key, dir: sort.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" };
-    setSort(next);
-    persistSort(next);
-  };
+  const { scrollerRef, rowRef } = useSelectedRowInView(
+    selected,
+    rows.some((r) => r.symbol.toUpperCase() === selected)
+  );
 
   const selectHours = (next: LiquidationSummaryHours) => {
     persistLiqHours(next);
@@ -278,33 +232,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-panel">
             <TableRow className="hover:bg-transparent">
-              {COLS.map((col, i) => {
-                const sortKey = col.key;
-                return (
-                  <TableHead
-                    key={col.label || `bar-${i}`}
-                    hideBelow={col.hideBelow}
-                    className={col.align === "end" ? "text-right" : undefined}
-                  >
-                    {sortKey ? (
-                      <button
-                        type="button"
-                        onClick={() => setSortMode(sortKey)}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 hover:text-text",
-                          col.align === "end" && "ml-auto",
-                          sort.key === sortKey && "text-text"
-                        )}
-                      >
-                        {col.label}
-                        {sort.key === sortKey ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-                      </button>
-                    ) : (
-                      col.label
-                    )}
-                  </TableHead>
-                );
-              })}
+              <SortableHeads cols={COLS} sort={sort} onSort={setSortMode} />
             </TableRow>
             {fold.totalUsd > 0 ? (
               <>
@@ -367,11 +295,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
                 return (
                   <TableRow
                     key={row.marketIndex}
-                    ref={(el) => {
-                      const key = row.symbol.toUpperCase();
-                      if (el) rowRefs.current.set(key, el);
-                      else rowRefs.current.delete(key);
-                    }}
+                    ref={rowRef(row.symbol)}
                     data-state={isSelected ? "selected" : undefined}
                     className="cursor-pointer"
                     onClick={() => onSymbolChange?.(row.symbol)}

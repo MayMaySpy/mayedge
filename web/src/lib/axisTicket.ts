@@ -1,54 +1,12 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { storedFlag } from "@/lib/storedFlag";
 
-const KEY = "mayedge-chart-axis-ticket";
-const EVENT = "mayedge-chart-axis-ticket";
+const flag = storedFlag("mayedge-chart-axis-ticket");
 
-let cache: boolean | null = null;
-
-function read(): boolean {
-  if (cache != null) return cache;
-  try {
-    cache = localStorage.getItem(KEY) === "1";
-  } catch {
-    cache = false;
-  }
-  return cache;
-}
-
-function emit() {
-  window.dispatchEvent(new Event(EVENT));
-}
-
-export function getAxisTicketArmed(): boolean {
-  return cache ?? read();
-}
-
-export function setAxisTicketArmed(armed: boolean) {
-  cache = armed;
-  try {
-    localStorage.setItem(KEY, armed ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
-  emit();
-}
-
-export function subscribeAxisTicket(onChange: () => void) {
-  const onStorage = (e: StorageEvent) => {
-    if (e.key && e.key !== KEY) return;
-    cache = null;
-    onChange();
-  };
-  window.addEventListener(EVENT, onChange);
-  window.addEventListener("storage", onStorage);
-  return () => {
-    window.removeEventListener(EVENT, onChange);
-    window.removeEventListener("storage", onStorage);
-  };
-}
+export const getAxisTicketArmed = flag.get;
+export const setAxisTicketArmed = flag.set;
+export const subscribeAxisTicket = flag.subscribe;
 
 export function useAxisTicket() {
-  const armed = useSyncExternalStore(subscribeAxisTicket, getAxisTicketArmed, () => false);
-  const setArmed = useCallback((next: boolean) => setAxisTicketArmed(next), []);
+  const [armed, setArmed] = flag.useFlag();
   return { armed, setArmed };
 }

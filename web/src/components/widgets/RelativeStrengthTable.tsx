@@ -1,35 +1,26 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useMemo } from "react";
 import { TokenMark } from "@/components/desk/TokenMark";
+import { SortableHeads } from "@/components/widgets/SortableHeads";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableName,
   TableRow,
-  type HideBelow,
 } from "@/components/ui/table";
 import type { Market } from "@/lib/api";
 import { formatFundingPct } from "@/lib/marketPicker";
-import {
-  rankRelativeStrength,
-  type RsSort,
-  type RsSortDir,
-} from "@/lib/relativeStrength";
-import { alignRowToTop } from "@/lib/scanScroll";
+import { rankRelativeStrength, type RsSort } from "@/lib/relativeStrength";
+import { useSelectedRowInView } from "@/lib/scanScroll";
+import { useStoredSort, type SortCol } from "@/lib/tableSort";
 import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-rs-sort";
 
-type PersistedSort = { key: RsSort; dir: RsSortDir };
+const SORTS: readonly RsSort[] = ["rs", "volume", "oi"];
 
-const COLS: {
-  key: RsSort | null;
-  label: string;
-  hideBelow?: HideBelow;
-  align: "start" | "end";
-}[] = [
+const COLS: readonly SortCol<RsSort>[] = [
   { key: null, label: "#", align: "end", hideBelow: "lg" },
   { key: null, label: "Market", align: "start" },
   { key: null, label: "24h", align: "end" },
@@ -38,31 +29,6 @@ const COLS: {
   { key: "oi", label: "OI", align: "end", hideBelow: "md" },
   { key: null, label: "Funding", align: "end", hideBelow: "md" },
 ];
-
-function loadSort(): PersistedSort {
-  try {
-    const raw = localStorage.getItem(SORT_KEY);
-    if (!raw) return { key: "rs", dir: "desc" };
-    const parsed = JSON.parse(raw) as PersistedSort;
-    if (
-      (parsed?.key === "rs" || parsed?.key === "volume" || parsed?.key === "oi") &&
-      (parsed?.dir === "asc" || parsed?.dir === "desc")
-    ) {
-      return parsed;
-    }
-  } catch {
-    /* ignore */
-  }
-  return { key: "rs", dir: "desc" };
-}
-
-function persistSort(next: PersistedSort) {
-  try {
-    localStorage.setItem(SORT_KEY, JSON.stringify(next));
-  } catch {
-    /* ignore */
-  }
-}
 
 function signedClass(value: number | null | undefined) {
   if (value == null) return "text-muted-foreground";
@@ -87,69 +53,30 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
   symbol,
   onSymbolChange,
 }: RelativeStrengthTableProps) {
-  const [sort, setSort] = useState<PersistedSort>(loadSort);
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const [sort, setSortMode] = useStoredSort(SORT_KEY, SORTS, "rs");
   const selected = symbol.toUpperCase();
 
   const board = useMemo(
     () => rankRelativeStrength(markets, { sort: sort.key, dir: sort.dir }),
     [markets, sort]
   );
-  const selectedOnBoard = board.rows.some((r) => r.symbol.toUpperCase() === selected);
-
-  useEffect(() => {
-    const container = scrollerRef.current;
-    const row = rowRefs.current.get(selected);
-    if (!container || !row) return;
-    alignRowToTop(container, row, 24);
-  }, [selected, selectedOnBoard]);
-
-  const setSortMode = (key: RsSort) => {
-    const next: PersistedSort =
-      sort.key === key ? { key, dir: sort.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" };
-    setSort(next);
-    persistSort(next);
-  };
+  const { scrollerRef, rowRef } = useSelectedRowInView(
+    selected,
+    board.rows.some((r) => r.symbol.toUpperCase() === selected)
+  );
 
   return (
     <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-panel">
           <TableRow className="hover:bg-transparent">
-            {COLS.map((col) => {
-              const sortKey = col.key;
-              return (
-              <TableHead
-                key={col.label}
-                hideBelow={col.hideBelow}
-                className={col.align === "end" ? "text-right" : undefined}
-              >
-                {sortKey ? (
-                  <button
-                    type="button"
-                    onClick={() => setSortMode(sortKey)}
-                    className={cn(
-                      "inline-flex items-center gap-0.5 hover:text-text",
-                      col.align === "end" && "ml-auto",
-                      sort.key === sortKey && "text-text"
-                    )}
-                  >
-                    {col.label}
-                    {sort.key === sortKey ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-                  </button>
-                ) : (
-                  col.label
-                )}
-              </TableHead>
-              );
-            })}
+            <SortableHeads cols={COLS} sort={sort} onSort={setSortMode} />
           </TableRow>
         </TableHeader>
         <TableBody>
           {board.rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+              <TableCell colSpan={COLS.length} className="px-3 py-8 text-center text-muted-foreground">
                 No markets
               </TableCell>
             </TableRow>
@@ -159,11 +86,7 @@ export const RelativeStrengthTable = memo(function RelativeStrengthTable({
               return (
                 <TableRow
                   key={row.marketIndex}
-                  ref={(el) => {
-                    const key = row.symbol.toUpperCase();
-                    if (el) rowRefs.current.set(key, el);
-                    else rowRefs.current.delete(key);
-                  }}
+                  ref={rowRef(row.symbol)}
                   data-state={isSelected ? "selected" : undefined}
                   className="cursor-pointer"
                   onClick={() => onSymbolChange?.(row.symbol)}

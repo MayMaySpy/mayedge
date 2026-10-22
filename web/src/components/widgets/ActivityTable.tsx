@@ -1,36 +1,23 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { TokenMark } from "@/components/desk/TokenMark";
+import { SortableHeads } from "@/components/widgets/SortableHeads";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableName,
   TableRow,
-  type HideBelow,
 } from "@/components/ui/table";
 import { useScanActivity } from "@/lib/liveData";
 import { formatFundingPct } from "@/lib/marketPicker";
-import {
-  ACTIVITY_SORTS,
-  rankActivity,
-  type ActivitySort,
-  type ActivitySortDir,
-} from "@/lib/scanActivity";
+import { ACTIVITY_SORTS, rankActivity, type ActivitySort } from "@/lib/scanActivity";
+import { useStoredSort, type SortCol } from "@/lib/tableSort";
 import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-activity-sort";
 
-type PersistedSort = { key: ActivitySort; dir: ActivitySortDir };
-
-const COLS: {
-  key: ActivitySort | null;
-  label: string;
-  align: "start" | "end";
-  title?: string;
-  hideBelow?: HideBelow;
-}[] = [
+const COLS: readonly SortCol<ActivitySort>[] = [
   { key: null, label: "Market", align: "start" },
   { key: null, label: "5m", align: "end" },
   { key: "share", label: "Of day", align: "end", title: "The 5m move as a share of the Day range", hideBelow: "lg" },
@@ -39,18 +26,6 @@ const COLS: {
   { key: "funding", label: "Funding", align: "end", title: "Hourly rate, and sigmas from its own 24h median", hideBelow: "md" },
   { key: "premium", label: "Premium", align: "end", title: "Mark over index, and sigmas from its own 24h median", hideBelow: "md" },
 ];
-
-function loadSort(): PersistedSort {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SORT_KEY) ?? "null") as PersistedSort | null;
-    if (parsed && ACTIVITY_SORTS.includes(parsed.key) && (parsed.dir === "asc" || parsed.dir === "desc")) {
-      return parsed;
-    }
-  } catch {
-    /* ignore */
-  }
-  return { key: "share", dir: "desc" };
-}
 
 function signedClass(value: number | null | undefined) {
   if (value == null || value === 0) return "text-muted-foreground";
@@ -68,54 +43,16 @@ interface ActivityTableProps {
 
 export const ActivityTable = memo(function ActivityTable({ symbol, onSymbolChange }: ActivityTableProps) {
   const rows = useScanActivity();
-  const [sort, setSort] = useState<PersistedSort>(loadSort);
+  const [sort, setSortMode] = useStoredSort(SORT_KEY, ACTIVITY_SORTS, "share");
   const selected = symbol.toUpperCase();
   const ranked = useMemo(() => rankActivity(rows, sort.key, sort.dir), [rows, sort]);
-
-  const setSortMode = (key: ActivitySort) => {
-    const next: PersistedSort =
-      sort.key === key ? { key, dir: sort.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" };
-    setSort(next);
-    try {
-      localStorage.setItem(SORT_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
-  };
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-panel">
           <TableRow className="hover:bg-transparent">
-            {COLS.map((col) => {
-              const sortKey = col.key;
-              return (
-                <TableHead
-                  key={col.label}
-                  title={col.title}
-                  hideBelow={col.hideBelow}
-                  className={col.align === "end" ? "text-right" : undefined}
-                >
-                  {sortKey ? (
-                    <button
-                      type="button"
-                      onClick={() => setSortMode(sortKey)}
-                      className={cn(
-                        "inline-flex items-center gap-0.5 hover:text-text",
-                        col.align === "end" && "ml-auto",
-                        sort.key === sortKey && "text-text"
-                      )}
-                    >
-                      {col.label}
-                      {sort.key === sortKey ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-                    </button>
-                  ) : (
-                    col.label
-                  )}
-                </TableHead>
-              );
-            })}
+            <SortableHeads cols={COLS} sort={sort} onSort={setSortMode} />
           </TableRow>
         </TableHeader>
         <TableBody>
