@@ -27,8 +27,9 @@ import { planIssue } from "@/lib/ideas";
 
 const THESIS = "A Thesis needs at least 10 characters.";
 
-function perpFirst(markets: Market[]): Market[] {
-  return [...markets].sort((a, b) => Number(b.is_perp) - Number(a.is_perp) || a.symbol.localeCompare(b.symbol));
+// Perps only: a spot symbol ("rhQQQ/USDC") is no desk route and would not survive I1's upper case.
+function perps(markets: Market[]): Market[] {
+  return markets.filter((market) => market.is_perp).sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
 export function NewIdeaDialog({
@@ -44,7 +45,9 @@ export function NewIdeaDialog({
   onOpenChange: (open: boolean) => void;
   onCreate: (body: IdeaBody) => Promise<unknown>;
 }) {
-  const listed = perpFirst(markets);
+  const listed = perps(markets);
+  // The list portals into the dialog: outside it, the modal dialog leaves it under its overlay and unclickable.
+  const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [symbol, setSymbol] = useState("");
   const [side, setSide] = useState<"long" | "short">("long");
   const [thesis, setThesis] = useState("");
@@ -113,7 +116,7 @@ export function NewIdeaDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[480px]">
+      <DialogContent ref={setContent} className="sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>New idea</DialogTitle>
           <DialogDescription>An Idea never sends an order.</DialogDescription>
@@ -129,7 +132,7 @@ export function NewIdeaDialog({
               }}
             >
               <ComboboxInput aria-label="Market" placeholder="Market" showClear={false} />
-              <ComboboxContent>
+              <ComboboxContent container={content}>
                 <ComboboxEmpty>No market</ComboboxEmpty>
                 <ComboboxList>
                   {(item: string) => (
