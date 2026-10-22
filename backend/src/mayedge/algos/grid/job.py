@@ -7,7 +7,7 @@ from typing import Any
 
 from mayedge.algos import common
 from mayedge.algos.chase.iceberg import Action, MarketView, leftover_is_dust
-from mayedge.algos.chase.state import ChaseStatus
+from mayedge.algos.chase.state import ChaseStatus, ClipBookView, ClipState
 from mayedge.algos.clip_job import ClipJob
 from mayedge.algos.common import venue_order_keys
 from mayedge.algos.grid.config import (
@@ -29,7 +29,7 @@ from mayedge.algos.grid.decide import (
     credit_grid_fill,
     decide,
 )
-from mayedge.algos.grid.state import GridBookView, GridState
+from mayedge.algos.grid.state import GridState
 from mayedge.algos.ledger import Clip, Ledger
 from mayedge.config import settings
 from mayedge.lighter.errors import (
@@ -43,12 +43,12 @@ from mayedge.rows import is_obj, obj
 logger = logging.getLogger(__name__)
 
 
-class GridRunner(ClipJob[GridBookView, GridState]):
+class GridRunner(ClipJob[ClipBookView, GridState]):
     """Two-sided chase-grid job."""
 
     LABEL = "grid"
 
-    def __init__(self, book: GridBookView) -> None:
+    def __init__(self, book: ClipBookView) -> None:
         super().__init__(book, GridState())
         self._last_chase_tx_ms = 0
         self._handled_clip_seqs: set[int] = set()
@@ -120,53 +120,8 @@ class GridRunner(ClipJob[GridBookView, GridState]):
         self._process_new_fills()
 
     async def _sync_fills(self) -> None:
-        self._drain_trades()
-        live = self._state.ledger.live_clips()
-        if not live:
-            self._reconcile_master()
-            self._process_new_fills()
-            return
-        for clip in list(live):
-            await self._sync_one_clip(clip)
-        self._reconcile_master()
+        await self._sync_live_clips()
         self._process_new_fills()
-
-    async def _sync_one_clip(self, clip: Clip) -> None:
-        from mayedge.algos.chase.config import STALE_ACK_MS
-
-        found = self._find_open(clip.client_order_index)
-        now = common.now_ms()
-        if found is None:
-            if self._canceling:
-                self._state.ledger.close_missing(clip, canceling=True, now=now)
-                return
-            if not clip.seen_on_book:
-                if now - clip.placed_at < STALE_ACK_MS:
-                    return
-                if getattr(self, "_backoff_until", 0) > now:
-                    return
-                await self._resolve_vanished_clip(clip, now=now)
-                return
-            if self._may_invent_fill(clip, now):
-                self._close_missing_clip(clip, now=now, assume_fill=True)
-                return
-            if clip.missing_since is None:
-                clip.missing_since = now
-                return
-            if now - clip.missing_since < self._book.missing_fill_grace_ms:
-                return
-            if getattr(self, "_backoff_until", 0) > now:
-                return
-            if clip.seq not in self._missing_refreshed:
-                self._missing_refreshed.add(clip.seq)
-            await self._resolve_vanished_clip(clip, now=now)
-            return
-        rem = to_decimal(found.get("remaining") or "0")
-        filled = to_decimal(found.get("filled") or "0")
-        idx = int(found.get("order_index") or 0) or None
-        self._state.ledger.apply_open(
-            clip, rem, now=now, order_index=idx, book_filled=filled if filled > 0 else None
-        )
 
     def _chase_clip(self, side: str):
         want = "chase_buy" if side == "buy" else "chase_sell"
@@ -550,39 +505,21 @@ class GridRunner(ClipJob[GridBookView, GridState]):
 
     async def _evaluate(self) -> None:
         async with self._lock:
-            if (
-                self._stop.is_set()
-                or self._state.status != ChaseStatus.RUNNING
-                or not self._state.params
-            ):
-                return
-            if not self._exec().enabled:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = "Trading not configured"
-                self._publish()
+            if not self._ready_to_evaluate():
                 return
 
             await self._sync_fills()
             now = common.now_ms()
             if now < self._backoff_until:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = self._backoff_reason or "rate_limited"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes(self._backoff_reason or "rate_limited")
                 return
 
             if not self._exec().is_book_synced(self._state.market_index):
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "book_unsynced"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes("book_unsynced")
                 return
 
             if not self._account_ready():
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "account_unsynced"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes("account_unsynced")
                 return
 
             view = self._market_view()
@@ -651,34 +588,16 @@ class GridRunner(ClipJob[GridBookView, GridState]):
                 "post_be_cooldown_ms": raw.get("post_be_cooldown_ms"),
             }
         )
-        status = ChaseStatus.of(row.get("status"))
-        ledger = Ledger.from_row(row)
+        fields = ClipState.fields_from_row(row)
+        ledger: Ledger = fields["ledger"]
         runtime = GridRuntime.from_json(runtime_raw if is_obj(runtime_raw) else {})
         for clip in ledger.clips:
             if clip.seq in runtime.handled_fill_qty:
                 continue
             if clip.status != "live":
                 runtime.handled_fill_qty[clip.seq] = min(clip.filled, clip.qty)
-        self._state = GridState(
-            status=status,
-            params=params,
-            runtime=runtime,
-            market_index=int(row.get("market_index") or 0),
-            symbol=str(row.get("symbol") or ""),
-            filled=to_decimal(row.get("filled") or "0"),
-            remaining=to_decimal(row.get("remaining") or "0"),
-            quote_action=str(row.get("quote_action") or Action.PAUSE.value),
-            reason=row.get("reason"),
-            rest_price=to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None,
-            rest_qty=to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None,
-            error=row.get("error"),
-            algo_id=str(row.get("algo_id") or ""),
-            created_at=int(row.get("created_at") or 0),
-            ledger=ledger,
-        )
-        self._cois = {c.client_order_index for c in ledger.clips}
+        self._restore_state(GridState(params=params, runtime=runtime, **fields))
         self._handled_clip_seqs = {c.seq for c in ledger.clips if c.status == "filled"}
-        self._reset_job()
 
     async def start(
         self,

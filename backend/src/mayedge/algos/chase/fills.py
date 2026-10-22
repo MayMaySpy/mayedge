@@ -419,6 +419,13 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
         await self._sync_clip(clip)
         self._reconcile_master()
 
+    async def _sync_live_clips(self) -> None:
+        """Every live clip, for algos that rest more than one at a time."""
+        self._drain_trades()
+        for clip in list(self._state.ledger.live_clips()):
+            await self._sync_clip(clip)
+        self._reconcile_master()
+
     async def _sync_clip(self, clip: Clip) -> None:
         found = self._find_open(clip.client_order_index)
         now = common.now_ms()

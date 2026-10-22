@@ -8,17 +8,16 @@ from mayedge.algos.chase.fills import may_invent_fill
 from mayedge.algos.chase.iceberg import (
     ALGO_ID,
     ALGO_VERSION,
-    Action,
     ChaseIcebergParams,
 )
 from mayedge.algos.chase.state import (
     ACTIVE_STATUSES,
-    ChaseBookView,
     ChaseState,
     ChaseStatus,
+    ClipBookView,
+    ClipState,
 )
 from mayedge.algos.clip_job import ClipJob
-from mayedge.algos.ledger import Ledger
 from mayedge.config import settings
 from mayedge.numbers import check_notional, fmt_decimal, to_decimal
 
@@ -28,18 +27,18 @@ __all__ = [
     "ACTIVE_STATUSES",
     "ALGO_ID",
     "ALGO_VERSION",
-    "ChaseBookView",
     "ChaseIcebergRunner",
     "ChaseState",
     "ChaseStatus",
+    "ClipBookView",
     "may_invent_fill",
 ]
 
 
-class ChaseIcebergRunner(ClipJob[ChaseBookView, ChaseState]):
+class ChaseIcebergRunner(ClipJob[ClipBookView, ChaseState]):
     """One chase job. ChaseBook owns many of these."""
 
-    def __init__(self, book: ChaseBookView) -> None:
+    def __init__(self, book: ClipBookView) -> None:
         super().__init__(book, ChaseState())
 
     def snapshot(self, s: ChaseState | None = None) -> dict[str, Any]:
@@ -92,27 +91,7 @@ class ChaseIcebergRunner(ClipJob[ChaseBookView, ChaseState]):
             price_floor=to_decimal(row["price_floor"]),
             price_ceiling=to_decimal(row["price_ceiling"]),
         )
-        status = ChaseStatus.of(row.get("status"))
-        ledger = Ledger.from_row(row)
-        self._state = ChaseState(
-            status=status,
-            params=params,
-            market_index=int(row.get("market_index") or 0),
-            symbol=str(row.get("symbol") or ""),
-            reduce_only=bool(row.get("reduce_only")),
-            remaining=to_decimal(row.get("remaining") or "0"),
-            filled=to_decimal(row.get("filled") or "0"),
-            quote_action=str(row.get("quote_action") or Action.PAUSE.value),
-            reason=row.get("reason"),
-            rest_price=to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None,
-            rest_qty=to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None,
-            error=row.get("error"),
-            algo_id=str(row.get("algo_id") or ""),
-            created_at=int(row.get("created_at") or 0),
-            ledger=ledger,
-        )
-        self._cois = {c.client_order_index for c in ledger.clips}
-        self._reset_job()
+        self._restore_state(ChaseState(params=params, **ClipState.fields_from_row(row)))
         self._reconcile_master()
 
     async def start(

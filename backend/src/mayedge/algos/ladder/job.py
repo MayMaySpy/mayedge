@@ -6,7 +6,7 @@ from typing import Any
 
 from mayedge.algos import common
 from mayedge.algos.chase.iceberg import Action, leftover_is_dust
-from mayedge.algos.chase.state import ChaseStatus
+from mayedge.algos.chase.state import ChaseStatus, ClipBookView, ClipState
 from mayedge.algos.clip_job import ClipJob
 from mayedge.algos.common import venue_order_keys
 from mayedge.algos.ladder.config import MIN_PLACE_GAP_MS, is_ladder_client_order
@@ -18,8 +18,7 @@ from mayedge.algos.ladder.plan import (
     select_rungs_to_place,
     sort_by_closeness,
 )
-from mayedge.algos.ladder.state import LadderBookView, LadderState
-from mayedge.algos.ledger import Ledger
+from mayedge.algos.ladder.state import LadderState
 from mayedge.config import settings
 from mayedge.lighter.errors import (
     is_min_size,
@@ -31,12 +30,12 @@ from mayedge.rows import obj
 logger = logging.getLogger(__name__)
 
 
-class LadderRunner(ClipJob[LadderBookView, LadderState]):
+class LadderRunner(ClipJob[ClipBookView, LadderState]):
     """One ladder job — keep-N live rungs on static prices."""
 
     LABEL = "ladder"
 
-    def __init__(self, book: LadderBookView) -> None:
+    def __init__(self, book: ClipBookView) -> None:
         super().__init__(book, LadderState())
         # Why the venue last refused a rung, for the blotter: "below_min_qty", "would_cross".
         self._place_refused: str | None = None
@@ -50,14 +49,7 @@ class LadderRunner(ClipJob[LadderBookView, LadderState]):
         )
 
     async def _sync_fills(self) -> None:
-        self._drain_trades()
-        live = list(self._state.ledger.live_clips())
-        if not live:
-            self._reconcile_master()
-            return
-        for clip in live:
-            await self._sync_clip(clip)
-        self._reconcile_master()
+        await self._sync_live_clips()
 
     def snapshot(self, s: LadderState | None = None) -> dict[str, Any]:
         st = s if s is not None else self._state
@@ -132,27 +124,7 @@ class LadderRunner(ClipJob[LadderBookView, LadderState]):
             rungs=int(raw.get("rungs") or 0),
             window=int(raw.get("window") or 10),
         )
-        status = ChaseStatus.of(row.get("status"))
-        ledger = Ledger.from_row(row)
-        self._state = LadderState(
-            status=status,
-            params=params,
-            market_index=int(row.get("market_index") or 0),
-            symbol=str(row.get("symbol") or ""),
-            reduce_only=bool(row.get("reduce_only")),
-            remaining=to_decimal(row.get("remaining") or "0"),
-            filled=to_decimal(row.get("filled") or "0"),
-            quote_action=str(row.get("quote_action") or Action.PAUSE.value),
-            reason=row.get("reason"),
-            rest_price=to_decimal(row["rest_price"]) if row.get("rest_price") is not None else None,
-            rest_qty=to_decimal(row["rest_qty"]) if row.get("rest_qty") is not None else None,
-            error=row.get("error"),
-            algo_id=str(row.get("algo_id") or ""),
-            created_at=int(row.get("created_at") or 0),
-            ledger=ledger,
-        )
-        self._cois = {c.client_order_index for c in ledger.clips}
-        self._reset_job()
+        self._restore_state(LadderState(params=params, **ClipState.fields_from_row(row)))
         self._reconcile_master()
 
     async def start(
@@ -224,16 +196,7 @@ class LadderRunner(ClipJob[LadderBookView, LadderState]):
 
     async def _evaluate(self) -> None:
         async with self._lock:
-            if (
-                self._stop.is_set()
-                or self._state.status != ChaseStatus.RUNNING
-                or not self._state.params
-            ):
-                return
-            if not self._exec().enabled:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = "Trading not configured"
-                self._publish()
+            if not self._ready_to_evaluate():
                 return
 
             await self._sync_fills()
@@ -257,25 +220,16 @@ class LadderRunner(ClipJob[LadderBookView, LadderState]):
                     return
 
             if not self._exec().is_book_synced(self._state.market_index):
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "book_unsynced"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes("book_unsynced")
                 return
 
             if not self._account_ready():
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "account_unsynced"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes("account_unsynced")
                 return
 
             view = self._market_view()
             if view is None:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "no_market"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes("no_market")
                 return
 
             ladder_params = self._state.params
@@ -285,10 +239,7 @@ class LadderRunner(ClipJob[LadderBookView, LadderState]):
                     await self._cancel_clip(clip)
 
             if now < self._backoff_until:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = self._backoff_reason or "rate_limited"
-                self._sync_rest_from_live()
-                self._publish()
+                self._hold_quotes(self._backoff_reason or "rate_limited")
                 return
 
             live = self._state.ledger.live_clips()

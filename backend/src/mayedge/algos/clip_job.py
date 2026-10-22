@@ -16,10 +16,10 @@ from typing import Any, Protocol
 
 from mayedge.algos.chase.config import AUTO_RESUME_ERRORS
 from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.fills import FillBook, FillState
+from mayedge.algos.chase.fills import FillState
 from mayedge.algos.chase.iceberg import Action
 from mayedge.algos.chase.place import ChasePlaceMixin
-from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
+from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus, ClipBookView
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.errors import is_blocked, is_invalid_nonce
 from mayedge.rows import items
@@ -29,20 +29,12 @@ logger = logging.getLogger(__name__)
 _BOOK_MSGS = frozenset({"order_book", "order_book_snapshot", "order_book_delta"})
 
 
-class JobBook(FillBook, Protocol):
-    def publish(self) -> None: ...
-
-    def finish(self, job: Any) -> None: ...
-
-    def alloc_coi(self) -> int: ...
-
-
 class JobState(FillState, Protocol):
     algo_id: str
     symbol: str
 
 
-class ClipJob[BookT: JobBook, StateT: JobState](ChasePlaceMixin[BookT, StateT]):
+class ClipJob[BookT: ClipBookView, StateT: JobState](ChasePlaceMixin[BookT, StateT]):
     """One Clip algo job. Its book owns many of these."""
 
     def __init__(self, book: BookT, state: StateT) -> None:
@@ -64,6 +56,12 @@ class ClipJob[BookT: JobBook, StateT: JobState](ChasePlaceMixin[BookT, StateT]):
     @property
     def state(self) -> StateT:
         return self._state
+
+    def _restore_state(self, state: StateT) -> None:
+        """Take a state read from a stored run: its clips are this job's, its timers start fresh."""
+        self._state = state
+        self._cois = {c.client_order_index for c in state.ledger.clips}
+        self._reset_job()
 
     def _reset_job(self) -> None:
         """Forget the last run's timers and queues before a start or a restore."""

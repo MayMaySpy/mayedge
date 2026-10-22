@@ -505,18 +505,31 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             return False
         return True
 
+    def _ready_to_evaluate(self) -> bool:
+        """False when the job should not quote now. With no trading key the job errors."""
+        if (
+            self._stop.is_set()
+            or self._state.status != ChaseStatus.RUNNING
+            or not self._state.params
+        ):
+            return False
+        if not self._exec().enabled:
+            self._state.status = ChaseStatus.ERROR
+            self._state.error = "Trading not configured"
+            self._publish()
+            return False
+        return True
+
+    def _hold_quotes(self, reason: str) -> None:
+        """Quote nothing this tick and say why. Clips already resting stay."""
+        self._state.quote_action = Action.PAUSE.value
+        self._state.reason = reason
+        self._sync_rest_from_live()
+        self._publish()
+
     async def _evaluate(self) -> None:
         async with self._lock:
-            if (
-                self._stop.is_set()
-                or self._state.status != ChaseStatus.RUNNING
-                or not self._state.params
-            ):
-                return
-            if not self._exec().enabled:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = "Trading not configured"
-                self._publish()
+            if not self._ready_to_evaluate():
                 return
 
             await self._sync_fills()
