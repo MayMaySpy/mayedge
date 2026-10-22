@@ -1,5 +1,8 @@
 import type {
   AutoKillRequest,
+  IdeaAlertBody,
+  IdeaAlertSaved,
+  IdeaAlerts,
   IdeaBody,
   IdeaCreated,
   IdeaDetail,
@@ -908,4 +911,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   ideaDelete: (id: string) => request<void>(`/ideas/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  ideaAlerts: (id: string) => request<IdeaAlerts>(`/ideas/${encodeURIComponent(id)}/alerts`),
+  ideaAlertCreate: (id: string, body: IdeaAlertBody) =>
+    request<IdeaAlertSaved>(`/ideas/${encodeURIComponent(id)}/alerts`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  ideaAlertsFromPlan: (id: string) =>
+    request<IdeaAlerts>(`/ideas/${encodeURIComponent(id)}/alerts/plan`, { method: "POST" }),
+  ideaAlertRearm: (alertId: number) =>
+    request<IdeaAlertSaved>(`/idea-alerts/${alertId}/rearm`, { method: "POST" }),
+  ideaAlertDelete: (alertId: number) => request<void>(`/idea-alerts/${alertId}`, { method: "DELETE" }),
 };

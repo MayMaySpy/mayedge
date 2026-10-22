@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Ellipsis } from "lucide-react";
 import { TokenMark } from "@/components/desk/TokenMark";
+import { IdeaAlerts } from "@/components/ideas/IdeaAlerts";
 import { IdeaChart } from "@/components/ideas/IdeaChart";
 import { IdeaPlanForm } from "@/components/ideas/IdeaPlanForm";
 import { IdeaZoneBar } from "@/components/ideas/IdeaZoneBar";
@@ -27,12 +28,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, api, type Market } from "@/lib/api";
 import type { Idea, IdeaCatalyst, IdeaLogLine, IdeaPatch, IdeaReviewBody, IdeaStatusBody, JournalTrip } from "@/lib/api.gen";
+import { useIdeaAlerts } from "@/hooks/useIdeaAlerts";
+import { armedCount } from "@/lib/ideaAlerts";
 import { ideaTrips, marketLast, planComplete } from "@/lib/ideas";
 import { money, price, rValue, size } from "@/lib/journalFormat";
 import { utcDateTime } from "@/lib/utcTime";
 import { cn, signClass } from "@/lib/utils";
 
-export type IdeaTab = "thesis" | "plan" | "log" | "trades" | "review";
+export type IdeaTab = "thesis" | "plan" | "alerts" | "log" | "trades" | "review";
 
 const STATUS = { watching: "Watching", active: "Active", closed: "Closed", dropped: "Dropped" } as const;
 const OUTCOME = [
@@ -41,7 +44,7 @@ const OUTCOME = [
   ["missed", "Missed"],
   ["wrong", "Wrong"],
 ] as const;
-const KIND = { update: "✎", plan: "⇢", status: "●", planner: "▶" } as const;
+const KIND = { update: "✎", plan: "⇢", status: "●", planner: "▶", alert: "🔔" } as const;
 
 function Linked({ text }: { text: string }) {
   const parts = text.split(/(https?:\/\/\S+)/g);
@@ -103,6 +106,7 @@ export function IdeaDetail({
   const ended = idea.status === "closed" || idea.status === "dropped";
   const [trips, setTrips] = useState<JournalTrip[]>([]);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const priceAlerts = useIdeaAlerts(idea.id);
 
   useEffect(() => {
     let live = true;
@@ -229,6 +233,7 @@ export function IdeaDetail({
         <TabsList>
           <TabsTrigger value="thesis">Thesis</TabsTrigger>
           <TabsTrigger value="plan">Plan</TabsTrigger>
+          <TabsTrigger value="alerts">Alerts {armedCount(priceAlerts.alerts)}</TabsTrigger>
           <TabsTrigger value="log">Log {log.length}</TabsTrigger>
           <TabsTrigger value="trades">Trades {trips.length}</TabsTrigger>
           {ended ? <TabsTrigger value="review">Review</TabsTrigger> : null}
@@ -244,6 +249,9 @@ export function IdeaDetail({
             last={last}
             onSave={onPatch}
           />
+        </TabsContent>
+        <TabsContent value="alerts">
+          <IdeaAlerts idea={idea} last={last} alerts={priceAlerts.alerts} onChanged={priceAlerts.reload} />
         </TabsContent>
         <TabsContent value="log">
           <Log log={log} composer={composer} onLog={onLog} />

@@ -34,6 +34,7 @@ The first algo snapshot after boot only seeds the diff. A restart does not repla
 | Desk frozen | the wall clock jumped more than 30s while the loop missed its ticks, without a restart. Urgent, key `freeze:{to}`. Positions and uPnL come from the cached account payload. If the account feed is not live, the line says they are unknown and does not wait. | `Desk was frozen 14m (02:10–02:24 UTC). Trails, Planner trailing parts and Auto kill were not watching; venue stops held. 2 Positions open, uPnL −$120.` | `freeze:{to}` | yes |
 | Backup failed | a Backup raises. The loop keeps running and tries again at the next `backup_at`. | `⚠️ Backup failed: disk full` | `backup` | no |
 | Yesterday's journal | UTC time is at or past `daily_at`, once that UTC date, including a start that missed the minute. The numbers are the UTC journal day 24 hours earlier, the same day key the journal uses. Closed Round trips only; partial and open stay out. Empty `daily_at` sends nothing. A failed read is logged and that local date is not tried again. **Portfolio part** (docs/portfolio-rules.md D1): when the desk has the venue's daily buckets stamped at both UTC midnights of that day, the line leads with the Portfolio's change that day and each kind that moved. Without both buckets, or if that read fails, the line goes out without it. | `Yesterday: Portfolio +$412 (Perps +$380, Spot +$40, Staking −$8) · Net +$380 over 9 Round trips, fees $38, funding −$6`. Without the Portfolio part: `Yesterday: Net +$412 over 9 Round trips, fees $38, funding −$6`. None closed: `Yesterday: no Round trips.` (or `… · no Round trips.` after the Portfolio part) | `journal:{local date}` | no |
+| Price alert | an armed Price alert on a Watching or Active Idea is met ([idea-rules.md](idea-rules.md#price-alerts) A1–A11), and `ideas` is `on`. `off` keeps the desk toast and the Idea log line. | `🔔 ZRO above 2.20 · T1 · Last 2.2034`, the alert's note on the next line | `idea-alert:{id}:{fires}` | no |
 | Send test | the Alerts panel, or `POST /api/push/test` | `Desk test push ✓` | `test:{time}` | yes |
 
 `algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, and TWAP send an error and nothing else.
@@ -54,6 +55,7 @@ Sizes use a unicode minus (`−2.0`). A loss in dollars does too (`−$812`). Pr
 | `repeat_s` | 600 | the same key stays quiet this long. Urgent skips it. The venue-back push skips it too. |
 | `max_per_min` | 12 | past this many sends in a minute, non-urgent items wait and leave as one `N more: a; b` when the minute ends. Urgent still goes. |
 | `daily_at` | empty | `HH:MM` UTC for yesterday's journal. Empty is off. |
+| `ideas` | `on` | `on` or `off`: whether a fired Price alert also leaves as a Push. |
 
 The worker also sends at most one message a second. An HTTP 429 waits `parameters.retry_after` and tries again; it is not one of the three failures. After eight 429s in a row it counts as a failure. Any other error waits 2s, then 4s, then 8s, then the message is dropped and one warning is logged. The warning does not include the exception or the request.
 

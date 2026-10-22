@@ -298,6 +298,10 @@ _Avoid_: history, journal (that is the Journal page), comments
 How an Idea ended, written when it is Closed or Dropped: an outcome and what the operator learned.
 _Avoid_: post-mortem, result (that is the Round trips' Net)
 
+**Price alert**:
+A price on an Idea's Market the operator asked to hear about: a Level that Last reaches, a Move from where Last was when it was set, or a Daily Change. When it is met it fires: a toast on the desk, a Push, and a line in the Idea log. It never sends an order and never moves the Idea. The rules are in [docs/idea-rules.md](docs/idea-rules.md#price-alerts).
+_Avoid_: Alert (unqualified: that is the desk's own), alarm, trigger (that is the Plan's words, or the venue's price), notification
+
 ### Account
 
 **Account index**:

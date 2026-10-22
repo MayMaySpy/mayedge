@@ -25,6 +25,8 @@ from mayedge.backup import health as backup_health
 from mayedge.backup import start_backup
 from mayedge.config import settings
 from mayedge.heartbeat import heartbeat_view, start_heartbeat
+from mayedge.idea_alert_watch import start as start_idea_alerts
+from mayedge.idea_alert_watch import stop as stop_idea_alerts
 from mayedge.journal_sync import note_fill
 from mayedge.journal_sync import start as start_journal
 from mayedge.journal_sync import stop as stop_journal
@@ -143,6 +145,7 @@ async def lifespan(app: FastAPI):
     set_fill_listener(note_fill)
     start_journal()
     start_portfolio_sync()
+    start_idea_alerts(publish)
     await desk.start()
     await desk.restore()
     backup = start_backup(pusher)
@@ -167,6 +170,7 @@ async def lifespan(app: FastAPI):
         await stop_journal()
         set_open_emitter(None)
         await stop_portfolio_sync()
+        await stop_idea_alerts()
         gateway.unsubscribe(auto_kill.on_gateway)
         auto_kill.stop()
         feed_health.set_emitter(None)

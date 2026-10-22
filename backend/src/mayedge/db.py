@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS funding_days (
 """
     + _JOURNAL_TABLES
     + migrations.IDEAS_SQL
+    + ";"
+    + migrations.IDEA_ALERTS_SQL
 )
 
 _last_liq_fold_at = time.time()

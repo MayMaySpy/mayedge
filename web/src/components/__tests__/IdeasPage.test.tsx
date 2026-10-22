@@ -121,6 +121,8 @@ beforeEach(() => {
   vi.spyOn(api, "markets").mockResolvedValue([market("ZRO", 2.19), market("HYPE", 1)]);
   vi.spyOn(api, "candles").mockResolvedValue([]);
   vi.spyOn(api, "journalTrips").mockResolvedValue({ trips: [] });
+  vi.spyOn(api, "ideaAlerts").mockResolvedValue({ alerts: [] });
+  vi.spyOn(api, "pushStatus").mockResolvedValue({ enabled: true, chat_set: true, alerts: "held", algos: "lifecycle" });
 });
 
 afterEach(() => {

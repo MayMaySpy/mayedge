@@ -379,6 +379,34 @@ def _v16(conn: sqlite3.Connection) -> None:
     _run(conn, IDEAS_SQL)
 
 
+# Price alerts (docs/idea-rules.md A1–A11). Times are milliseconds. Frozen with step 17: do not edit.
+IDEA_ALERTS_SQL = """
+CREATE TABLE IF NOT EXISTS idea_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    price TEXT,
+    pct TEXT,
+    base TEXT,
+    repeat INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    fires INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    armed_at INTEGER NOT NULL,
+    fired_at INTEGER,
+    fired_last TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_idea_alerts ON idea_alerts(idea_id, status)
+"""
+
+
+def _v17(conn: sqlite3.Connection) -> None:
+    _run(conn, IDEA_ALERTS_SQL)
+
+
 STEPS: tuple[Step, ...] = (
     Step(1, "liquidation columns, algo venue", _v1),
     Step(2, "algo type, params and clip side", _v2),
@@ -396,6 +424,7 @@ STEPS: tuple[Step, ...] = (
     Step(14, "portfolio pnl buckets", _v14),
     Step(15, "journal excursions", _v15),
     Step(16, "ideas", _v16),
+    Step(17, "idea price alerts", _v17),
 )
 
 LATEST = STEPS[-1].version

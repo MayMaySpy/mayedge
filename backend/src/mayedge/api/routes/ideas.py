@@ -7,9 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from mayedge import persist_idea_alerts as alerts_store
 from mayedge.api import responses
 from mayedge.api.responses import documents
 from mayedge.api.schemas import (
+    IdeaAlertBody,
     IdeaBody,
     IdeaLogBody,
     IdeaPatch,
@@ -17,6 +19,8 @@ from mayedge.api.schemas import (
     IdeaReviewBody,
     IdeaStatusBody,
 )
+from mayedge.idea_alert_watch import gateway_quote
+from mayedge.idea_alerts import spec_of
 from mayedge.ideas import Refusal, last_text, normalise
 from mayedge.lighter.gateway import gateway
 from mayedge.persist_ideas import (
@@ -163,3 +167,75 @@ async def post_planner(idea_id: str, body: IdeaPlannerBody) -> dict[str, Any]:
 @router.delete("/api/ideas/{idea_id}", status_code=204)
 async def delete_idea(idea_id: str) -> None:
     await _call(idea_delete, idea_id)
+
+
+async def _alert_call(fn: Any, *args: Any) -> Any:
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except alerts_store.Missing:
+        raise HTTPException(404, "No such Idea or alert.") from None
+    except Refusal as err:
+        raise _refused(err) from None
+
+
+async def _symbol_of(idea_id: str) -> str:
+    current = await asyncio.to_thread(idea_get, idea_id)
+    if current is None:
+        raise HTTPException(404, "No such Idea.")
+    return str(current["idea"]["symbol"])
+
+
+@router.get(
+    "/api/ideas/{idea_id}/alerts",
+    response_model=None,
+    responses=documents(responses.IdeaAlerts),
+)
+async def get_alerts(idea_id: str) -> dict[str, Any]:
+    await _symbol_of(idea_id)
+    return {"alerts": await asyncio.to_thread(alerts_store.alerts_for, idea_id)}
+
+
+@router.post(
+    "/api/ideas/{idea_id}/alerts",
+    response_model=None,
+    responses=documents(responses.IdeaAlertSaved),
+)
+async def post_alert(idea_id: str, body: IdeaAlertBody) -> dict[str, Any]:
+    spec = spec_of(body.model_dump())
+    if isinstance(spec, Refusal):
+        raise _refused(spec)
+    last, change = gateway_quote(await _symbol_of(idea_id))
+    alert = await _alert_call(alerts_store.alert_add, idea_id, spec, last, change)
+    return {"alert": alert}
+
+
+@router.post(
+    "/api/ideas/{idea_id}/alerts/plan",
+    response_model=None,
+    responses=documents(responses.IdeaAlerts),
+)
+async def post_plan_alerts(idea_id: str) -> dict[str, Any]:
+    last, _ = gateway_quote(await _symbol_of(idea_id))
+    if last is None:
+        raise HTTPException(422, {"field": "kind", "message": "No Last for this Market yet."})
+    made = await _alert_call(alerts_store.alerts_from_plan, idea_id, last)
+    return {"alerts": made}
+
+
+@router.post(
+    "/api/idea-alerts/{alert_id}/rearm",
+    response_model=None,
+    responses=documents(responses.IdeaAlertSaved),
+)
+async def post_rearm(alert_id: int) -> dict[str, Any]:
+    found = await asyncio.to_thread(alerts_store.alert_symbol, alert_id)
+    if found is None:
+        raise HTTPException(404, "No such alert.")
+    last, change = gateway_quote(found)
+    alert = await _alert_call(alerts_store.alert_rearm, alert_id, last, change)
+    return {"alert": alert}
+
+
+@router.delete("/api/idea-alerts/{alert_id}", status_code=204)
+async def delete_alert(alert_id: int) -> None:
+    await _alert_call(alerts_store.alert_delete, alert_id)

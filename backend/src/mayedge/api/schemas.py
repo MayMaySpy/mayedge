@@ -159,3 +159,12 @@ class IdeaLogBody(BaseModel):
 
 class IdeaPlannerBody(BaseModel):
     algo_id: str
+
+
+class IdeaAlertBody(BaseModel):
+    kind: Literal["level", "move", "day"]
+    price: str | None = None
+    pct: str | None = None
+    direction: Literal["above", "below", "up", "down", "either"] | None = None
+    repeat: bool = False
+    note: str = ""

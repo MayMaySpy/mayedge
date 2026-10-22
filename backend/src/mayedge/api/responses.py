@@ -342,7 +342,7 @@ class Idea(_Shape):
 class IdeaLogLine(_Shape):
     id: int
     ts: int
-    kind: Literal["update", "plan", "status", "planner"]
+    kind: Literal["update", "plan", "status", "planner", "alert"]
     body: str
     last: str | None
 
@@ -372,6 +372,33 @@ class IdeaSaved(_Shape):
 
 class IdeaLogged(_Shape):
     line: IdeaLogLine
+
+
+class IdeaAlert(_Shape):
+    id: int
+    idea_id: str
+    kind: Literal["level", "move", "day"]
+    direction: Literal["above", "below", "up", "down", "either"]
+    price: str | None
+    pct: str | None
+    base: str | None
+    repeat: bool
+    label: str
+    note: str
+    status: Literal["armed", "fired"]
+    fires: int
+    created_at: int
+    armed_at: int
+    fired_at: int | None
+    fired_last: str | None
+
+
+class IdeaAlerts(_Shape):
+    alerts: list[IdeaAlert]
+
+
+class IdeaAlertSaved(_Shape):
+    alert: IdeaAlert
 
 
 def documents(model: type[BaseModel]) -> dict[int | str, dict[str, object]]:

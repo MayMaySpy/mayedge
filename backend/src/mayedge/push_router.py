@@ -100,6 +100,8 @@ class PushRouter:
             self._on_feed(msg)
         elif kind == "desk_freeze":
             self._on_freeze(msg)
+        elif kind == "idea_alert":
+            self._on_idea_alert(msg)
         self.poll()
 
     def poll(self) -> None:
@@ -265,6 +267,15 @@ class PushRouter:
         self._position_pnl = pnls
         raw = msg.get("unrealized_pnl")
         self._upnl = _num(raw) if raw not in (None, "") else None
+
+    def _on_idea_alert(self, msg: dict[str, Any]) -> None:
+        """A fired Price alert (docs/idea-rules.md A9). `ideas: off` leaves the toast only."""
+        if self._cfg.ideas == "off":
+            return
+        key = msg.get("key")
+        text = msg.get("text")
+        if isinstance(key, str) and key and isinstance(text, str) and text:
+            self._out.push(key, text)
 
     def _on_freeze(self, msg: dict[str, Any]) -> None:
         try:

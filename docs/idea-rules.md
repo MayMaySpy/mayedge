@@ -76,3 +76,38 @@ The Draft is a copy of the Plan at send time. Later edits to the Idea do not mov
 | D3 | The desk switches to the Market, replaces that Market's Draft with the Idea's (a toast says so when it replaced one), and opens the Planner dialog. Nothing reaches the venue until **Start** ([ADR 0018](adr/0018-the-chart-drafts-a-planner.md)). A Market where a Planner already runs shows the dialog's own refusal ([ADR 0015](adr/0015-planner-owns-the-exit.md)). | | `chartDraft` tests |
 | D4 | When a Planner starts from that Draft, the desk writes `POST /api/ideas/{id}/planner` with the algo id. The Idea goes Active (S2) and its log names the Planner. The write is idempotent per algo id. If the write fails, the Planner still runs; a toast says the Idea was not updated. | | test_a_planner_start_marks_the_idea_active |
 | D5 | An Idea's Round trips are the Journal's on its Market whose open time is at or after the Idea's creation, and before it was Closed or Dropped if it was. A journal timestamp below 10^12 is seconds. | code | `web: ideas.test.ts` |
+
+## Price alerts
+
+A **Price alert** tells the operator a price was reached. It is a toast, a Push and an Idea log line, and nothing else: it never places, amends or cancels an order, and never moves an Idea's status ([ADR 0021](adr/0021-a-price-alert-is-a-push-not-an-order.md)). Pushes follow [push-rules.md](push-rules.md) (the `ideas` knob).
+
+A long ZRO Idea with Last at 2.15:
+
+- A Level at 2.20 is set **above** (2.20 is over Last). It fires when Last is 2.20 or more.
+- A Move of 5% either way has its base at 2.15. It fires at 2.2575 or more, or 2.0425 or less.
+- A Day of 10% up fires when the Daily Change is +10% or more.
+
+| | Rule | Knob | Pinned by |
+|---|---|---|---|
+| A1 | A Price alert belongs to one Idea and watches that Idea's Market. Its kind is **Level**, **Move** or **Day**. An Idea holds at most 20, armed or fired. Deleting the Idea deletes them. | code | test_an_idea_holds_at_most_20_alerts, test_deleting_the_idea_deletes_its_alerts |
+| A2 | A Level has a price (a decimal string above 0, kept as typed) and a direction, **above** or **below**. Without a direction it is taken from Last when the alert is armed: above when the price is over Last, below when under. A price equal to Last, or no Last and no direction, is refused. It is met when Last ≥ price (above) or Last ≤ price (below). | | test_a_level_takes_its_direction_from_last, test_a_level_at_last_is_refused |
+| A3 | A Move has a percent above 0 and at most 100, and a direction **up**, **down** or **either** (either by default). Its base is Last when it is armed; with no Last it is refused. It is met when (Last − base) / base × 100 is at least the percent (up), at most minus the percent (down), or either. | code | test_a_move_is_measured_from_its_base |
+| A4 | A Day has a percent above 0 and at most 100 and a direction up, down or either (either by default). It is met when the **Daily Change** is at least +percent (up), at most −percent (down), or either. One already met when it is armed is refused, with the Daily Change now. | code | test_a_day_already_met_is_refused |
+| A5 | Last is L1's. A missing Last, or a missing Daily Change for a Day, is unknown: the alert waits. It never fires on an unknown. | | test_an_alert_waits_without_a_last |
+| A6 | Only alerts on a Watching or Active Idea are checked. Closing or dropping the Idea stops the checks and leaves the alerts as they are; a reopen checks them again. | | test_alerts_on_a_closed_idea_wait |
+| A7 | The desk checks armed alerts every 2 seconds, only while it runs. An alert armed before the desk started and already met at its first look fires then, and its text says it was met when the desk started. | code | test_an_alert_met_at_start_says_so |
+| A8 | **Once** (the default): a fired alert stays, marked fired with the time and Last. **Re-arm** arms it again as if new: a Level takes its direction from Last now, a Move its base. **Repeat**: the desk re-arms it the same way 15 minutes after it fired, and a Day only once the Daily Change is back inside its percent. A Level waits while Last sits on its price. | code | test_rearm_takes_last_now, test_a_repeat_rearms_after_15_minutes, test_a_day_rearms_back_inside |
+| A9 | A fire marks the alert fired and writes one Idea log line (kind `alert`) with Last, in one transaction, then sends one desk message: a toast on the desk and a Push under the key `idea-alert:{id}:{fires}`. | | test_a_fire_logs_and_emits_once |
+| A10 | **Alert on my plan** arms a Once Level alert at each Plan price Last is not on: the zone edge nearer Last (none while In zone), the stop, and each Target. Each is labelled Entry zone, Stop, T1… A price that already has an armed Level alert on the Idea is skipped. With no Plan price it does nothing. | | test_plan_alerts_skip_prices_already_watched |
+| A11 | A note is optional, up to 120 characters, and goes out with the Push. | code | test_alert_note_is_trimmed |
+
+Texts, one line each, the note on its own line under it:
+
+| Kind | Text |
+|---|---|
+| Level | `🔔 ZRO above 2.20 · T1 · Last 2.2034` |
+| Move | `🔔 ZRO moved +5.02% from 2.15 (alert ±5%) · Last 2.2579`. Up shows `+5%`, down `−5%`, either `±5%`. |
+| Day | `🔔 ZRO Daily Change +10.4% (alert +10%) · Last 2.2` |
+| Met at start | the line ends `· met when the desk started` |
+
+Prices are the ones stored, with thousands separators. The log line is the same text without the bell.

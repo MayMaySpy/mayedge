@@ -65,6 +65,42 @@ export interface Idea {
   r_multiples: string[] | null;
 }
 
+export interface IdeaAlert {
+  id: number;
+  idea_id: string;
+  kind: "level" | "move" | "day";
+  direction: "above" | "below" | "up" | "down" | "either";
+  price: string | null;
+  pct: string | null;
+  base: string | null;
+  repeat: boolean;
+  label: string;
+  note: string;
+  status: "armed" | "fired";
+  fires: number;
+  created_at: number;
+  armed_at: number;
+  fired_at: number | null;
+  fired_last: string | null;
+}
+
+export interface IdeaAlertBody {
+  kind: "level" | "move" | "day";
+  price?: string | null;
+  pct?: string | null;
+  direction?: "above" | "below" | "up" | "down" | "either" | null;
+  repeat?: boolean;
+  note?: string;
+}
+
+export interface IdeaAlertSaved {
+  alert: IdeaAlert;
+}
+
+export interface IdeaAlerts {
+  alerts: IdeaAlert[];
+}
+
 export interface IdeaBody {
   symbol: string;
   side: "long" | "short";
@@ -108,7 +144,7 @@ export interface IdeaLogBody {
 export interface IdeaLogLine {
   id: number;
   ts: number;
-  kind: "update" | "plan" | "status" | "planner";
+  kind: "update" | "plan" | "status" | "planner" | "alert";
   body: string;
   last: string | null;
 }

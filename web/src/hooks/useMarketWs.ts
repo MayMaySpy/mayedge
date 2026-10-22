@@ -262,6 +262,17 @@ export function useMarketWs(symbol: string) {
               tone: "warn",
             });
             break;
+          case "idea_alert": {
+            // A fired Price alert (docs/idea-rules.md A9): the bell line, then the note.
+            const [title, ...rest] = String(msg.text ?? "Price alert").split("\n");
+            notifyDesk({
+              title,
+              description: rest.join(" ") || undefined,
+              tone: "warn",
+              symbol: typeof msg.symbol === "string" ? msg.symbol : undefined,
+            });
+            break;
+          }
           case "market_stats":
             applyMarketQuotes((msg.markets as MarketQuote[]) ?? []);
             break;

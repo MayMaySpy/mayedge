@@ -149,6 +149,7 @@ class MigrationTests(unittest.TestCase):
         store.init_db()
         with store._lock:
             conn = store._connect()
+            conn.execute("DROP TABLE IF EXISTS idea_alerts")
             conn.execute("DROP TABLE IF EXISTS idea_log")
             conn.execute("DROP TABLE IF EXISTS ideas")
             store._set_meta(conn, "schema_version", "15")
@@ -157,9 +158,24 @@ class MigrationTests(unittest.TestCase):
             shape = _shape(conn)
             version = migrations.stored_version(conn)
         self.assertEqual(shape, fresh)
-        self.assertEqual(version, 16)
+        self.assertEqual(version, store.SCHEMA_VERSION)
         self.assertIn("ideas", shape)
         self.assertIn("idea_log", shape)
+
+    def test_step_17_adds_price_alerts_to_a_version_16_file(self) -> None:
+        fresh = self._fresh_shape()
+        store.init_db()
+        with store._lock:
+            conn = store._connect()
+            conn.execute("DROP TABLE IF EXISTS idea_alerts")
+            store._set_meta(conn, "schema_version", "16")
+            conn.commit()
+            store._migrate(conn)
+            shape = _shape(conn)
+            version = migrations.stored_version(conn)
+        self.assertEqual(shape, fresh)
+        self.assertEqual(version, 17)
+        self.assertIn("idea_alerts", shape)
 
     def test_a_failed_step_leaves_the_file_at_the_step_before(self) -> None:
         store.init_db()
