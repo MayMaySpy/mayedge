@@ -10,7 +10,11 @@ from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.clip_book import AlgoBook, AlgoPayload, MarketWatch
 from mayedge.algos.planner import venue
-from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
+from mayedge.algos.planner.config import (
+    MARKET_AMENDS_PER_MIN,
+    PLANNER_COI_BASE,
+    PLANNER_COI_END,
+)
 from mayedge.algos.planner.job import PlannerRunner
 from mayedge.algos.planner.plan import ALGO_ID, PlannerParams, PlanRefused, build_plan
 from mayedge.algos.planner.state import PlannerState
@@ -25,6 +29,7 @@ class PlannerBook(AlgoBook[PlannerRunner], MarketWatch):
     ALGO_ID = ALGO_ID
     ID_PREFIX = "PL-"
     LABEL = "Planner"
+    AMENDS_PER_MIN = MARKET_AMENDS_PER_MIN
     COI_BASE = PLANNER_COI_BASE
     COI_END = PLANNER_COI_END
     RESTORE_WAITS_FOR_FEEDS = False

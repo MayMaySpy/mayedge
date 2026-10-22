@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mayedge import feed_health
-from mayedge.algos.book import AlgoBook, find_book, find_book_by_algo_id
+from mayedge.algos.book import DeskBook, find_book, find_book_by_algo_id
 from mayedge.algos.chase import HISTORY_CAP
 from mayedge.algos.chase.book import ChaseBook
 from mayedge.algos.chase.execution import ChaseExecution
@@ -123,7 +123,7 @@ trail_book = TrailBook(
     coi_end=TRAIL_COI_END,
     watch_prints=gateway.watch_prints,
 )
-books: tuple[AlgoBook, ...] = (
+books: tuple[DeskBook, ...] = (
     chase_book,
     twap_book,
     ladder_book,
@@ -133,7 +133,7 @@ books: tuple[AlgoBook, ...] = (
 )
 
 
-def _market_has_other_desk_algo(exclude: AlgoBook) -> Callable[[int], bool]:
+def _market_has_other_desk_algo(exclude: DeskBook) -> Callable[[int], bool]:
     def _fn(market_index: int) -> bool:
         for book in books:
             if book is exclude:
@@ -163,7 +163,7 @@ def trail_stop_owns_stop(market_index: int) -> bool:
     return trail_book.stop_live_on_market(market_index)
 
 
-def get_book(algo_type: str) -> AlgoBook | None:
+def get_book(algo_type: str) -> DeskBook | None:
     return find_book(books, algo_type)
 
 

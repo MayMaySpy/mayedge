@@ -1,4 +1,4 @@
-"""Algo book protocol — desk iterates registered books instead of naming each type."""
+"""What the desk needs from a book. It iterates the registered books instead of naming each type."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class AlgoBook(Protocol):
+class DeskBook(Protocol):
     @property
     def algo_type(self) -> str: ...
 
@@ -35,14 +35,14 @@ class AlgoBook(Protocol):
     def live_on_market(self, market_index: int, *, exclude: str | None = None) -> bool: ...
 
 
-def find_book(books: tuple[AlgoBook, ...], algo_type: str) -> AlgoBook | None:
+def find_book(books: tuple[DeskBook, ...], algo_type: str) -> DeskBook | None:
     for book in books:
         if book.algo_type == algo_type:
             return book
     return None
 
 
-def find_book_by_algo_id(books: tuple[AlgoBook, ...], algo_id: str) -> AlgoBook | None:
+def find_book_by_algo_id(books: tuple[DeskBook, ...], algo_id: str) -> DeskBook | None:
     for book in books:
         if book.has(algo_id):
             return book

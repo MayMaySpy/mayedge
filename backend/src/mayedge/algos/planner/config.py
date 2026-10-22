@@ -10,6 +10,9 @@ MARKET_ORDER_CAP = 30
 # EL4: algo sends a Ladder entry leaves free for the stop when it rests its rungs.
 RUNG_TX_RESERVE = 3
 
+# Amends a minute, shared by the Planners on one Market; the same budget as Trail F7.
+MARKET_AMENDS_PER_MIN = 15
+
 RATE_LIMIT_COOLDOWN_MS = 2_000
 MIN_PLACE_GAP_MS = 100
 

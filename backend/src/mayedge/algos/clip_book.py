@@ -3,7 +3,8 @@
 Chase, Grid, Ladder and TWAP keep many jobs whose Clips live in one Ledger each. A
 subclass names its algo, its id prefix and its client_order_index band, makes a
 runner, and adds its own start checks. Planner and Trail own more than Clips and keep
-their own books. ``AlgoBook`` is the shared base in this file. ``ClipBook`` adds the
+their own books. ``AlgoBook`` is the shared base in this file; ``DeskBook`` in book.py is
+what the desk calls on any book. ``ClipBook`` adds the
 clip-only methods. This is the method-by-method diff the split follows.
 
 | Method | Kind | What differs |
@@ -20,7 +21,7 @@ clip-only methods. This is the method-by-method diff the split follows.
 | ``pause_for_market`` | shared | clip pauses running jobs; trail and planner stop every job on the market |
 | ``stop`` | shared | clip publishes when the id is missing; planner does not. Trail adds ``keep_stop`` |
 | ``_ensure_book``, ``_launch``, ``live_on_market_side``, ``missing_fill_grace_ms`` | clip | |
-| ``set_market_conflict``, ``set_watch_prints``, ``take_amend`` | trail and planner | the same minute budget |
+| ``set_market_conflict``, ``set_watch_prints``, ``take_amend`` | trail and planner | each names its own ``AMENDS_PER_MIN`` |
 | ``_sync_watch``, ``_check_free`` | one book | the "want prints" test and the free-market rule differ |
 | ``preview_from_body``, ``start_from_body`` | one book | both books, different bodies |
 | ``edit_from_body``, ``stop_live_on_market`` | trail | |
@@ -42,7 +43,6 @@ from mayedge.algos.chase.config import HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Ledger
-from mayedge.algos.trail.config import MARKET_AMENDS_PER_MIN
 from mayedge.rows import is_list, is_obj
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,8 @@ def _created_at(snap: Mapping[str, object]) -> int:
 class MarketWatch:
     """Amend budget and print watch. Trail and planner use it. Clip books do not."""
 
+    AMENDS_PER_MIN: ClassVar[int]
+
     def __init__(
         self,
         market_conflict: Callable[[int], bool] | None = None,
@@ -148,7 +150,7 @@ class MarketWatch:
         sent = self._amends.setdefault(market_index, deque())
         while sent and now_ms - sent[0] >= 60_000:
             sent.popleft()
-        if len(sent) >= MARKET_AMENDS_PER_MIN:
+        if len(sent) >= self.AMENDS_PER_MIN:
             return False
         sent.append(now_ms)
         return True

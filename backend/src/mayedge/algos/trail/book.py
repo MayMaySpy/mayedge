@@ -15,7 +15,12 @@ from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.clip_book import AlgoBook, AlgoPayload, MarketWatch
 from mayedge.algos.planner import venue
-from mayedge.algos.trail.config import MAX_PER_MARKET, TRAIL_COI_BASE, TRAIL_COI_END
+from mayedge.algos.trail.config import (
+    MARKET_AMENDS_PER_MIN,
+    MAX_PER_MARKET,
+    TRAIL_COI_BASE,
+    TRAIL_COI_END,
+)
 from mayedge.algos.trail.job import TrailRunner
 from mayedge.algos.trail.plan import ALGO_ID, KIND_NAMES, TrailParams, TrailRefused, check_start
 from mayedge.algos.trail.state import TrailState
@@ -44,6 +49,7 @@ class TrailBook(AlgoBook[TrailRunner], MarketWatch):
     ALGO_ID = ALGO_ID
     ID_PREFIX = "TR-"
     LABEL = "Trail"
+    AMENDS_PER_MIN = MARKET_AMENDS_PER_MIN
     COI_BASE = TRAIL_COI_BASE
     COI_END = TRAIL_COI_END
     RESTORE_WAITS_FOR_FEEDS = False
