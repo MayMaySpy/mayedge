@@ -20,6 +20,7 @@ import {
   type PlannerPreview,
   type PlannerTargetPlan,
 } from "@/lib/api";
+import { clearDraftIdea, draftIdea, saveIdeaHref, useChartDraft } from "@/lib/chartDraft";
 import { setAlgo } from "@/lib/liveData";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { decimalInput } from "@/lib/numbers";
@@ -29,6 +30,7 @@ import {
   formFromPlanner,
   plannerBody,
   plannerFormBlock,
+  livePlannerFor,
   replacedLine,
   rLabel,
   plannerTrails,
@@ -194,6 +196,8 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
   const canSend = !blocked && !sending && (replan || (plan != null && refused == null));
   const long = form.side === "buy";
   const runner = runnerPct(form.targets);
+  const chartDraft = useChartDraft(market.symbol);
+  const ideaHref = saveIdeaHref(market.symbol, chartDraft, market.price_decimals ?? 2);
 
   const send = async () => {
     if (!canSend) return;
@@ -211,6 +215,22 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
         status: "active",
         note: replan ? "re-planned" : mode === "attach" ? "attached" : undefined,
       });
+      if (!replan) {
+        const ideaId = draftIdea(market.symbol);
+        const algoId = livePlannerFor(book, market.market_index)?.algo_id ?? null;
+        if (ideaId) {
+          if (!algoId) {
+            notifyErr("The Planner is running. The Idea was not updated.");
+          } else {
+            try {
+              await api.ideaPlanner(ideaId, { algo_id: algoId });
+              clearDraftIdea(market.symbol);
+            } catch (err) {
+              notifyErr(err instanceof Error ? err.message : "The Planner is running. The Idea was not updated.");
+            }
+          }
+        }
+      }
       onOpenChange(false);
     } catch (e) {
       notifyErr(e instanceof Error ? e.message : "Planner refused");
@@ -793,6 +813,11 @@ function PlannerDialogBody({ onOpenChange, market, mode, side, running, initial 
       </div>
 
       <DialogFooter className="gap-2 sm:justify-end">
+        {ideaHref ? (
+          <a href={ideaHref} target="_blank" rel="noopener" className="mr-auto self-center text-sm text-muted-foreground">
+            Save as Idea
+          </a>
+        ) : null}
         <Button type="button" variant="ghost" disabled={sending} onClick={() => onOpenChange(false)}>
           Cancel
         </Button>

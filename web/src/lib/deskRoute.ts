@@ -7,7 +7,8 @@ const LEGACY_VENUE_RE = /^(lighter|hyperliquid)$/i;
 export const WATCH_PATH = "/watch";
 export const JOURNAL_PATH = "/journal";
 export const PORTFOLIO_PATH = "/portfolio";
-const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH", "JOURNAL", "PORTFOLIO"]);
+export const IDEAS_PATH = "/ideas";
+const RESERVED = new Set(["API", "WS", "ASSETS", "WATCH", "JOURNAL", "PORTFOLIO", "IDEAS"]);
 
 export type ParsedPath = {
   symbol: string;
@@ -50,6 +51,11 @@ export function isJournalPath(pathname: string): boolean {
 export function isPortfolioPath(pathname: string): boolean {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   return parts.length === 1 && parts[0].toUpperCase() === "PORTFOLIO";
+}
+
+export function isIdeasPath(pathname: string): boolean {
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  return parts.length === 1 && parts[0].toUpperCase() === "IDEAS";
 }
 
 function readSymbolFromStorage(): string | null {

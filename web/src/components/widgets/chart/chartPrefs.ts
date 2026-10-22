@@ -1,5 +1,7 @@
 import type { ScanTab } from "@/components/widgets/ScanBoard";
 
+import { storedFlag } from "@/lib/storedFlag";
+
 export const VOL_KEY = "mayedge-chart-vol";
 export const OI_KEY = "mayedge-chart-oi";
 export const FUND_KEY = "mayedge-chart-fund";
@@ -7,6 +9,9 @@ export const BBO_KEY = "mayedge-chart-bbo";
 export const MAYREKT_KEY = "mayedge-chart-mayrekt";
 export const FILLS_KEY = "mayedge-chart-fills";
 export const MODE_KEY = "mayedge-chart-mode";
+
+/** Open Ideas drawn on the price chart. Off until the operator turns it on. */
+export const chartIdeas = storedFlag("mayedge-chart-ideas");
 export const SCAN_TAB_KEY = "mayedge-scan-tab";
 export const RIGHT_OFFSET = 8;
 

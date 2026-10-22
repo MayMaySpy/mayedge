@@ -14,4 +14,12 @@ describe("PageNav", () => {
     expect(screen.getByRole("link", { name: "Desk" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Journal" })).toBeNull();
   });
+
+  it("titles Ideas and links the other pages", () => {
+    render(<PageNav current="Ideas" />);
+    expect(screen.getByRole("heading", { name: "Ideas" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Portfolio" }).getAttribute("href")).toBe("/portfolio");
+    expect(screen.getByRole("link", { name: "Journal" }).getAttribute("href")).toBe("/journal");
+    expect(screen.queryByRole("link", { name: "Ideas" })).toBeNull();
+  });
 });

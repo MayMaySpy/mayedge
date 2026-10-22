@@ -41,6 +41,7 @@ import {
   SCAN_TAB_KEY,
   SCAN_TABS,
   VOL_KEY,
+  chartIdeas,
   type ChartMode,
 } from "./chartPrefs";
 import { ohlcOf } from "./chartFormat";
@@ -140,6 +141,7 @@ export function ChartFrame(props: {
     display, hover, hoverBar, seriesKey, liveOi, fundBars, hoverFills,
   } = props;
   const { armed: planArmed, setArmed: setPlanArmed } = useChartPlan();
+  const [ideasOn, setIdeasOn] = chartIdeas.useFlag();
   const draft = useChartDraft(symbol);
   const draftNote = useChartDraftNotice(symbol);
   const canOpenDraft = planArmed && draftReady(draft);
@@ -293,6 +295,7 @@ export function ChartFrame(props: {
     { label: "B/A", pressed: bboOn, title: "Top of book", onChange: () => toggleBbo() },
     { label: "MR", pressed: mayRektOn, title: mayRektOn ? "Hide MayRekt" : "MayRekt", onChange: () => toggleMayRekt() },
     { label: "Fills", pressed: fillsOn, title: fillsOn ? "Hide your fills" : "Show your fills", onChange: () => toggleFills() },
+    { label: "Ideas", pressed: ideasOn, title: ideasOn ? "Hide open Ideas" : "Draw open Ideas", onChange: (next) => setIdeasOn(next) },
   ];
   const toolToggles: HeaderToggle[] = [
     {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SYMBOL, isWatchPath, parsePath, toPath } from "@/lib/deskRoute";
+import { DEFAULT_SYMBOL, isIdeasPath, isWatchPath, parsePath, toPath } from "@/lib/deskRoute";
 
 describe("parsePath", () => {
   it("reads /ETH as ETH", () => {
@@ -21,6 +21,14 @@ describe("parsePath", () => {
   it("does not treat /watch as a Market", () => {
     expect(parsePath("/watch")).toEqual({ symbol: DEFAULT_SYMBOL });
     expect(parsePath("/WATCH")).toEqual({ symbol: DEFAULT_SYMBOL });
+  });
+
+  it("does not treat /ideas as a Market", () => {
+    expect(parsePath("/ideas")).toEqual({ symbol: DEFAULT_SYMBOL });
+    expect(parsePath("/IDEAS")).toEqual({ symbol: DEFAULT_SYMBOL });
+    expect(isIdeasPath("/ideas")).toBe(true);
+    expect(isIdeasPath("/ideas/")).toBe(true);
+    expect(isIdeasPath("/ETH")).toBe(false);
   });
 });
 

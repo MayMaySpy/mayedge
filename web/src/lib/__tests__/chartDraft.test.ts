@@ -5,6 +5,7 @@ import {
   clearChartDraft,
   clickChartDraft,
   draftDistancePct,
+  draftIdea,
   draftOpenMode,
   draftOverlays,
   draftRAt,
@@ -13,6 +14,7 @@ import {
   emptyChartDraft,
   moveChartDraft,
   moveDraftLine,
+  setChartDraft,
 } from "@/lib/chartDraft";
 import { theme } from "@/lib/theme";
 
@@ -106,6 +108,17 @@ describe("chart draft", () => {
     clearChartDraft("ETH");
     expect(chartDraftFor("ETH").entry).toBeNull();
     expect(chartDraftFor("BTC").entry).toBe(50);
+  });
+
+  it("replaces a Draft, links the Idea, and clear drops the link", () => {
+    clickChartDraft("ETH", 100, null);
+    clickChartDraft("ETH", 90, null);
+    expect(setChartDraft("ETH", { entry: 2.19, stop: 2.08, targets: [{ r: "2", pct: "50" }] }, "idea-1")).toBe(true);
+    expect(chartDraftFor("ETH").entry).toBe(2.19);
+    expect(draftIdea("ETH")).toBe("idea-1");
+    clearChartDraft("ETH");
+    expect(draftIdea("ETH")).toBeNull();
+    expect(chartDraftFor("ETH").entry).toBeNull();
   });
 
   it("fills the dialog from the same prices", () => {

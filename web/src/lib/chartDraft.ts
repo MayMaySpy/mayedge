@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import type { ChartOverlay } from "@/lib/chartTradingLines";
+import type { Idea } from "@/lib/api.gen";
 import { defaultPlannerForm, type PlannerForm } from "@/lib/plannerPlan";
 import { snapTick } from "@/lib/ticketAmend";
 import { theme } from "@/lib/theme";
@@ -210,12 +211,15 @@ type Snap = {
   drafts: Record<string, ChartDraft>;
   notices: Record<string, string>;
   openSeq: number;
+  pendingOpen: boolean;
 };
 
-const serverSnap: Snap = { armed: false, drafts: {}, notices: {}, openSeq: 0 };
+const serverSnap: Snap = { armed: false, drafts: {}, notices: {}, openSeq: 0, pendingOpen: false };
 let armed = false;
 let openSeq = 0;
+let pendingOpen = false;
 const drafts = new Map<string, ChartDraft>();
+const ideaIds = new Map<string, string>();
 const notices = new Map<string, string>();
 const listeners = new Set<() => void>();
 let snap: Snap = serverSnap;
@@ -226,6 +230,7 @@ function emit() {
     drafts: Object.fromEntries(drafts),
     notices: Object.fromEntries(notices),
     openSeq,
+    pendingOpen,
   };
   for (const listener of listeners) listener();
 }
@@ -247,6 +252,25 @@ export function setChartPlanArmed(next: boolean) {
 
 export function chartDraftFor(symbol: string): ChartDraft {
   return drafts.get(symbol) ?? BLANK;
+}
+
+/** Replace this Market's Draft with an Idea's plan. True when a Draft was already there. */
+export function setChartDraft(symbol: string, draft: ChartDraft, ideaId: string): boolean {
+  const prev = drafts.get(symbol);
+  const replaced = prev != null && (prev.entry != null || prev.stop != null);
+  drafts.set(symbol, draft);
+  ideaIds.set(symbol, ideaId);
+  emit();
+  return replaced;
+}
+
+export function draftIdea(symbol: string): string | null {
+  return ideaIds.get(symbol) ?? null;
+}
+
+export function clearDraftIdea(symbol: string) {
+  if (!ideaIds.delete(symbol)) return;
+  emit();
 }
 
 export function clickChartDraft(symbol: string, price: number, positionEntry: number | null) {
@@ -272,7 +296,8 @@ export function moveChartDraft(
 }
 
 export function clearChartDraft(symbol: string) {
-  if (!drafts.has(symbol) && !notices.has(symbol)) return;
+  const hadIdea = ideaIds.delete(symbol);
+  if (!drafts.has(symbol) && !notices.has(symbol) && !hadIdea) return;
   drafts.delete(symbol);
   notices.delete(symbol);
   emit();
@@ -287,12 +312,19 @@ export function setChartDraftNotice(symbol: string, text: string) {
 
 export function requestChartDraftOpen() {
   openSeq += 1;
+  pendingOpen = true;
+  emit();
+}
+
+export function ackChartDraftOpen() {
+  if (!pendingOpen) return;
+  pendingOpen = false;
   emit();
 }
 
 export function useChartPlan() {
   const current = useSyncExternalStore(subscribe, () => snap, () => serverSnap);
-  return { armed: current.armed, setArmed: setChartPlanArmed, openSeq: current.openSeq };
+  return { armed: current.armed, setArmed: setChartPlanArmed, openSeq: current.openSeq, pendingOpen: current.pendingOpen };
 }
 
 export function useChartDraft(symbol: string): ChartDraft {
@@ -303,4 +335,42 @@ export function useChartDraft(symbol: string): ChartDraft {
 export function useChartDraftNotice(symbol: string): string {
   const current = useSyncExternalStore(subscribe, () => snap, () => serverSnap);
   return current.notices[symbol] ?? "";
+}
+
+/** Open an Idea prefilled from this Draft. The Thesis is still required there. */
+export function saveIdeaHref(symbol: string, draft: ChartDraft, decimals: number): string | null {
+  if (!draftReady(draft) || draft.entry == null || draft.stop == null) return null;
+  const params = new URLSearchParams();
+  params.set("symbol", symbol);
+  params.set("entry", formatDraftPrice(draft.entry, decimals));
+  params.set("stop", formatDraftPrice(draft.stop, decimals));
+  const prices = draft.targets
+    .map((target) => {
+      const raw = draftTargetPrice(draft.entry!, draft.stop!, Number(target.r));
+      return raw == null ? null : formatDraftPrice(raw, decimals);
+    })
+    .filter((price): price is string => price != null);
+  if (prices.length) params.set("t", prices.join(","));
+  return `/ideas?${params.toString()}`;
+}
+
+/** Faint display-only lines for open Ideas on this Market. Never interactive (ADR 0007). */
+export function ideaOverlays(ideas: readonly Idea[], symbol: string): ChartOverlay[] {
+  const want = symbol.toUpperCase();
+  const lines: ChartOverlay[] = [];
+  for (const idea of ideas) {
+    if (idea.symbol.toUpperCase() !== want) continue;
+    if (idea.status !== "watching" && idea.status !== "active") continue;
+    const zone = idea.side === "long" ? theme.bid : theme.ask;
+    const add = (id: string, price: string | null, color: string, label: string) => {
+      const n = Number(price);
+      if (!(n > 0)) return;
+      lines.push({ id: `${idea.id}-${id}`, kind: "idea", price: n, color, label, interactive: false });
+    };
+    add("zone", idea.entry_low, zone, "IDEA ZONE");
+    if (idea.entry_high && idea.entry_high !== idea.entry_low) add("zone-high", idea.entry_high, zone, "IDEA ZONE");
+    add("stop", idea.stop, theme.ask, "IDEA STOP");
+    idea.targets.forEach((target, index) => add(`t${index}`, target.price, theme.bid, `IDEA T${index + 1}`));
+  }
+  return lines;
 }

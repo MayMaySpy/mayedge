@@ -1,4 +1,4 @@
-import { ChevronDown, Search, Star, X } from "lucide-react";
+import { ChevronDown, Lightbulb, Search, Star, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { TokenMark } from "@/components/desk/TokenMark";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { uniqueSymbolMarkets } from "@/lib/algos";
 import type { Market } from "@/lib/api";
+import { IDEAS_PATH } from "@/lib/deskRoute";
+import { useOpenIdeas } from "@/hooks/useOpenIdeas";
 import { useFavorites } from "@/lib/favorites";
 import { overlayQuote, useLiveQuotes } from "@/lib/liveData";
 import {
@@ -100,6 +102,8 @@ export const MarketPicker = memo(function MarketPicker({
 
 
   const quotes = useLiveQuotes();
+  const openIdeas = useOpenIdeas();
+  const ideaSymbols = useMemo(() => new Set(openIdeas.map((idea) => idea.symbol)), [openIdeas]);
   const universe = useMemo(() => uniqueSymbolMarkets(markets), [markets]);
   const selected = universe.find((m) => m.symbol === symbol) ?? null;
   const current = selected ? overlayQuote(selected, quotes[selected.market_index]) : null;
@@ -351,6 +355,18 @@ export const MarketPicker = memo(function MarketPicker({
                             </button>
                             <TokenMark symbol={m.symbol} />
                             <span className="font-sans text-lg text-text">{m.symbol}</span>
+                            {ideaSymbols.has(m.symbol) ? (
+                              <a
+                                href={`${IDEAS_PATH}?symbol=${encodeURIComponent(m.symbol)}`}
+                                target="_blank"
+                                rel="noopener"
+                                aria-label={`Ideas for ${m.symbol}`}
+                                className="inline-flex size-6 items-center justify-center text-warn"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Lightbulb className="size-3.5" />
+                              </a>
+                            ) : null}
                             {m.max_leverage ? (
                               <span className="text-base text-muted-foreground tabular-nums">
                                 {m.max_leverage}x

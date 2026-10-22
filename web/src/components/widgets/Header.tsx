@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { BookOpen, LayoutGrid, Star, Wallet } from "lucide-react";
+import { BookOpen, LayoutGrid, Lightbulb, Star, Wallet } from "lucide-react";
 import { notifyErr, notifyOk, notifyWarn } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,7 @@ import { formatFundingPct } from "@/lib/marketPicker";
 import { averageReading, headlineAverage } from "@/lib/funding";
 import { formatClock } from "@/lib/alertFormat";
 import { utcClock } from "@/lib/utcTime";
-import { JOURNAL_PATH, PORTFOLIO_PATH } from "@/lib/deskRoute";
+import { IDEAS_PATH, JOURNAL_PATH, PORTFOLIO_PATH } from "@/lib/deskRoute";
 
 /** Prints settle hourly; a slow refresh keeps the average current. */
 const FUNDING_AVERAGE_REFRESH_MS = 10 * 60_000;
@@ -523,6 +523,12 @@ export function Header({
             <a href={JOURNAL_PATH} target="_blank" rel="noopener">
               <BookOpen data-icon="inline-start" />
               Journal
+            </a>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="h-7">
+            <a href={IDEAS_PATH} target="_blank" rel="noopener">
+              <Lightbulb data-icon="inline-start" />
+              Ideas
             </a>
           </Button>
 

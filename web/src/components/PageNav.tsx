@@ -1,9 +1,10 @@
 import { ArrowLeftIcon } from "lucide-react";
-import { JOURNAL_PATH, PORTFOLIO_PATH, readSymbol, toPath } from "@/lib/deskRoute";
+import { IDEAS_PATH, JOURNAL_PATH, PORTFOLIO_PATH, readSymbol, toPath } from "@/lib/deskRoute";
 
 const PAGES = [
   { name: "Portfolio", path: PORTFOLIO_PATH },
   { name: "Journal", path: JOURNAL_PATH },
+  { name: "Ideas", path: IDEAS_PATH },
 ] as const;
 
 type Page = (typeof PAGES)[number]["name"];

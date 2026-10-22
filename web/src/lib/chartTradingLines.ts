@@ -10,7 +10,7 @@ import { AttachedPrimitive, measureText, PriceAxisLabel } from "@/lib/chartPrimi
 import { theme } from "@/lib/theme";
 import { formatUsd } from "@/lib/utils";
 
-export type ChartOverlayKind = "position" | "order" | "liq" | "algo" | "band" | "draft";
+export type ChartOverlayKind = "position" | "order" | "liq" | "algo" | "band" | "draft" | "idea";
 
 export interface ChartOverlay {
   id: string;

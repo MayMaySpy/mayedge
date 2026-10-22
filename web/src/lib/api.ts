@@ -1,5 +1,16 @@
 import type {
   AutoKillRequest,
+  IdeaBody,
+  IdeaCreated,
+  IdeaDetail,
+  IdeaLogBody,
+  IdeaLogged,
+  IdeaPatch,
+  IdeaPlannerBody,
+  IdeaReviewBody,
+  IdeaSaved,
+  IdeaStatusBody,
+  Ideas,
   JournalExcursion,
   JournalNote,
   JournalSummary,
@@ -15,6 +26,16 @@ import type {
 } from "@/lib/api.gen";
 
 export type {
+  Idea,
+  IdeaBody,
+  IdeaCreated,
+  IdeaDetail,
+  IdeaLogLine,
+  IdeaPatch,
+  IdeaReviewBody,
+  IdeaSaved,
+  IdeaStatusBody,
+  Ideas,
   PortfolioMargin,
   JournalExcursion,
   JournalFill,
@@ -33,16 +54,46 @@ export type {
 
 const API_BASE = "/api";
 
+/** A refused desk call. `field` is set when the server names the input that broke. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly field: string | null;
+
+  constructor(status: number, message: string, field: string | null = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.field = field;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(formatApiDetail(err.detail, res.statusText));
-  }
+  if (!res.ok) throw await apiError(res);
+  if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+async function apiError(res: Response): Promise<ApiError> {
+  const err = await res.json().catch(() => ({ detail: res.statusText }));
+  const parsed = readDetail(err.detail);
+  return new ApiError(res.status, parsed.message || formatApiDetail(err.detail, res.statusText), parsed.field);
+}
+
+function readDetail(detail: unknown): { message: string | null; field: string | null } {
+  if (typeof detail === "string") return { message: detail, field: null };
+  if (Array.isArray(detail)) return { message: formatApiDetail(detail, ""), field: null };
+  if (detail && typeof detail === "object") {
+    const row = detail as { message?: unknown; msg?: unknown; field?: unknown };
+    const message =
+      typeof row.message === "string" ? row.message : typeof row.msg === "string" ? row.msg : null;
+    const field = typeof row.field === "string" ? row.field : null;
+    return { message, field };
+  }
+  return { message: null, field: null };
 }
 
 function formatApiDetail(detail: unknown, fallback: string): string {
@@ -57,10 +108,8 @@ function formatApiDetail(detail: unknown, fallback: string): string {
       })
       .join("; ");
   }
-  if (detail && typeof detail === "object" && "msg" in detail) {
-    return String((detail as { msg: string }).msg);
-  }
-  return fallback;
+  const parsed = readDetail(detail);
+  return parsed.message ?? fallback;
 }
 
 export interface Market {
@@ -829,4 +878,34 @@ export const api = {
   autoKill: () => request<AutoKillState>("/kill/auto"),
   setAutoKill: (body: AutoKillRequest) =>
     request<AutoKillState>("/kill/auto", { method: "PUT", body: JSON.stringify(body) }),
+  ideas: (status = "all") => request<Ideas>(`/ideas?status=${encodeURIComponent(status)}`),
+  idea: (id: string) => request<IdeaDetail>(`/ideas/${encodeURIComponent(id)}`),
+  ideaCreate: (body: IdeaBody) =>
+    request<IdeaCreated>("/ideas", { method: "POST", body: JSON.stringify(body) }),
+  ideaPatch: (id: string, body: IdeaPatch) =>
+    request<IdeaSaved>(`/ideas/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  ideaStatus: (id: string, body: IdeaStatusBody) =>
+    request<IdeaSaved>(`/ideas/${encodeURIComponent(id)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  ideaReview: (id: string, body: IdeaReviewBody) =>
+    request<IdeaSaved>(`/ideas/${encodeURIComponent(id)}/review`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  ideaLog: (id: string, body: IdeaLogBody) =>
+    request<IdeaLogged>(`/ideas/${encodeURIComponent(id)}/log`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  ideaPlanner: (id: string, body: IdeaPlannerBody) =>
+    request<IdeaSaved>(`/ideas/${encodeURIComponent(id)}/planner`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  ideaDelete: (id: string) => request<void>(`/ideas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

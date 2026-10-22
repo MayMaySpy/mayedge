@@ -96,6 +96,12 @@ Grid and Planner will not start on a Market that already has another desk algo l
 
 Screenshots are the live desk with account figures masked.
 
+### Ideas
+
+An **Idea** is one Market and one side: a Thesis, and a Plan once you write where you'd be wrong. The page never places, amends, or cancels an order ([ADR 0020](docs/adr/0020-an-idea-is-a-note-not-an-order.md)). **Draft on chart** copies the Plan onto the desk as a Draft; nothing reaches the venue until **Start**. The rules are [docs/idea-rules.md](docs/idea-rules.md).
+
+<img src="docs/screens/ideas.png" alt="Ideas: ZRO long in the zone, with the plan on its chart" width="960">
+
 ### Data
 
 Lighter WebSocket fan-out. Public market data works without keys. Testnet or mainnet via `LIGHTER_NETWORK` in backend `.env`.

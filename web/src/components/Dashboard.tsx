@@ -19,7 +19,7 @@ import { QuickTradePanel } from "@/components/widgets/QuickTradePanel";
 import { TradesTapeWidget } from "@/components/widgets/TradesTapeWidget";
 import { useMarketWs } from "@/hooks/useMarketWs";
 import { useDeskRoute } from "@/lib/deskRoute";
-import { useDeskWatchBridge } from "@/lib/deskBridge";
+import { useDeskWatchBridge, useDeskIdeasBridge } from "@/lib/deskBridge";
 import {
   mergeMarkets,
   setAlgo,
@@ -43,12 +43,20 @@ import {
   draftOverlays,
   draftReady,
   draftToForm,
+  ideaOverlays,
   moveChartDraft,
+  ackChartDraftOpen,
+  requestChartDraftOpen,
+  setChartDraft,
   setChartDraftNotice,
+  setChartPlanArmed,
   useChartDraft,
   useChartPlan,
 } from "@/lib/chartDraft";
 import { useDraftPreview } from "@/hooks/useDraftPreview";
+import { useOpenIdeas } from "@/hooks/useOpenIdeas";
+import { chartIdeas } from "@/components/widgets/chart/chartPrefs";
+import { ideaToDraft } from "@/lib/ideas";
 import { defaultPlannerForm, plannerBody } from "@/lib/plannerPlan";
 import type { DraftMove } from "@/lib/ticketAmend";
 
@@ -161,7 +169,9 @@ function ChartPanel({
     accountSnap?.positions.find((p) => p.symbol === symbol && parseFloat(p.size) !== 0) ?? null;
   const positionEntry = position ? parseFloat(position.entry_price) : null;
   const draftEntry = positionEntry != null && positionEntry > 0 ? positionEntry : null;
-  const { armed: planArmed, openSeq } = useChartPlan();
+  const { armed: planArmed, openSeq, pendingOpen } = useChartPlan();
+  const openIdeas = useOpenIdeas();
+  const [ideasOn] = chartIdeas.useFlag();
   const draft = useChartDraft(symbol);
   const draftForm = useMemo(() => {
     if (!planArmed || !market || !draftReady(draft)) return null;
@@ -192,9 +202,14 @@ function ChartPanel({
   );
   const [seenOpen, setSeenOpen] = useState(openSeq);
   const [plannerOpen, setPlannerOpen] = useState(false);
-  if (openSeq !== seenOpen) {
+  useEffect(() => {
+    if (!pendingOpen || !draftForm) return;
+    ackChartDraftOpen();
+    setPlannerOpen(true);
+  }, [pendingOpen, draftForm]);
+  if (openSeq !== seenOpen && draftForm) {
     setSeenOpen(openSeq);
-    if (draftForm) setPlannerOpen(true);
+    setPlannerOpen(true);
   }
 
   const overlays = useMemo(() => {
@@ -331,6 +346,7 @@ function ChartPanel({
         }),
       );
     }
+    if (ideasOn) lines.push(...ideaOverlays(openIdeas, symbol));
     return lines;
   }, [
     accountSnap,
@@ -344,6 +360,8 @@ function ChartPanel({
     preview,
     draft,
     draftEntry,
+    ideasOn,
+    openIdeas,
   ]);
 
   const handleTicketAmend = useCallback(async (amend: TicketAmend) => {
@@ -489,6 +507,32 @@ export function Dashboard() {
   }, [ws.markets, restMarkets]);
 
   useDeskWatchBridge({ markets, symbol, onSymbol: setSymbol });
+  useDeskIdeasBridge({ onSymbol: setSymbol });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("idea");
+    if (!id) return;
+    let live = true;
+    void api.idea(id).then((detail) => {
+      if (!live) return;
+      params.delete("idea");
+      const qs = params.toString();
+      window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+      setSymbol(detail.idea.symbol);
+      const draft = ideaToDraft(detail.idea, 8);
+      if (!draft) return;
+      const replaced = setChartDraft(detail.idea.symbol, draft, detail.idea.id);
+      if (replaced) notifyOk(`Draft replaced with the ${detail.idea.symbol} Idea's plan`);
+      setChartPlanArmed(true);
+      requestChartDraftOpen();
+    }).catch((e: unknown) => {
+      if (live) notifyErr(e instanceof Error ? e.message : "No such Idea.");
+    });
+    return () => {
+      live = false;
+    };
+  }, [setSymbol]);
 
   const market = useMemo(
     () => preferPerpMarket(markets, symbol) ?? null,
