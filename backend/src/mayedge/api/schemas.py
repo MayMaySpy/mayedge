@@ -97,3 +97,65 @@ class AlgoStopRequest(BaseModel):
 
 class ToneTimeframesRequest(BaseModel):
     timeframes: list[str]
+
+
+class IdeaTargetIn(BaseModel):
+    price: str
+    pct: str | None = None
+
+
+class IdeaCatalystIn(BaseModel):
+    text: str = ""
+    date: str | None = None
+
+
+class IdeaBody(BaseModel):
+    symbol: str
+    side: Literal["long", "short"]
+    thesis: str
+    conviction: int = 2
+    horizon: Literal["scalp", "swing", "position"] = "swing"
+    invalidation: str = ""
+    trigger: str = ""
+    tags: list[str] = Field(default_factory=list)
+    catalysts: list[IdeaCatalystIn] = Field(default_factory=list)
+    entry_low: str | None = None
+    entry_high: str | None = None
+    stop: str | None = None
+    targets: list[IdeaTargetIn] = Field(default_factory=list)
+
+
+class IdeaPatch(BaseModel):
+    seen_updated_at: int
+    symbol: str | None = None
+    side: Literal["long", "short"] | None = None
+    thesis: str | None = None
+    conviction: int | None = None
+    horizon: Literal["scalp", "swing", "position"] | None = None
+    invalidation: str | None = None
+    trigger: str | None = None
+    tags: list[str] | None = None
+    catalysts: list[IdeaCatalystIn] | None = None
+    entry_low: str | None = None
+    entry_high: str | None = None
+    stop: str | None = None
+    targets: list[IdeaTargetIn] | None = None
+
+
+class IdeaStatusBody(BaseModel):
+    status: Literal["watching", "active", "closed", "dropped"]
+    outcome: Literal["worked", "failed", "missed", "wrong"] | None = None
+    review: str | None = None
+
+
+class IdeaReviewBody(BaseModel):
+    outcome: Literal["worked", "failed", "missed", "wrong"] | None = None
+    review: str | None = None
+
+
+class IdeaLogBody(BaseModel):
+    body: str
+
+
+class IdeaPlannerBody(BaseModel):
+    algo_id: str

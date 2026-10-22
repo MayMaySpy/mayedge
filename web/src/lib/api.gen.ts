@@ -38,6 +38,140 @@ export interface ConditionalLeg {
   price?: string | null;
 }
 
+export interface Idea {
+  id: string;
+  symbol: string;
+  side: "long" | "short";
+  status: "watching" | "active" | "closed" | "dropped";
+  conviction: number;
+  horizon: "scalp" | "swing" | "position";
+  thesis: string;
+  invalidation: string;
+  trigger: string;
+  tags: string[];
+  catalysts: IdeaCatalyst[];
+  entry_low: string | null;
+  entry_high: string | null;
+  stop: string | null;
+  targets: IdeaTarget[];
+  planner_ids: string[];
+  outcome: "worked" | "failed" | "missed" | "wrong" | null;
+  review: string;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+  plan_entry: string | null;
+  r: string | null;
+  r_multiples: string[] | null;
+}
+
+export interface IdeaBody {
+  symbol: string;
+  side: "long" | "short";
+  thesis: string;
+  conviction?: number;
+  horizon?: "scalp" | "swing" | "position";
+  invalidation?: string;
+  trigger?: string;
+  tags?: string[];
+  catalysts?: IdeaCatalystIn[];
+  entry_low?: string | null;
+  entry_high?: string | null;
+  stop?: string | null;
+  targets?: IdeaTargetIn[];
+}
+
+export interface IdeaCatalyst {
+  text: string;
+  date: string | null;
+}
+
+export interface IdeaCatalystIn {
+  text?: string;
+  date?: string | null;
+}
+
+export interface IdeaCreated {
+  idea: Idea;
+  warning: IdeaWarning | null;
+}
+
+export interface IdeaDetail {
+  idea: Idea;
+  log: IdeaLogLine[];
+}
+
+export interface IdeaLogBody {
+  body: string;
+}
+
+export interface IdeaLogLine {
+  id: number;
+  ts: number;
+  kind: "update" | "plan" | "status" | "planner";
+  body: string;
+  last: string | null;
+}
+
+export interface IdeaLogged {
+  line: IdeaLogLine;
+}
+
+export interface IdeaPatch {
+  seen_updated_at: number;
+  symbol?: string | null;
+  side?: "long" | "short" | null;
+  thesis?: string | null;
+  conviction?: number | null;
+  horizon?: "scalp" | "swing" | "position" | null;
+  invalidation?: string | null;
+  trigger?: string | null;
+  tags?: string[] | null;
+  catalysts?: IdeaCatalystIn[] | null;
+  entry_low?: string | null;
+  entry_high?: string | null;
+  stop?: string | null;
+  targets?: IdeaTargetIn[] | null;
+}
+
+export interface IdeaPlannerBody {
+  algo_id: string;
+}
+
+export interface IdeaReviewBody {
+  outcome?: "worked" | "failed" | "missed" | "wrong" | null;
+  review?: string | null;
+}
+
+export interface IdeaSaved {
+  idea: Idea;
+}
+
+export interface IdeaStatusBody {
+  status: "watching" | "active" | "closed" | "dropped";
+  outcome?: "worked" | "failed" | "missed" | "wrong" | null;
+  review?: string | null;
+}
+
+export interface IdeaTarget {
+  price: string;
+  pct: string | null;
+}
+
+export interface IdeaTargetIn {
+  price: string;
+  pct?: string | null;
+}
+
+export interface IdeaWarning {
+  id: string;
+  message: string;
+}
+
+export interface Ideas {
+  ideas: Idea[];
+}
+
 export interface JournalCurvePoint {
   ts: number;
   net: string;

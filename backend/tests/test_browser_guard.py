@@ -84,6 +84,19 @@ class GuardedAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.status_code, 200)
         stop.assert_awaited_once()
 
+    async def test_another_site_cannot_post_an_idea(self) -> None:
+        async with await self._client() as client:
+            res = await client.post(
+                "/api/ideas",
+                headers={"Origin": "https://evil.example"},
+                json={
+                    "symbol": "ZRO",
+                    "side": "long",
+                    "thesis": "Unlock overhang gone after the 20th.",
+                },
+            )
+        self.assertEqual(res.status_code, 403)
+
     async def test_a_request_without_origin_passes(self) -> None:
         with patch("mayedge.api.app.desk.stop_algo", new_callable=AsyncMock) as stop:
             stop.return_value = {"type": "algo"}

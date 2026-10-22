@@ -337,6 +337,48 @@ def _v15(conn: sqlite3.Connection) -> None:
     )
 
 
+# Ideas (docs/idea-rules.md). Times are milliseconds. Frozen with step 16: do not edit.
+IDEAS_SQL = """
+CREATE TABLE IF NOT EXISTS ideas (
+    id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    status TEXT NOT NULL,
+    conviction INTEGER NOT NULL DEFAULT 2,
+    horizon TEXT NOT NULL DEFAULT 'swing',
+    thesis TEXT NOT NULL,
+    invalidation TEXT NOT NULL DEFAULT '',
+    trigger TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    catalysts TEXT NOT NULL DEFAULT '[]',
+    entry_low TEXT,
+    entry_high TEXT,
+    stop TEXT,
+    targets TEXT NOT NULL DEFAULT '[]',
+    planner_ids TEXT NOT NULL DEFAULT '[]',
+    outcome TEXT,
+    review TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    closed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status, updated_at);
+CREATE TABLE IF NOT EXISTS idea_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id TEXT NOT NULL REFERENCES ideas(id) ON DELETE CASCADE,
+    ts INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    body TEXT NOT NULL,
+    last TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_idea_log ON idea_log(idea_id, ts)
+"""
+
+
+def _v16(conn: sqlite3.Connection) -> None:
+    _run(conn, IDEAS_SQL)
+
+
 STEPS: tuple[Step, ...] = (
     Step(1, "liquidation columns, algo venue", _v1),
     Step(2, "algo type, params and clip side", _v2),
@@ -353,6 +395,7 @@ STEPS: tuple[Step, ...] = (
     Step(13, "journal", _v13),
     Step(14, "portfolio pnl buckets", _v14),
     Step(15, "journal excursions", _v15),
+    Step(16, "ideas", _v16),
 )
 
 LATEST = STEPS[-1].version

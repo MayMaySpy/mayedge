@@ -299,6 +299,81 @@ class PortfolioDays(_Shape):
     days: list[PortfolioDay]
 
 
+# ── Ideas (docs/idea-rules.md) ───────────────────────────────────────────
+
+
+class IdeaTarget(_Shape):
+    price: str
+    pct: str | None
+
+
+class IdeaCatalyst(_Shape):
+    text: str
+    date: str | None
+
+
+class Idea(_Shape):
+    id: str
+    symbol: str
+    side: Literal["long", "short"]
+    status: Literal["watching", "active", "closed", "dropped"]
+    conviction: int
+    horizon: Literal["scalp", "swing", "position"]
+    thesis: str
+    invalidation: str
+    trigger: str
+    tags: list[str]
+    catalysts: list[IdeaCatalyst]
+    entry_low: str | None
+    entry_high: str | None
+    stop: str | None
+    targets: list[IdeaTarget]
+    planner_ids: list[str]
+    outcome: Literal["worked", "failed", "missed", "wrong"] | None
+    review: str
+    created_at: int
+    updated_at: int
+    closed_at: int | None
+    plan_entry: str | None
+    r: str | None
+    r_multiples: list[str] | None
+
+
+class IdeaLogLine(_Shape):
+    id: int
+    ts: int
+    kind: Literal["update", "plan", "status", "planner"]
+    body: str
+    last: str | None
+
+
+class Ideas(_Shape):
+    ideas: list[Idea]
+
+
+class IdeaDetail(_Shape):
+    idea: Idea
+    log: list[IdeaLogLine]
+
+
+class IdeaWarning(_Shape):
+    id: str
+    message: str
+
+
+class IdeaCreated(_Shape):
+    idea: Idea
+    warning: IdeaWarning | None
+
+
+class IdeaSaved(_Shape):
+    idea: Idea
+
+
+class IdeaLogged(_Shape):
+    line: IdeaLogLine
+
+
 def documents(model: type[BaseModel]) -> dict[int | str, dict[str, object]]:
     """The ``responses=`` argument that documents a 200 without touching the answer."""
     return {200: {"model": model}}

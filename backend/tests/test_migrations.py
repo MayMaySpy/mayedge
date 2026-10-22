@@ -144,6 +144,23 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(tuple(row), (100 * 24 + 23, 2.0))
         self.assertIsNone(days)
 
+    def test_step_16_adds_ideas_to_a_version_15_file(self) -> None:
+        fresh = self._fresh_shape()
+        store.init_db()
+        with store._lock:
+            conn = store._connect()
+            conn.execute("DROP TABLE IF EXISTS idea_log")
+            conn.execute("DROP TABLE IF EXISTS ideas")
+            store._set_meta(conn, "schema_version", "15")
+            conn.commit()
+            store._migrate(conn)
+            shape = _shape(conn)
+            version = migrations.stored_version(conn)
+        self.assertEqual(shape, fresh)
+        self.assertEqual(version, 16)
+        self.assertIn("ideas", shape)
+        self.assertIn("idea_log", shape)
+
     def test_a_failed_step_leaves_the_file_at_the_step_before(self) -> None:
         store.init_db()
 
