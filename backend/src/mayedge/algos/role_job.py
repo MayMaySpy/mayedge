@@ -21,7 +21,7 @@ from mayedge.algos.ledger import Clip, ClipSide, Ledger
 from mayedge.algos.planner import venue
 from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.errors import is_blocked, is_invalid_nonce, is_order_not_found
-from mayedge.rows import is_obj, items
+from mayedge.rows import is_obj, items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,10 @@ class RoleJob[BookT: RoleBook, StateT: RoleState]:
 
     def _role(self, clip: Clip) -> str:
         return self._state.roles.get(clip.seq, "")
+
+    def _clip_roles(self) -> dict[str, str]:
+        """Each Clip's role by client_order_index, for the blotter."""
+        return {str(c.client_order_index): self._role(c) for c in self._state.ledger.clips}
 
     def _latest(self, role: str) -> Clip | None:
         for c in reversed(self._state.ledger.clips):
@@ -319,6 +323,14 @@ class RoleJob[BookT: RoleBook, StateT: RoleState]:
                 if is_obj(m) and venue.market_of(m) == st.market_index:
                     self._wake.set()
                     return
+
+    @classmethod
+    def _stored_params(cls, row: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A stored run's params, and this algo's runtime saved inside them."""
+        raw: object = row.get("params_json") or {}
+        if not is_obj(raw):
+            raise ValueError(f"unrecoverable {cls.LABEL} row {row.get('algo_id')}: no params")
+        return raw, obj(obj(raw.get("runtime")).get(cls.LABEL))
 
     def _ensure_task(self) -> None:
         if self._task is None or self._task.done():

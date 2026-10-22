@@ -3,8 +3,8 @@
 Chase, Grid, Ladder and TWAP keep many jobs whose Clips live in one Ledger each. A
 subclass names its algo, its id prefix and its client_order_index band, makes a
 runner, and adds its own start checks. Planner and Trail own more than Clips and keep
-their own books. ``AlgoBook`` is the shared base in this file; ``DeskBook`` in book.py is
-what the desk calls on any book. ``ClipBook`` adds the
+their own books on ``WatchBook``. ``AlgoBook`` is the shared base in this file; ``DeskBook``
+in book.py is what the desk calls on any book. ``ClipBook`` adds the
 clip-only methods. This is the method-by-method diff the split follows.
 
 | Method | Kind | What differs |
@@ -21,8 +21,8 @@ clip-only methods. This is the method-by-method diff the split follows.
 | ``pause_for_market`` | shared | clip pauses running jobs; trail and planner stop every job on the market |
 | ``stop`` | shared | clip publishes when the id is missing; planner does not. Trail adds ``keep_stop`` |
 | ``_ensure_book``, ``_launch``, ``live_on_market_side``, ``missing_fill_grace_ms`` | clip | |
-| ``set_market_conflict``, ``set_watch_prints``, ``take_amend`` | trail and planner | each names its own ``AMENDS_PER_MIN`` |
-| ``_sync_watch``, ``_check_free`` | one book | the "want prints" test and the free-market rule differ |
+| ``set_market_conflict``, ``set_watch_prints``, ``take_amend``, ``_sync_watch`` | ``WatchBook`` | each names its ``AMENDS_PER_MIN`` and ``_wants_prints`` |
+| ``_check_free`` | one book | the free-market rule differs |
 | ``preview_from_body``, ``start_from_body`` | one book | both books, different bodies |
 | ``edit_from_body``, ``stop_live_on_market`` | trail | |
 | ``replan_from_body``, ``finish_entry`` | planner | |
@@ -43,7 +43,7 @@ from mayedge.algos.chase.config import HISTORY_CAP, RESTORE_FEED_TIMEOUT_S
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
 from mayedge.algos.ledger import Ledger
-from mayedge.rows import is_list, is_obj
+from mayedge.rows import is_list, is_obj, obj
 
 logger = logging.getLogger(__name__)
 
@@ -123,37 +123,6 @@ def _as_record_list(raw: object) -> list[AlgoPayload]:
 
 def _created_at(snap: Mapping[str, object]) -> int:
     return as_int(snap.get("created_at"))
-
-
-class MarketWatch:
-    """Amend budget and print watch. Trail and planner use it. Clip books do not."""
-
-    AMENDS_PER_MIN: ClassVar[int]
-
-    def __init__(
-        self,
-        market_conflict: Callable[[int], bool] | None = None,
-        watch_prints: Callable[[int, bool], None] | None = None,
-    ) -> None:
-        self._market_conflict = market_conflict
-        self._watch_prints = watch_prints
-        self._amends: dict[int, deque[int]] = {}
-
-    def set_market_conflict(self, fn: Callable[[int], bool]) -> None:
-        self._market_conflict = fn
-
-    def set_watch_prints(self, fn: Callable[[int, bool], None]) -> None:
-        self._watch_prints = fn
-
-    def take_amend(self, market_index: int, now_ms: int) -> bool:
-        """One amend budget a minute, shared by the jobs on a market."""
-        sent = self._amends.setdefault(market_index, deque())
-        while sent and now_ms - sent[0] >= 60_000:
-            sent.popleft()
-        if len(sent) >= self.AMENDS_PER_MIN:
-            return False
-        sent.append(now_ms)
-        return True
 
 
 class AlgoBook[R: ClipRunner]:
@@ -569,3 +538,108 @@ class ClipBook[R: ClipRunner](AlgoBook[R]):
             _ = self._jobs.pop(algo_id, None)
             raise
         self.publish()
+
+
+class WatchRunner(ClipRunner, Protocol):
+    @property
+    def state(self) -> Any: ...
+
+
+class WatchBook[R: WatchRunner](AlgoBook[R]):
+    """Trail's and Planner's book: few jobs, an amend budget per Market, prints on demand.
+
+    It keeps its own counters, stops every job on a cancel-all, and leaves a job that
+    will not resume up in error, since its stop is still on the venue.
+    """
+
+    AMENDS_PER_MIN: ClassVar[int]
+    RESTORE_WAITS_FOR_FEEDS = False
+    # Stored fields a run that will not restore keeps, beyond its id, Market and times.
+    BROKEN_KEEPS: ClassVar[tuple[str, ...]] = ("side", "qty")
+
+    def __init__(
+        self,
+        *,
+        execution: Callable[[], ChaseExecution],
+        broadcast: Callable[[AlgoPayload], None],
+        coi_base: int | None = None,
+        coi_end: int | None = None,
+        market_conflict: Callable[[int], bool] | None = None,
+        watch_prints: Callable[[int, bool], None] | None = None,
+    ) -> None:
+        super().__init__(
+            execution=execution, broadcast=broadcast, coi_base=coi_base, coi_end=coi_end
+        )
+        self._market_conflict = market_conflict
+        self._watch_prints = watch_prints
+        self._amends: dict[int, deque[int]] = {}
+
+    def set_market_conflict(self, fn: Callable[[int], bool]) -> None:
+        self._market_conflict = fn
+
+    def set_watch_prints(self, fn: Callable[[int, bool], None]) -> None:
+        self._watch_prints = fn
+
+    def take_amend(self, market_index: int, now_ms: int) -> bool:
+        """One amend budget a minute, shared by the jobs on a market."""
+        sent = self._amends.setdefault(market_index, deque())
+        while sent and now_ms - sent[0] >= 60_000:
+            sent.popleft()
+        if len(sent) >= self.AMENDS_PER_MIN:
+            return False
+        sent.append(now_ms)
+        return True
+
+    def _wants_prints(self, job: R) -> bool:
+        """True when this job follows Last on its Market and needs every print."""
+        raise NotImplementedError
+
+    def _sync_watch(self, market_index: int) -> None:
+        if self._watch_prints is None:
+            return
+        want = any(self._wants_prints(job) for job in self._live(market_index, None))
+        self._watch_prints(market_index, want)
+
+    def _view(self, job: R) -> JobView:
+        return job.state
+
+    def _seeds_counters(self) -> bool:
+        return False
+
+    def _log_empty_restore(self) -> bool:
+        return False
+
+    def _restore_waits_for_account(self) -> bool:
+        return True
+
+    def _cancel_all_stops(self) -> bool:
+        return True
+
+    def _remember_broken(self) -> bool:
+        return False
+
+    def _on_restored(self, job: R) -> None:
+        self._sync_watch(self._view(job).market_index)
+
+    def _on_finished(self, job: R) -> None:
+        self._sync_watch(self._view(job).market_index)
+
+    def _resume_failed(self, job: R, row: Mapping[str, object]) -> None:
+        del row
+        state = self._view(job)
+        logger.exception("failed to resume %s %s", self.LABEL.lower(), state.algo_id)
+        job.state.status = ChaseStatus.ERROR
+        job.state.error = "restore failed"
+
+    def _broken_run(self, row: Mapping[str, object]) -> dict[str, Any]:
+        return {
+            "algo_id": row.get("algo_id"),
+            "algo_type": self.ALGO_ID,
+            "status": ChaseStatus.STOPPED.value,
+            "market_index": row.get("market_index") or 0,
+            "symbol": row.get("symbol") or "",
+            **{key: row.get(key) for key in self.BROKEN_KEEPS},
+            "created_at": row.get("created_at") or 0,
+            "error": "restore failed",
+            "params_json": obj(row.get("params_json")),
+        }

@@ -8,12 +8,11 @@ rename the import.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.clip_book import AlgoBook, AlgoPayload, MarketWatch
+from mayedge.algos.clip_book import WatchBook
 from mayedge.algos.planner import venue
 from mayedge.algos.trail.config import (
     MARKET_AMENDS_PER_MIN,
@@ -23,9 +22,7 @@ from mayedge.algos.trail.config import (
 )
 from mayedge.algos.trail.job import TrailRunner
 from mayedge.algos.trail.plan import ALGO_ID, KIND_NAMES, TrailParams, TrailRefused, check_start
-from mayedge.algos.trail.state import TrailState
 from mayedge.lighter.orders import protect_role_kind
-from mayedge.rows import obj
 
 logger = logging.getLogger(__name__)
 
@@ -45,90 +42,25 @@ def stop_tickets(ex: ChaseExecution, market_index: int, side: str) -> list[dict[
     return out
 
 
-class TrailBook(AlgoBook[TrailRunner], MarketWatch):
+class TrailBook(WatchBook[TrailRunner]):
     ALGO_ID = ALGO_ID
     ID_PREFIX = "TR-"
     LABEL = "Trail"
     AMENDS_PER_MIN = MARKET_AMENDS_PER_MIN
     COI_BASE = TRAIL_COI_BASE
     COI_END = TRAIL_COI_END
-    RESTORE_WAITS_FOR_FEEDS = False
-
-    def __init__(
-        self,
-        *,
-        execution: Callable[[], ChaseExecution],
-        broadcast: Callable[[AlgoPayload], None],
-        coi_base: int = TRAIL_COI_BASE,
-        coi_end: int = TRAIL_COI_END,
-        market_conflict: MarketConflictFn | None = None,
-        watch_prints: Callable[[int, bool], None] | None = None,
-    ) -> None:
-        super().__init__(
-            execution=execution, broadcast=broadcast, coi_base=coi_base, coi_end=coi_end
-        )
-        MarketWatch.__init__(self, market_conflict, watch_prints)
 
     def _new_runner(self) -> TrailRunner:
         return TrailRunner(self)
-
-    def _view(self, job: TrailRunner) -> TrailState:
-        return job.state
-
-    def _seeds_counters(self) -> bool:
-        return False
-
-    def _log_empty_restore(self) -> bool:
-        return False
-
-    def _restore_waits_for_account(self) -> bool:
-        return True
-
-    def _cancel_all_stops(self) -> bool:
-        return True
-
-    def _remember_broken(self) -> bool:
-        return False
-
-    def _on_restored(self, job: TrailRunner) -> None:
-        self._sync_watch(job.state.market_index)
-
-    def _on_finished(self, job: TrailRunner) -> None:
-        self._sync_watch(job.state.market_index)
-
-    def _resume_failed(self, job: TrailRunner, row: Mapping[str, object]) -> None:
-        del row
-        logger.exception("failed to resume trail %s", job.state.algo_id)
-        job.state.status = ChaseStatus.ERROR
-        job.state.error = "restore failed"
-
-    def _broken_run(self, row: Mapping[str, object]) -> dict[str, Any]:
-        return {
-            "algo_id": row.get("algo_id"),
-            "algo_type": self.ALGO_ID,
-            "status": ChaseStatus.STOPPED.value,
-            "market_index": row.get("market_index") or 0,
-            "symbol": row.get("symbol") or "",
-            "side": row.get("side"),
-            "qty": row.get("qty"),
-            "created_at": row.get("created_at") or 0,
-            "error": "restore failed",
-            "params_json": obj(row.get("params_json")),
-        }
 
     def stop_live_on_market(self, market_index: int) -> bool:
         """TS4: the Stop editor refuses a new Stop beside a Trail Stop."""
         return any(job.kind == "stop" for job in self._live(market_index, None))
 
-    def _sync_watch(self, market_index: int) -> None:
-        """F9: keep a Market's prints while a Trail on Last runs there."""
-        if self._watch_prints is None:
-            return
-        want = any(
-            job.state.params is not None and job.state.params.reference == "last"
-            for job in self._live(market_index, None)
-        )
-        self._watch_prints(market_index, want)
+    def _wants_prints(self, job: TrailRunner) -> bool:
+        """F9: a Trail on Last needs every print on its Market."""
+        p = job.state.params
+        return p is not None and p.reference == "last"
 
     def _check_free(self, market_index: int, params: TrailParams) -> None:
         """S1 and S2."""

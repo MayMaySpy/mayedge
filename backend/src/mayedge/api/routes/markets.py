@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -10,9 +11,30 @@ from mayedge import db as store
 from mayedge.api.deps import _market_index
 from mayedge.api.token_icon import token_icon_response
 from mayedge.lighter.gateway import gateway
+from mayedge.lighter.models import MarketMeta
 from mayedge.persist_liq import liquidation_summary_since_ms
 
 router = APIRouter()
+
+
+def _market(symbol: str) -> MarketMeta:
+    meta = gateway.get_market(symbol)
+    if not meta:
+        raise HTTPException(404, "Market not found")
+    return meta
+
+
+async def _perp_series(
+    load: Callable[..., list[dict[str, Any]]], meta: MarketMeta, resolution: str, count: int
+) -> list[dict[str, Any]]:
+    """Up to 3600 points of a perp-only series. A spot market has none."""
+    if not meta.is_perp:
+        return []
+    n = min(max(int(count), 1), 3600)
+    try:
+        return await asyncio.to_thread(load, meta.market_index, resolution=resolution, count=n)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @router.get("/api/liquidations")
@@ -51,9 +73,7 @@ async def list_markets() -> list[dict[str, Any]]:
 
 @router.get("/api/markets/{symbol}")
 async def get_market(symbol: str) -> dict[str, Any]:
-    meta = gateway.get_market(symbol)
-    if not meta:
-        raise HTTPException(404, "Market not found")
+    meta = _market(symbol)
     return meta.as_public_dict()
 
 
@@ -61,25 +81,13 @@ async def get_market(symbol: str) -> dict[str, Any]:
 async def get_open_interest(
     symbol: str, resolution: str = "1m", count: int = 500
 ) -> list[dict[str, Any]]:
-    meta = gateway.get_market(symbol)
-    if not meta:
-        raise HTTPException(404, "Market not found")
-    if not meta.is_perp:
-        return []
-    n = min(max(int(count), 1), 3600)
-    try:
-        return await asyncio.to_thread(
-            store.list_open_interest, meta.market_index, resolution=resolution, count=n
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+    meta = _market(symbol)
+    return await _perp_series(store.list_open_interest, meta, resolution, count)
 
 
 @router.get("/api/funding/{symbol}/average")
 async def get_funding_average(symbol: str) -> dict[str, Any]:
-    meta = gateway.get_market(symbol)
-    if not meta:
-        raise HTTPException(404, "Market not found")
+    meta = _market(symbol)
     if not meta.is_perp:
         return {"windows": [], "first_time": None}
     return await asyncio.to_thread(store.funding_averages, meta.market_index)
@@ -89,18 +97,8 @@ async def get_funding_average(symbol: str) -> dict[str, Any]:
 async def get_funding_history(
     symbol: str, resolution: str = "1h", count: int = 500
 ) -> list[dict[str, Any]]:
-    meta = gateway.get_market(symbol)
-    if not meta:
-        raise HTTPException(404, "Market not found")
-    if not meta.is_perp:
-        return []
-    n = min(max(int(count), 1), 3600)
-    try:
-        return await asyncio.to_thread(
-            store.list_funding, meta.market_index, resolution=resolution, count=n
-        )
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+    meta = _market(symbol)
+    return await _perp_series(store.list_funding, meta, resolution, count)
 
 
 @router.get("/api/candles/{symbol}")

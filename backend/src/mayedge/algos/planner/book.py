@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
-from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.state import ChaseStatus
-from mayedge.algos.clip_book import AlgoBook, AlgoPayload, MarketWatch
+from mayedge.algos.clip_book import WatchBook
 from mayedge.algos.planner import venue
 from mayedge.algos.planner.config import (
     MARKET_AMENDS_PER_MIN,
@@ -17,101 +15,31 @@ from mayedge.algos.planner.config import (
 )
 from mayedge.algos.planner.job import PlannerRunner
 from mayedge.algos.planner.plan import ALGO_ID, PlannerParams, PlanRefused, build_plan
-from mayedge.algos.planner.state import PlannerState
-from mayedge.rows import obj
 
 logger = logging.getLogger(__name__)
 
 MarketConflictFn = Callable[[int], bool]
 
 
-class PlannerBook(AlgoBook[PlannerRunner], MarketWatch):
+class PlannerBook(WatchBook[PlannerRunner]):
     ALGO_ID = ALGO_ID
     ID_PREFIX = "PL-"
     LABEL = "Planner"
+    BROKEN_KEEPS = ("side", "qty", "filled")
     AMENDS_PER_MIN = MARKET_AMENDS_PER_MIN
     COI_BASE = PLANNER_COI_BASE
     COI_END = PLANNER_COI_END
-    RESTORE_WAITS_FOR_FEEDS = False
-
-    def __init__(
-        self,
-        *,
-        execution: Callable[[], ChaseExecution],
-        broadcast: Callable[[AlgoPayload], None],
-        coi_base: int = PLANNER_COI_BASE,
-        coi_end: int = PLANNER_COI_END,
-        market_conflict: MarketConflictFn | None = None,
-        watch_prints: Callable[[int, bool], None] | None = None,
-    ) -> None:
-        super().__init__(
-            execution=execution, broadcast=broadcast, coi_base=coi_base, coi_end=coi_end
-        )
-        MarketWatch.__init__(self, market_conflict, watch_prints)
 
     def _new_runner(self) -> PlannerRunner:
         return PlannerRunner(self)
 
-    def _view(self, job: PlannerRunner) -> PlannerState:
-        return job.state
-
-    def _seeds_counters(self) -> bool:
-        return False
-
-    def _log_empty_restore(self) -> bool:
-        return False
-
-    def _restore_waits_for_account(self) -> bool:
-        return True
-
     def _wait_with_nothing_restored(self) -> bool:
         return True
 
-    def _cancel_all_stops(self) -> bool:
-        return True
-
-    def _remember_broken(self) -> bool:
-        return False
-
-    def _on_restored(self, job: PlannerRunner) -> None:
-        self._sync_watch(job.state.market_index)
-
-    def _on_finished(self, job: PlannerRunner) -> None:
-        self._sync_watch(job.state.market_index)
-
-    def _resume_failed(self, job: PlannerRunner, row: Mapping[str, object]) -> None:
-        del row
-        # Its stop is still on the venue. Leave the job up, in error, for the operator.
-        logger.exception("failed to resume planner %s", job.state.algo_id)
-        job.state.status = ChaseStatus.ERROR
-        job.state.error = "restore failed"
-
-    def _broken_run(self, row: Mapping[str, object]) -> dict[str, Any]:
-        return {
-            "algo_id": row.get("algo_id"),
-            "algo_type": self.ALGO_ID,
-            "status": ChaseStatus.STOPPED.value,
-            "market_index": row.get("market_index") or 0,
-            "symbol": row.get("symbol") or "",
-            "side": row.get("side"),
-            "qty": row.get("qty"),
-            "filled": row.get("filled"),
-            "created_at": row.get("created_at") or 0,
-            "error": "restore failed",
-            "params_json": obj(row.get("params_json")),
-        }
-
-    def _sync_watch(self, market_index: int) -> None:
-        """Keep a Market's prints while a plan there trails on Last."""
-        if self._watch_prints is None:
-            return
-        want = any(
-            job.state.params is not None
-            and job.state.params.reference == "last"
-            and job.state.params.trails()
-            for job in self._live(market_index, None)
-        )
-        self._watch_prints(market_index, want)
+    def _wants_prints(self, job: PlannerRunner) -> bool:
+        """A plan that trails on Last needs every print on its Market."""
+        p = job.state.params
+        return p is not None and p.reference == "last" and p.trails()
 
     def _check_free(self, market_index: int) -> None:
         """S5: one Planner per Market, alone among desk algos."""

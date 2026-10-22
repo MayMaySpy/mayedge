@@ -331,13 +331,33 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
             logger.exception("chase REST trades reconcile failed")
             return False
 
+    def _hold_unproven(self, now: int) -> None:
+        """REST could not settle a vanished clip: wait out a rate limit, or say the trades did not add up."""
+        self._state.quote_action = Action.PAUSE.value
+        if getattr(self, "_backoff_until", 0) > now:
+            self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
+        else:
+            self._state.reason = "trades_reconcile_failed"
+            self._state.rest_price = None
+            self._state.rest_qty = None
+        self._reconcile_master()
+        self._publish()
+
+    def _apply_open_row(self, clip: Clip, row: dict[str, Any], now: int) -> None:
+        """The venue still lists the clip: take its remaining, filled and order index."""
+        filled = to_decimal(row.get("filled") or "0")
+        self._state.ledger.apply_open(
+            clip,
+            to_decimal(row.get("remaining") or "0"),
+            now=now,
+            order_index=int(row.get("order_index") or 0) or None,
+            book_filled=filled if filled > 0 else None,
+        )
+
     async def _resolve_vanished_clip(self, clip: Clip, *, now: int) -> None:
         """Clip absent from WS cache — REST truth, then credit or auto-rest."""
         if getattr(self, "_backoff_until", 0) > now:
-            self._state.quote_action = Action.PAUSE.value
-            self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
-            self._reconcile_master()
-            self._publish()
+            self._hold_unproven(now)
             return
         rest_needed = (not clip.seen_on_book) or (not self._ws_orders_ok())
         if rest_needed:
@@ -348,31 +368,11 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 self._last_vanish_rest_ms = now
         rest_rows = await self._refresh_open_orders(rest=rest_needed)
         if rest_rows is None:
-            if getattr(self, "_backoff_until", 0) > now:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
-                self._reconcile_master()
-                self._publish()
-                return
-            self._state.quote_action = Action.PAUSE.value
-            self._state.reason = "trades_reconcile_failed"
-            self._state.rest_price = None
-            self._state.rest_qty = None
-            self._reconcile_master()
-            self._publish()
+            self._hold_unproven(now)
             return
         found = self._find_in_rows(rest_rows, clip.client_order_index)
         if found is not None:
-            rem = to_decimal(found.get("remaining") or "0")
-            filled = to_decimal(found.get("filled") or "0")
-            idx = int(found.get("order_index") or 0) or None
-            self._state.ledger.apply_open(
-                clip,
-                rem,
-                now=now,
-                order_index=idx,
-                book_filled=filled if filled > 0 else None,
-            )
+            self._apply_open_row(clip, found, now)
             self._reconcile_master()
             return
         if self._may_invent_fill(clip, now):
@@ -392,18 +392,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
             self._unproven_retry_at = 0
             return
         if not credited:
-            if getattr(self, "_backoff_until", 0) > now:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = getattr(self, "_backoff_reason", None) or "rate_limited"
-                self._reconcile_master()
-                self._publish()
-                return
-            self._state.quote_action = Action.PAUSE.value
-            self._state.reason = "trades_reconcile_failed"
-            self._state.rest_price = None
-            self._state.rest_qty = None
-            self._reconcile_master()
-            self._publish()
+            self._hold_unproven(now)
             return
         if not self._exec().orders_hydrated():
             self._reconcile_master()
@@ -454,16 +443,7 @@ class ChaseFillMixin[BookT: FillBook, StateT: FillState]:
                 self._missing_refreshed.add(clip.seq)
             await self._resolve_vanished_clip(clip, now=now)
             return
-        rem = to_decimal(found.get("remaining") or "0")
-        filled = to_decimal(found.get("filled") or "0")
-        idx = int(found.get("order_index") or 0) or None
-        self._state.ledger.apply_open(
-            clip,
-            rem,
-            now=now,
-            order_index=idx,
-            book_filled=filled if filled > 0 else None,
-        )
+        self._apply_open_row(clip, found, now)
 
     def _find_open(self, coi: int) -> dict[str, Any] | None:
         payload = self._exec().cached_account_payload() or {}

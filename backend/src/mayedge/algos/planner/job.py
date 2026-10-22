@@ -49,7 +49,6 @@ from mayedge.algos.trail import engine
 from mayedge.algos.trail.engine import Follow, Point
 from mayedge.config import settings
 from mayedge.numbers import check_notional, fmt_decimal
-from mayedge.rows import is_obj, obj
 
 logger = logging.getLogger(__name__)
 
@@ -125,18 +124,9 @@ class PlannerRunner(RoleJob[PlannerBookView, PlannerState]):
             **st.ledger.to_dict(),
         }
 
-    def _clip_roles(self) -> dict[str, str]:
-        return {
-            str(c.client_order_index): self._state.roles.get(c.seq, "")
-            for c in self._state.ledger.clips
-        }
-
     def hydrate_from_row(self, row: dict[str, Any]) -> None:
-        raw: object = row.get("params_json") or {}
-        if not is_obj(raw):
-            raise ValueError(f"unrecoverable planner row {row.get('algo_id')}: no params")
+        raw, runtime = self._stored_params(row)
         params = PlannerParams.from_json(raw)
-        runtime = obj(obj(raw.get("runtime")).get("planner"))
         status = ChaseStatus.of(row.get("status"))
         st = PlannerState(
             status=status,

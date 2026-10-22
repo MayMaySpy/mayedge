@@ -17,8 +17,9 @@ from mayedge.api import responses
 from mayedge.api.responses import documents
 from mayedge.api.turn import breathe
 from mayedge.config import settings
-from mayedge.journal import Fill, FundingPayment, GroupBy, RoundTrip, seconds_of, summary
+from mayedge.journal import GroupBy, RoundTrip, seconds_of, summary
 from mayedge.journal import round_trips as build_trips
+from mayedge.journal_build import JournalInputs, load_inputs
 from mayedge.journal_build import build as build_off_loop
 from mayedge.journal_excursion import excursion, resolution_for
 from mayedge.journal_sync import run_sync
@@ -28,12 +29,7 @@ from mayedge.numbers import fmt_decimal
 from mayedge.persist_journal import (
     journal_generation,
     journal_load_excursion,
-    journal_load_fills,
-    journal_load_funding,
-    journal_load_links,
     journal_load_notes,
-    journal_load_planner_risk,
-    journal_oldest_ts,
     journal_put_excursion,
     journal_put_note,
 )
@@ -43,15 +39,8 @@ router = APIRouter()
 
 _RANGES = {"7d": 7, "30d": 30, "90d": 90, "all": None}
 _GROUPS = {"day", "market", "algo", "none"}
-_Inputs = tuple[
-    list[Fill],
-    list[FundingPayment],
-    dict[str, str],
-    dict[str, tuple[Decimal, Decimal]],
-    int | None,
-]
 _cache_lock = threading.Lock()
-_cache: tuple[int, _Inputs] | None = None
+_cache: tuple[int, JournalInputs] | None = None
 _ready: tuple[tuple[str, int], list[RoundTrip]] | None = None
 _build_lock: asyncio.Lock | None = None
 _lock_loop: asyncio.AbstractEventLoop | None = None
@@ -126,24 +115,14 @@ async def post_sync() -> dict[str, Any]:
     return await run_sync()
 
 
-def _inputs() -> _Inputs:
+def _inputs() -> JournalInputs:
     """Parsed fills and the rest, reused until a journal write bumps the generation."""
     global _cache
     gen = journal_generation()
     with _cache_lock:
         if _cache is not None and _cache[0] == gen:
             return _cache[1]
-        risk = {
-            algo_id: (Decimal(entry), Decimal(stop))
-            for algo_id, (entry, stop) in journal_load_planner_risk().items()
-        }
-        data: _Inputs = (
-            [_fill(row) for row in journal_load_fills()],
-            [_funding(row) for row in journal_load_funding()],
-            journal_load_links(),
-            risk,
-            journal_oldest_ts(),
-        )
+        data = load_inputs()
         if journal_generation() == gen:
             _cache = (gen, data)
         return data
@@ -290,31 +269,6 @@ def _trips(upnl: dict[int, Decimal] | None = None) -> list[RoundTrip]:
         risk,
         oldest_ts=oldest,
         upnl=_upnl() if upnl is None else upnl,
-    )
-
-
-def _fill(row: dict[str, Any]) -> Fill:
-    return Fill(
-        trade_id=str(row["trade_id"]),
-        market_index=int(row["market_index"]),
-        symbol=str(row["symbol"]),
-        side=str(row["side"]),
-        is_maker=bool(row["is_maker"]),
-        price=Decimal(str(row["price"])),
-        size=Decimal(str(row["size"])),
-        usd=Decimal(str(row["usd"])),
-        fee=Decimal(str(row["fee"])),
-        pnl=Decimal(str(row["pnl"])),
-        kind=str(row["kind"]),
-        ts=int(row["ts"]),
-    )
-
-
-def _funding(row: dict[str, Any]) -> FundingPayment:
-    return FundingPayment(
-        market_index=int(row["market_index"]),
-        ts=int(row["ts"]),
-        amount=Decimal(str(row["amount"])),
     )
 
 

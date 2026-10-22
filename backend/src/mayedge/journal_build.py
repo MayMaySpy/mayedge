@@ -22,14 +22,17 @@ def imports_gateway(db_path: str, upnl: dict[int, Decimal]) -> bool:
     return "mayedge.lighter.gateway" in sys.modules
 
 
-def build(db_path: str, upnl: dict[int, Decimal]) -> list[RoundTrip]:
-    from mayedge import db as store
-    from mayedge.config import settings
+JournalInputs = tuple[
+    list[Fill],
+    list[FundingPayment],
+    dict[str, str],
+    dict[str, tuple[Decimal, Decimal]],
+    int | None,
+]
 
-    if settings.db_path != db_path:
-        settings.db_path = db_path
-        store.close_db()
-    from mayedge.journal import round_trips as build_trips
+
+def load_inputs() -> JournalInputs:
+    """Fills, funding, algo links, Planner risk and the oldest fill, parsed from the database."""
     from mayedge.persist_journal import (
         journal_load_fills,
         journal_load_funding,
@@ -42,14 +45,26 @@ def build(db_path: str, upnl: dict[int, Decimal]) -> list[RoundTrip]:
         algo_id: (Decimal(entry), Decimal(stop))
         for algo_id, (entry, stop) in journal_load_planner_risk().items()
     }
-    return build_trips(
+    return (
         [_fill(row) for row in journal_load_fills()],
         [_funding(row) for row in journal_load_funding()],
         journal_load_links(),
         risk,
-        oldest_ts=journal_oldest_ts(),
-        upnl=upnl,
+        journal_oldest_ts(),
     )
+
+
+def build(db_path: str, upnl: dict[int, Decimal]) -> list[RoundTrip]:
+    from mayedge import db as store
+    from mayedge.config import settings
+
+    if settings.db_path != db_path:
+        settings.db_path = db_path
+        store.close_db()
+    from mayedge.journal import round_trips as build_trips
+
+    fills, funding, links, risk, oldest = load_inputs()
+    return build_trips(fills, funding, links, risk, oldest_ts=oldest, upnl=upnl)
 
 
 def _fill(row: dict[str, Any]) -> Fill:

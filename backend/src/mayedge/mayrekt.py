@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 _NAN = math.nan
@@ -95,9 +95,11 @@ def _sma(src: Sequence[float], length: int) -> list[float]:
     return out
 
 
-def _ema(src: Sequence[float], length: int) -> list[float]:
+def _seeded(
+    src: Sequence[float], length: int, step: Callable[[float, float], float]
+) -> list[float]:
+    """A running average seeded with the mean of the first `length` values. Gaps stay NaN."""
     out = [_NAN] * len(src)
-    alpha = 2 / (length + 1)
     prev = _NAN
     seed = 0.0
     seen = 0
@@ -114,32 +116,18 @@ def _ema(src: Sequence[float], length: int) -> list[float]:
         if not _finite(v):
             out[i] = _NAN
             continue
-        prev = alpha * v + (1 - alpha) * prev
+        prev = step(prev, v)
         out[i] = prev
     return out
+
+
+def _ema(src: Sequence[float], length: int) -> list[float]:
+    alpha = 2 / (length + 1)
+    return _seeded(src, length, lambda prev, v: alpha * v + (1 - alpha) * prev)
 
 
 def _rma(src: Sequence[float], length: int) -> list[float]:
-    out = [_NAN] * len(src)
-    prev = _NAN
-    seed = 0.0
-    seen = 0
-    for i, v in enumerate(src):
-        if not _finite(prev):
-            if not _finite(v):
-                continue
-            seed += v
-            seen += 1
-            if seen == length:
-                prev = seed / length
-                out[i] = prev
-            continue
-        if not _finite(v):
-            out[i] = _NAN
-            continue
-        prev = (prev * (length - 1) + v) / length
-        out[i] = prev
-    return out
+    return _seeded(src, length, lambda prev, v: (prev * (length - 1) + v) / length)
 
 
 def _stdev(src: Sequence[float], length: int) -> list[float]:
@@ -182,25 +170,7 @@ def _roc(src: Sequence[float], length: int) -> list[float]:
 
 
 def _rolling(src: Sequence[float], length: int, pick: str) -> list[float]:
-    out: list[float] = []
-    for i in range(len(src)):
-        if i < length - 1:
-            out.append(_NAN)
-            continue
-        best = -math.inf if pick == "high" else math.inf
-        bad = False
-        for k in range(length):
-            v = src[i - k]
-            if not _finite(v):
-                bad = True
-                break
-            if pick == "high":
-                if v > best:
-                    best = v
-            elif v < best:
-                best = v
-        out.append(_NAN if bad else best)
-    return out
+    return _rolling_shifted(src, 0, length, pick)
 
 
 def _rolling_shifted(src: Sequence[float], shift: int, length: int, pick: str) -> list[float]:

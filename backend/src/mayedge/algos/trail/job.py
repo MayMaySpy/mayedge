@@ -41,7 +41,6 @@ from mayedge.algos.trail.state import TrailBookView, TrailState
 from mayedge.config import settings
 from mayedge.lighter.coi import next_manual_client_order_index
 from mayedge.numbers import check_notional, fmt_decimal
-from mayedge.rows import is_obj, obj
 
 logger = logging.getLogger(__name__)
 
@@ -111,19 +110,14 @@ class TrailRunner(RoleJob[TrailBookView, TrailState]):
                 "distance_kind": p.distance_kind if p else None,
                 "activation": fmt_decimal(p.activation) if p else None,
                 "backstop": bool(p and p.kind != "entry" and p.reference == "last"),
-                "clip_roles": {
-                    str(c.client_order_index): st.roles.get(c.seq, "") for c in st.ledger.clips
-                },
+                "clip_roles": self._clip_roles(),
             },
             **st.ledger.to_dict(),
         }
 
     def hydrate_from_row(self, row: dict[str, Any]) -> None:
-        raw: object = row.get("params_json") or {}
-        if not is_obj(raw):
-            raise ValueError(f"unrecoverable trail row {row.get('algo_id')}: no params")
+        raw, runtime = self._stored_params(row)
         params = TrailParams.from_json(raw)
-        runtime = obj(obj(raw.get("runtime")).get("trail"))
         status = ChaseStatus.of(row.get("status"))
         st = TrailState(
             status=status,

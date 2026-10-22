@@ -335,19 +335,23 @@ class AccountService:
             return
         self._refresh_task = loop.create_task(self._refresh_loop())
 
+    async def _reload_snapshot(self) -> None:
+        """Assets, the summary, open orders and limits from REST, then publish."""
+        await self._load_asset_meta()
+        prev = self._summary
+        self._summary = await self.fetch_account_summary()
+        self._copy_fees(prev, self._summary)
+        self._orders_by_market = self._index_orders(self._summary.open_orders)
+        self._orders_hydrated = True
+        await self._refresh_limits()
+        self._publish()
+
     async def _refresh_loop(self) -> None:
         await asyncio.sleep(_REFRESH_DELAY)
         while self._refresh_wanted:
             self._refresh_wanted = False
             try:
-                await self._load_asset_meta()
-                prev = self._summary
-                self._summary = await self.fetch_account_summary()
-                self._copy_fees(prev, self._summary)
-                self._orders_by_market = self._index_orders(self._summary.open_orders)
-                self._orders_hydrated = True
-                await self._refresh_limits()
-                self._publish()
+                await self._reload_snapshot()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -372,14 +376,7 @@ class AccountService:
         """REST snapshot after the account socket drops. The live feed covers the rest."""
         token = budget.enter_lane("read")
         try:
-            await self._load_asset_meta()
-            prev = self._summary
-            self._summary = await self.fetch_account_summary()
-            self._copy_fees(prev, self._summary)
-            self._orders_by_market = self._index_orders(self._summary.open_orders)
-            self._orders_hydrated = True
-            await self._refresh_limits()
-            self._publish()
+            await self._reload_snapshot()
         except asyncio.CancelledError:
             raise
         except Exception as e:
