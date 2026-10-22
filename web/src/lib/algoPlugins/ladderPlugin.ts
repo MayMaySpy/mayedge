@@ -3,9 +3,9 @@ import {
   type LadderParamsState,
 } from "@/components/widgets/orderTicket/kinds/LadderParamsSheet";
 import { makerMinSize, trimQty } from "@/components/widgets/orderTicket/math";
-import { algoReasonLabel } from "@/lib/algos";
 import { api } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
+import { startNotice } from "./startNotice";
 import type { AlgoPlugin, AlgoSubmitContext } from "./types";
 
 export const LADDER_COI_BASE = 9_000_000_000;
@@ -123,45 +123,7 @@ export const ladderPlugin: AlgoPlugin<LadderParamsState> = {
       seed: s.seed,
       reduce_only: ctx.reduceOnly,
     });
-    const just = book.working?.[0];
-    if (just?.status === "error") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "ladder",
-          status: "error",
-          note: just.error || "Ladder error",
-          symbol: ctx.market.symbol,
-        },
-      };
-    }
-    if (just?.quote_action === "pause") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "ladder",
-          side: ctx.side,
-          size: just.rest_qty ?? ctx.qSize,
-          symbol: ctx.market.symbol,
-          status: "paused",
-          note: algoReasonLabel(just.reason) || "waiting",
-        },
-      };
-    }
-    return {
-      book,
-      setLiveBook: true,
-      notice: {
-        kind: "ladder",
-        side: ctx.side,
-        size: just?.rest_qty ?? ctx.qSize,
-        symbol: ctx.market.symbol,
-        price: just?.rest_price ?? undefined,
-        status: "active",
-      },
-    };
+    return startNotice(book, ctx, { kind: "ladder", label: "Ladder", side: ctx.side, size: ctx.qSize });
   },
   ParamsSheet: LadderParamsSheet,
 };

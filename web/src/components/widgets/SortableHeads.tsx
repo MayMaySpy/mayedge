@@ -1,8 +1,46 @@
-import { TableHead } from "@/components/ui/table";
+import { TableHead, type HideBelow } from "@/components/ui/table";
 import type { SortCol, TableSort } from "@/lib/tableSort";
 import { cn } from "@/lib/utils";
 
-/** The header cells of a sortable table. A sorting column is a button with an arrow when active. */
+/** One sortable header cell: a button, with an arrow while it is the sort. */
+export function SortHead<K extends string>({
+  label,
+  column,
+  sort,
+  onSort,
+  title,
+  hideBelow,
+  align = "end",
+}: {
+  label: string;
+  column: K;
+  sort: TableSort<K>;
+  onSort: (key: K) => void;
+  title?: string;
+  hideBelow?: HideBelow;
+  align?: "start" | "end";
+}) {
+  const active = sort.key === column;
+  return (
+    <TableHead hideBelow={hideBelow} className={align === "end" ? "text-right" : undefined}>
+      <button
+        type="button"
+        title={title ?? `Sort by ${label}`}
+        onClick={() => onSort(column)}
+        className={cn(
+          "inline-flex items-center gap-0.5 hover:text-text",
+          align === "end" && "ml-auto",
+          active && "text-text"
+        )}
+      >
+        {label}
+        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
+      </button>
+    </TableHead>
+  );
+}
+
+/** The header cells of a sortable table. A column with no sort key is a plain label. */
 export function SortableHeads<K extends string>({
   cols,
   sort,
@@ -12,32 +50,27 @@ export function SortableHeads<K extends string>({
   sort: TableSort<K>;
   onSort: (key: K) => void;
 }) {
-  return cols.map((col, i) => {
-    const sortKey = col.key;
-    return (
+  return cols.map((col, i) =>
+    col.key ? (
+      <SortHead
+        key={col.label || `col-${i}`}
+        label={col.label}
+        column={col.key}
+        sort={sort}
+        onSort={onSort}
+        title={col.title}
+        hideBelow={col.hideBelow}
+        align={col.align}
+      />
+    ) : (
       <TableHead
         key={col.label || `col-${i}`}
         title={col.title}
         hideBelow={col.hideBelow}
         className={col.align === "end" ? "text-right" : undefined}
       >
-        {sortKey ? (
-          <button
-            type="button"
-            onClick={() => onSort(sortKey)}
-            className={cn(
-              "inline-flex items-center gap-0.5 hover:text-text",
-              col.align === "end" && "ml-auto",
-              sort.key === sortKey && "text-text"
-            )}
-          >
-            {col.label}
-            {sort.key === sortKey ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-          </button>
-        ) : (
-          col.label
-        )}
+        {col.label}
       </TableHead>
-    );
-  });
+    )
+  );
 }

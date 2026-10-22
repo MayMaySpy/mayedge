@@ -10,15 +10,14 @@ import {
   TableHeader,
   TableName,
   TableRow,
-  type HideBelow,
 } from "@/components/ui/table";
+import { SortHead } from "@/components/widgets/SortableHeads";
 import type { Asset, Market } from "@/lib/api";
 import {
   assetChartSymbol,
   nextAssetSort,
   sortAssetRows,
   type AssetSort,
-  type AssetSortKey,
 } from "@/lib/assetsTable";
 import { cn, formatPrice, formatSigned, formatSize, formatUsd, signClass } from "@/lib/utils";
 
@@ -36,38 +35,6 @@ function formatLtv(raw: string): string {
 function formatAssetUsd(value: number): string {
   if (!(value > 0)) return "—";
   return formatUsd(value);
-}
-
-function SortHead({
-  label,
-  column,
-  sort,
-  onSort,
-  hideBelow,
-}: {
-  label: string;
-  column: AssetSortKey;
-  sort: AssetSort;
-  onSort: (key: AssetSortKey) => void;
-  hideBelow?: HideBelow;
-}) {
-  const active = sort.key === column;
-  return (
-    <TableHead hideBelow={hideBelow} className="text-right">
-      <button
-        type="button"
-        title={`Sort by ${label}`}
-        onClick={() => onSort(column)}
-        className={cn(
-          "ml-auto inline-flex items-center gap-0.5 hover:text-text",
-          active && "text-text"
-        )}
-      >
-        {label}
-        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-      </button>
-    </TableHead>
-  );
 }
 
 export function AssetsTab({

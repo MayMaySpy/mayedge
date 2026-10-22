@@ -73,9 +73,13 @@ function sma(src: readonly number[], length: number): number[] {
   });
 }
 
-function ema(src: readonly number[], length: number): number[] {
+/** A running average seeded with the mean of the first `length` values; gaps stay NaN. */
+function seeded(
+  src: readonly number[],
+  length: number,
+  step: (prev: number, v: number) => number
+): number[] {
   const out = src.map(() => NaN);
-  const alpha = 2 / (length + 1);
   let prev = NaN;
   let seed = 0;
   let seen = 0;
@@ -95,37 +99,19 @@ function ema(src: readonly number[], length: number): number[] {
       out[i] = NaN;
       continue;
     }
-    prev = alpha * v + (1 - alpha) * prev;
+    prev = step(prev, v);
     out[i] = prev;
   }
   return out;
 }
 
+function ema(src: readonly number[], length: number): number[] {
+  const alpha = 2 / (length + 1);
+  return seeded(src, length, (prev, v) => alpha * v + (1 - alpha) * prev);
+}
+
 function rma(src: readonly number[], length: number): number[] {
-  const out = src.map(() => NaN);
-  let prev = NaN;
-  let seed = 0;
-  let seen = 0;
-  for (let i = 0; i < src.length; i++) {
-    const v = src[i];
-    if (!finite(prev)) {
-      if (!finite(v)) continue;
-      seed += v;
-      seen += 1;
-      if (seen === length) {
-        prev = seed / length;
-        out[i] = prev;
-      }
-      continue;
-    }
-    if (!finite(v)) {
-      out[i] = NaN;
-      continue;
-    }
-    prev = (prev * (length - 1) + v) / length;
-    out[i] = prev;
-  }
-  return out;
+  return seeded(src, length, (prev, v) => (prev * (length - 1) + v) / length);
 }
 
 function stdev(src: readonly number[], length: number): number[] {

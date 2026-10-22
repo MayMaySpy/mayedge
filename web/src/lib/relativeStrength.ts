@@ -1,3 +1,4 @@
+import { compareSortValues } from "@/lib/tableSort";
 import { uniqueSymbolMarkets } from "@/lib/algos";
 import type { Market } from "@/lib/api";
 
@@ -45,22 +46,6 @@ function sortValue(row: RelativeStrengthRow, sort: RsSort): number | null {
   }
 }
 
-function compareRows(
-  a: RelativeStrengthRow,
-  b: RelativeStrengthRow,
-  sort: RsSort,
-  dir: RsSortDir
-): number {
-  const av = sortValue(a, sort);
-  const bv = sortValue(b, sort);
-  if (av == null && bv == null) return a.symbol.localeCompare(b.symbol);
-  if (av == null) return 1;
-  if (bv == null) return -1;
-  if (av === bv) return a.symbol.localeCompare(b.symbol);
-  const sign = dir === "asc" ? 1 : -1;
-  return (av < bv ? -1 : 1) * sign;
-}
-
 export function rankRelativeStrength(
   markets: readonly Market[],
   options?: {
@@ -91,7 +76,7 @@ export function rankRelativeStrength(
 
   const sort = options?.sort ?? "rs";
   const dir = options?.dir ?? "desc";
-  rows.sort((a, b) => compareRows(a, b, sort, dir));
+  rows.sort((a, b) => compareSortValues(a, b, sortValue(a, sort), sortValue(b, sort), dir));
 
   return { numeraireSymbol, numeraireChange24h, rows };
 }

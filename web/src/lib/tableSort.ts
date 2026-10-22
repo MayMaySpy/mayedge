@@ -44,3 +44,18 @@ export function useStoredSort<K extends string>(
   };
   return [sort, pick];
 }
+
+/** Order two rows by their sort values: a missing value goes last, a tie goes by symbol. */
+export function compareSortValues(
+  a: { symbol: string },
+  b: { symbol: string },
+  av: number | null,
+  bv: number | null,
+  dir: SortDir
+): number {
+  if (av == null && bv == null) return a.symbol.localeCompare(b.symbol);
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (av === bv) return a.symbol.localeCompare(b.symbol);
+  return (av < bv ? -1 : 1) * (dir === "asc" ? 1 : -1);
+}

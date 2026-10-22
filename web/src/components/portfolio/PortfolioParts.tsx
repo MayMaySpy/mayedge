@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   type AutoscaleInfoProvider,
-  ColorType,
   createChart,
   LineSeries,
   type MouseEventParams,
@@ -28,6 +27,7 @@ import {
   PORTFOLIO_KINDS,
 } from "@/lib/portfolioDay";
 import { pageOf } from "@/lib/portfolioShare";
+import { summaryChartOptions } from "@/lib/chartOptions";
 import { theme } from "@/lib/theme";
 import { DESK_DATE_LOCALE } from "@/lib/utcTime";
 import { cn, formatNumber } from "@/lib/utils";
@@ -194,23 +194,16 @@ export function ValueChart({
   useEffect(() => {
     const el = ref.current;
     if (!el || points.length === 0) return;
-    const chart = createChart(el, {
-      ...(fill ? {} : { height }),
-      autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
-        textColor: theme.muted,
-        fontFamily: theme.fontMono,
-        fontSize: theme.chartFontSize,
-      },
-      grid: { vertLines: { visible: false }, horzLines: { color: theme.rule } },
-      localization: { locale: theme.chartLocale, priceFormatter: axisUsd },
-      // Zero sits on the bottom edge: no margin below it to draw negative ticks into.
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.12, bottom: 0 } },
-      timeScale: { borderVisible: false, timeVisible: hourly },
-      handleScroll: false,
-      handleScale: false,
-    });
+    const chart = createChart(
+      el,
+      summaryChartOptions({
+        height: fill ? undefined : height,
+        priceFormatter: axisUsd,
+        // Zero sits on the bottom edge: no margin below it to draw negative ticks into.
+        rightPriceScale: { scaleMargins: { top: 0.12, bottom: 0 } },
+        timeScale: { timeVisible: hourly },
+      })
+    );
     const at = (ts: number) => Math.floor(ts / 1000) as UTCTimestamp;
     // Values are never below zero; without this the scale pads down past it.
     const floorAtZero: AutoscaleInfoProvider = (base) => {

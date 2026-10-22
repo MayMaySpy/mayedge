@@ -1,4 +1,5 @@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { CellInput } from "@/components/widgets/CellInput";
 import { decimalInput, parseDecimal } from "@/lib/numbers";
 import {
   trailDistanceLabel,
@@ -60,14 +61,14 @@ export function TrailExitSection({
     <div className="flex flex-col">
       <div className="grid grid-cols-2 border-t border-rule">
         {kind === "stop" ? (
-          <Cell
+          <CellInput
             label="Starts at"
             value={draft.start}
             placeholder={Number.isFinite(startAt) ? formatPrice(startAt, priceDecimals) : "0.0000"}
             onChange={(start) => set({ start })}
           />
         ) : null}
-        <Cell
+        <CellInput
           label="Activate at"
           value={draft.activation}
           placeholder={kind === "tp" ? "Required" : "Now"}
@@ -143,37 +144,5 @@ export function TrailExitSection({
         {problem ? <p className="text-ask">{problem}</p> : null}
       </div>
     </div>
-  );
-}
-
-function Cell({
-  label,
-  value,
-  placeholder,
-  onChange,
-  className,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (raw: string) => void;
-  className?: string;
-}) {
-  return (
-    <label
-      className={cn(
-        "flex min-w-0 items-center gap-2 bg-elevated/35 px-3 py-2.5 focus-within:bg-elevated/60",
-        className
-      )}
-    >
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <input
-        className="min-w-0 flex-1 bg-transparent text-right font-mono text-base tabular-nums outline-none placeholder:text-muted-foreground"
-        inputMode="decimal"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(decimalInput(e.target.value))}
-      />
-    </label>
   );
 }

@@ -1,34 +1,12 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { storedList } from "@/lib/storedList";
 
 export const FAVORITES_KEY = "mayedge-favorites";
-const EVENT = "mayedge-favorites";
+const list = storedList(FAVORITES_KEY, (raw) => raw as string[]);
 
-let cache: string[] | null = null;
-
-function read(): string[] {
-  try {
-    const raw = localStorage.getItem(FAVORITES_KEY);
-    const next = raw ? (JSON.parse(raw) as string[]) : [];
-    cache = Array.isArray(next) ? next : [];
-  } catch {
-    cache = [];
-  }
-  return cache;
-}
-
-function emit() {
-  window.dispatchEvent(new Event(EVENT));
-}
-
-export function getFavorites() {
-  return cache ?? read();
-}
-
-export function setFavorites(next: string[]) {
-  cache = next;
-  localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
-  emit();
-}
+export const getFavorites = list.get;
+export const setFavorites = list.set;
+export const subscribeFavorites = list.subscribe;
 
 export function toggleFavorite(symbol: string) {
   const cur = getFavorites();
@@ -42,19 +20,6 @@ export function reorderFavorites(fromIndex: number, toIndex: number) {
   const [item] = cur.splice(fromIndex, 1);
   cur.splice(toIndex, 0, item);
   setFavorites(cur);
-}
-
-export function subscribeFavorites(onChange: () => void) {
-  const handler = () => {
-    cache = null;
-    onChange();
-  };
-  window.addEventListener(EVENT, handler);
-  window.addEventListener("storage", handler);
-  return () => {
-    window.removeEventListener(EVENT, handler);
-    window.removeEventListener("storage", handler);
-  };
 }
 
 export function useFavorites() {

@@ -3,9 +3,9 @@ import {
   type ChaseParamsState,
 } from "@/components/widgets/orderTicket/kinds/ChaseParamsSheet";
 import { trimQty } from "@/components/widgets/orderTicket/math";
-import { algoReasonLabel } from "@/lib/algos";
 import { api } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
+import { startNotice } from "./startNotice";
 import type { AlgoPlugin } from "./types";
 
 export const CHASE_COI_BASE = 8_000_000_000;
@@ -67,45 +67,7 @@ export const chaseIcebergPlugin: AlgoPlugin<ChaseParamsState> = {
       price_ceiling: ceiling,
       reduce_only: ctx.reduceOnly,
     });
-    const just = book.working?.[0];
-    if (just?.status === "error") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "chase",
-          status: "error",
-          note: just.error || "Chase error",
-          symbol: ctx.market.symbol,
-        },
-      };
-    }
-    if (just?.quote_action === "pause") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "chase",
-          side: ctx.side,
-          size: just.rest_qty ?? clip,
-          symbol: ctx.market.symbol,
-          status: "paused",
-          note: algoReasonLabel(just.reason) || "waiting",
-        },
-      };
-    }
-    return {
-      book,
-      setLiveBook: true,
-      notice: {
-        kind: "chase",
-        side: ctx.side,
-        size: just?.rest_qty ?? clip,
-        symbol: ctx.market.symbol,
-        price: just?.rest_price ?? undefined,
-        status: "active",
-      },
-    };
+    return startNotice(book, ctx, { kind: "chase", label: "Chase", side: ctx.side, size: clip });
   },
   ParamsSheet: ChaseParamsSheet,
 };

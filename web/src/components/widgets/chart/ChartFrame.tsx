@@ -12,6 +12,7 @@ import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor"
 import { useToolbarFold } from "@/hooks/useToolbarFold";
 import type { ScanTab } from "@/components/widgets/ScanBoard";
 import { TimeframePins } from "@/components/widgets/TimeframePins";
+import { WatchWindowToggle } from "@/components/widgets/chart/WatchWindowToggle";
 import type { Candle, LiquidationSummaryHours, Market } from "@/lib/api";
 import { openWatchWindow } from "@/lib/deskBridge";
 import type { FillMark } from "@/lib/fillMarks";
@@ -27,7 +28,7 @@ import {
   useChartPlan,
 } from "@/lib/chartDraft";
 import { parseTimeframe, persistPins, persistTimeframe, supportsOpenInterest } from "@/lib/timeframe";
-import { WATCH_WINDOWS, WATCH_WINDOW_SEC, persistWatchWindow, type WatchWindow } from "@/lib/watchWindow";
+import { WATCH_WINDOW_SEC, type WatchWindow } from "@/lib/watchWindow";
 
 import {
   BBO_KEY,
@@ -173,12 +174,6 @@ export function ChartFrame(props: {
     } catch {
       /* ignore */
     }
-  };
-
-  const selectWatchWindow = (next: WatchWindow) => {
-    if (next === watchWindow) return;
-    setWatchWindow(next);
-    persistWatchWindow(next);
   };
 
   const lastBar = display.length ? ohlcOf(display[display.length - 1]) : null;
@@ -455,28 +450,7 @@ export function ChartFrame(props: {
           ) : null}
           {isWatch ? (
             <>
-            <ToggleGroup
-              type="single"
-              size="sm"
-              spacing={0}
-              value={watchWindow}
-              onValueChange={(v) => {
-                if (v && (WATCH_WINDOWS as readonly string[]).includes(v)) {
-                  selectWatchWindow(v as WatchWindow);
-                }
-              }}
-            >
-              {WATCH_WINDOWS.map((w) => (
-                <ToggleGroupItem
-                  key={w}
-                  value={w}
-                  title="Path window"
-                  className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
-                >
-                  {w}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <WatchWindowToggle value={watchWindow} onChange={setWatchWindow} />
             <button
               type="button"
               title="Pop out Watch"

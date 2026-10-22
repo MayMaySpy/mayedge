@@ -15,7 +15,7 @@ import { api, type Market } from "@/lib/api";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { cn, formatSigned, formatSize, signClass } from "@/lib/utils";
 import { utcDateTime } from "@/lib/utcTime";
-import { usePagedHistory } from "./usePagedHistory";
+import { rowPicksSymbol, usePagedHistory } from "./usePagedHistory";
 
 const FETCH = (q: Parameters<typeof api.accountFunding>[0]) =>
   api.accountFunding(q).then((r) => ({ rows: r.fundings, next_cursor: r.next_cursor }));
@@ -40,6 +40,8 @@ export function FundingHistoryTab({
     marketIndex,
     what: "funding",
   });
+
+  const pick = rowPicksSymbol(onSymbolChange, market?.symbol);
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -78,13 +80,7 @@ export function FundingHistoryTab({
                 return (
                   <TableRow
                     key={`${f.funding_id}-${f.timestamp}`}
-                    onClick={
-                      onSymbolChange
-                        ? () => {
-                            if (market?.symbol !== f.symbol) onSymbolChange(f.symbol);
-                          }
-                        : undefined
-                    }
+                    onClick={pick(f.symbol)}
                     accent={f.side === "long" ? "bid" : "ask"}
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >

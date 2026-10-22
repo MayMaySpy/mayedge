@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { notifyErr, notifyOrder } from "@/lib/notify";
 import { PanelCloseButton, PanelHeader } from "@/components/desk/PanelHeader";
+import { LazyPlannerDialog } from "@/components/widgets/planner/LazyPlannerDialog";
 import { ALGOS, algoById, algoPluginById, type AlgoId } from "@/lib/algoPlugins";
 import { useTradingReady } from "@/hooks/useTradingReady";
 import { api, type Market } from "@/lib/api";
@@ -29,30 +30,6 @@ import {
   useLiveBbo,
 } from "@/lib/liveData";
 import { livePlannerFor, type PlannerLadderStrength } from "@/lib/plannerPlan";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-const PlannerDialog = lazy(() =>
-  import("@/components/widgets/planner/PlannerDialog").then((m) => ({ default: m.PlannerDialog })),
-);
-
-function PlannerDialogFallback({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
-  return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Planner</DialogTitle>
-          <DialogDescription>One trade from its stop.</DialogDescription>
-        </DialogHeader>
-      </DialogContent>
-    </Dialog>
-  );
-}
 import type { OrderNoticeInput } from "@/lib/orderNotice";
 import { useLimitPricePick } from "@/lib/ticketFill";
 import { AlgoParams } from "./kinds/AlgoParams";
@@ -702,19 +679,15 @@ export function OrderTicket({
         onClose={() => setLevOpen(false)}
         onApply={applyLeverage}
       />
-      {plannerOpen ? (
-        <Suspense fallback={<PlannerDialogFallback onOpenChange={setPlannerOpen} />}>
-          <PlannerDialog
-            open={plannerOpen}
-            onOpenChange={setPlannerOpen}
-            market={market}
-            mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
-            side={signedPos < 0 ? "sell" : "buy"}
-            running={runningPlanner}
-            initial={plannerFromTicket}
-          />
-        </Suspense>
-      ) : null}
+      <LazyPlannerDialog
+        open={plannerOpen}
+        onOpenChange={setPlannerOpen}
+        market={market}
+        mode={runningPlanner || signedPos !== 0 ? "attach" : "enter"}
+        side={signedPos < 0 ? "sell" : "buy"}
+        running={runningPlanner}
+        initial={plannerFromTicket}
+      />
     </div>
   );
 }

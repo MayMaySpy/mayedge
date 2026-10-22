@@ -3,9 +3,9 @@ import {
   type GridParamsState,
 } from "@/components/widgets/orderTicket/kinds/GridParamsSheet";
 import { trimQty } from "@/components/widgets/orderTicket/math";
-import { algoReasonLabel } from "@/lib/algos";
 import { api } from "@/lib/api";
 import { canonicalDecimal, parseDecimal } from "@/lib/numbers";
+import { startNotice } from "./startNotice";
 import type { AlgoPlugin } from "./types";
 
 export const GRID_COI_BASE = 10_000_000_000;
@@ -73,43 +73,7 @@ export const chaseGridPlugin: AlgoPlugin<GridParamsState> = {
       price_ceiling: ceiling,
       be_delay_ms: parseInt(s.beDelayMs, 10) || 0,
     });
-    const just = book.working?.[0];
-    if (just?.status === "error") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "grid",
-          status: "error",
-          note: just.error || "Grid error",
-          symbol: ctx.market.symbol,
-        },
-      };
-    }
-    if (just?.quote_action === "pause") {
-      return {
-        book,
-        setLiveBook: true,
-        notice: {
-          kind: "grid",
-          size: just.rest_qty ?? clip,
-          symbol: ctx.market.symbol,
-          status: "paused",
-          note: algoReasonLabel(just.reason) || "waiting",
-        },
-      };
-    }
-    return {
-      book,
-      setLiveBook: true,
-      notice: {
-        kind: "grid",
-        size: just?.rest_qty ?? clip,
-        symbol: ctx.market.symbol,
-        price: just?.rest_price ?? undefined,
-        status: "active",
-      },
-    };
+    return startNotice(book, ctx, { kind: "grid", label: "Grid", size: clip });
   },
   ParamsSheet: GridParamsSheet,
 };

@@ -65,3 +65,16 @@ export function usePagedHistory<T>(
 
   return { rows, cursor, loading, loadingMore, loadMore };
 }
+
+/** A row click that moves the chart to the row's market, or nothing when there is no chart to move. */
+export function rowPicksSymbol(
+  onSymbolChange: ((symbol: string) => void) | undefined,
+  current: string | undefined
+) {
+  return (symbol: string) =>
+    onSymbolChange
+      ? () => {
+          if (current !== symbol) onSymbolChange(symbol);
+        }
+      : undefined;
+}

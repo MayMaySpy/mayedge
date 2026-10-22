@@ -16,7 +16,7 @@ import { useLiveAccountTrades } from "@/lib/liveData";
 import { cn, formatSigned, formatSize, signClass } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 import { utcClock } from "@/lib/utcTime";
-import { usePagedHistory } from "./usePagedHistory";
+import { rowPicksSymbol, usePagedHistory } from "./usePagedHistory";
 
 function mergeTrades(rest: AccountTrade[], live: AccountTrade[]): AccountTrade[] {
   const byId = new Map<string, AccountTrade>();
@@ -76,6 +76,8 @@ export function TradeHistoryTab({
     return mergeTrades(rows, filteredLive);
   }, [rows, live, marketIndex]);
 
+  const pick = rowPicksSymbol(onSymbolChange, market?.symbol);
+
   return (
     <ScrollArea className="min-h-0 flex-1">
       <ScopeToggle scope={scope} onScopeChange={setScope} pair={market?.symbol} className="mb-1.5" />
@@ -114,13 +116,7 @@ export function TradeHistoryTab({
                 return (
                   <TableRow
                     key={t.trade_id}
-                    onClick={
-                      onSymbolChange
-                        ? () => {
-                            if (market?.symbol !== t.symbol) onSymbolChange(t.symbol);
-                          }
-                        : undefined
-                    }
+                    onClick={pick(t.symbol)}
                     accent={t.side === "buy" ? "bid" : "ask"}
                     className={cn(onSymbolChange && "cursor-pointer")}
                   >

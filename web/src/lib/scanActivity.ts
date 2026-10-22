@@ -1,3 +1,4 @@
+import { compareSortValues } from "@/lib/tableSort";
 import type { ScanActivityRow, ToneBoardRow } from "@/lib/api";
 
 export type ActivitySort = "share" | "volume" | "oi" | "funding" | "premium";
@@ -26,16 +27,9 @@ export function rankActivity(
   sort: ActivitySort,
   dir: ActivitySortDir = "desc"
 ): ScanActivityRow[] {
-  const sign = dir === "asc" ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    const av = activityValue(a, sort);
-    const bv = activityValue(b, sort);
-    if (av == null && bv == null) return a.symbol.localeCompare(b.symbol);
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (av === bv) return a.symbol.localeCompare(b.symbol);
-    return (av < bv ? -1 : 1) * sign;
-  });
+  return [...rows].sort((a, b) =>
+    compareSortValues(a, b, activityValue(a, sort), activityValue(b, sort), dir)
+  );
 }
 
 export type ToneCell = { tone: "blue" | "orange"; closedAt: number };

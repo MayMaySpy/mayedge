@@ -1,3 +1,5 @@
+import { compareSortValues } from "@/lib/tableSort";
+
 export type LiqHeatSort = "total" | "long" | "short" | "net" | "share" | "largest";
 export type LiqHeatDir = "asc" | "desc";
 
@@ -95,22 +97,6 @@ function sortValue(row: LiquidationHeatRow, sort: LiqHeatSort): number | null {
   }
 }
 
-function compareRows(
-  a: LiquidationHeatRow,
-  b: LiquidationHeatRow,
-  sort: LiqHeatSort,
-  dir: LiqHeatDir
-): number {
-  const av = sortValue(a, sort);
-  const bv = sortValue(b, sort);
-  if (av == null && bv == null) return a.symbol.localeCompare(b.symbol);
-  if (av == null) return 1;
-  if (bv == null) return -1;
-  if (av === bv) return a.symbol.localeCompare(b.symbol);
-  const sign = dir === "asc" ? 1 : -1;
-  return (av < bv ? -1 : 1) * sign;
-}
-
 export function rankLiquidationHeat(
   rows: readonly LiquidationHeatInput[],
   options?: {
@@ -144,6 +130,6 @@ export function rankLiquidationHeat(
   if (windowTotal > 0) {
     for (const row of mapped) row.windowShare = row.totalUsd / windowTotal;
   }
-  mapped.sort((a, b) => compareRows(a, b, sort, dir));
+  mapped.sort((a, b) => compareSortValues(a, b, sortValue(a, sort), sortValue(b, sort), dir));
   return mapped;
 }

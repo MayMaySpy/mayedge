@@ -4,18 +4,12 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 const WatchBoard = lazy(() =>
   import("@/components/widgets/WatchBoard").then((m) => ({ default: m.WatchBoard })),
 );
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { WatchWindowToggle } from "@/components/widgets/chart/WatchWindowToggle";
 import type { Market } from "@/lib/api";
 import { applyMarketQuotes } from "@/lib/liveData";
 import { postDesk, subscribeDesk } from "@/lib/deskBridge";
 import { replaceWatchSamples, snapshotWatchSamples } from "@/lib/watchSamples";
-import {
-  WATCH_WINDOWS,
-  WATCH_WINDOW_SEC,
-  loadWatchWindow,
-  persistWatchWindow,
-  type WatchWindow,
-} from "@/lib/watchWindow";
+import { WATCH_WINDOW_SEC, loadWatchWindow, type WatchWindow } from "@/lib/watchWindow";
 
 function closeWatch() {
   try {
@@ -72,39 +66,12 @@ export function WatchPopout() {
     postDesk({ type: "symbol", symbol: next });
   }, []);
 
-  const selectWatchWindow = (next: WatchWindow) => {
-    if (next === watchWindow) return;
-    setWatchWindow(next);
-    persistWatchWindow(next);
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-8 shrink-0 items-center border-b border-border px-2">
         <span className="text-base font-medium">Watch</span>
         <div className="flex-1" />
-        <ToggleGroup
-          type="single"
-          size="sm"
-          spacing={0}
-          value={watchWindow}
-          onValueChange={(v) => {
-            if (v && (WATCH_WINDOWS as readonly string[]).includes(v)) {
-              selectWatchWindow(v as WatchWindow);
-            }
-          }}
-        >
-          {WATCH_WINDOWS.map((w) => (
-            <ToggleGroupItem
-              key={w}
-              value={w}
-              title="Path window"
-              className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
-            >
-              {w}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        <WatchWindowToggle value={watchWindow} onChange={setWatchWindow} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         <Suspense

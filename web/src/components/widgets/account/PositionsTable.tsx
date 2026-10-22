@@ -12,9 +12,9 @@ import {
   TableHeader,
   TableName,
   TableRow,
-  type HideBelow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SortHead } from "@/components/widgets/SortableHeads";
 import { api, isLongPosition, type AlgoBook, type Market, type OpenOrder, type Position } from "@/lib/api";
 import { useNextHour } from "@/hooks/useNextHour";
 import { setAlgo, useLiveQuotes, type OpenTripRealized } from "@/lib/liveData";
@@ -27,7 +27,6 @@ import {
   realizedFor,
   realizedTitle,
   type PosSort,
-  type PosSortKey,
 } from "@/lib/positionsTable";
 import { cn, formatPctAbs, formatSigned, formatSize, formatUsd, signClass } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
@@ -42,40 +41,6 @@ function liqCushion(p: Position, mark: number): number | null {
   const size = n(p.size);
   if (liq <= 0 || mark <= 0 || size === 0) return null;
   return size > 0 ? ((mark - liq) / mark) * 100 : ((liq - mark) / mark) * 100;
-}
-
-function SortHead({
-  label,
-  column,
-  sort,
-  onSort,
-  title,
-  hideBelow,
-}: {
-  label: string;
-  column: PosSortKey;
-  sort: PosSort;
-  onSort: (key: PosSortKey) => void;
-  title?: string;
-  hideBelow?: HideBelow;
-}) {
-  const active = sort.key === column;
-  return (
-    <TableHead hideBelow={hideBelow} className="text-right">
-      <button
-        type="button"
-        title={title ?? `Sort by ${label}`}
-        onClick={() => onSort(column)}
-        className={cn(
-          "ml-auto inline-flex items-center gap-0.5 hover:text-text",
-          active && "text-text"
-        )}
-      >
-        {label}
-        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
-      </button>
-    </TableHead>
-  );
 }
 
 /** A Position as the table shows it: priced at the live mark. */

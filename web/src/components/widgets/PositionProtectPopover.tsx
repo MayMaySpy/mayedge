@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { trimQty } from "@/components/widgets/orderTicket/math";
+import { CellInput } from "@/components/widgets/CellInput";
 import { TrailExitSection } from "@/components/widgets/trail/TrailExitSection";
 import { isAlgoClientOrder } from "@/lib/algoPlugins";
 import {
@@ -669,54 +670,5 @@ function ProtectSection({
       </div>
       {hint ? <p className="px-3 pb-2 text-sm text-ask">{hint}</p> : null}
     </div>
-  );
-}
-
-function CellInput({
-  label,
-  value,
-  placeholder,
-  onChange,
-  trailing,
-  derived = false,
-  className,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (raw: string) => void;
-  trailing?: ReactNode;
-  derived?: boolean;
-  className?: string;
-}) {
-  const [focused, setFocused] = useState(false);
-  const [draft, setDraft] = useState(value);
-  return (
-    <label
-      className={cn(
-        "flex min-w-0 items-center gap-2 bg-elevated/35 px-3 py-2.5 focus-within:bg-elevated/60",
-        className
-      )}
-    >
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <input
-        className="min-w-0 flex-1 bg-transparent text-right font-mono text-base tabular-nums outline-none placeholder:text-muted-foreground"
-        inputMode="decimal"
-        placeholder={placeholder}
-        value={derived && focused ? draft : value}
-        onFocus={() => {
-          if (!derived) return;
-          setDraft(value);
-          setFocused(true);
-        }}
-        onBlur={() => setFocused(false)}
-        onChange={(e) => {
-          const raw = decimalInput(e.target.value);
-          if (derived) setDraft(raw);
-          onChange(raw);
-        }}
-      />
-      {trailing}
-    </label>
   );
 }

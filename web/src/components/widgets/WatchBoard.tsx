@@ -1,7 +1,6 @@
 import {
   createChart,
   LineSeries,
-  CrosshairMode,
   type IChartApi,
   type ISeriesApi,
   type UTCTimestamp,
@@ -26,7 +25,7 @@ import { uniqueSymbolMarkets } from "@/lib/algos";
 import type { Market } from "@/lib/api";
 import { overlayQuote, useLiveQuotes } from "@/lib/liveData";
 import { sortPickerMarkets, type SortDir } from "@/lib/marketPicker";
-import { theme } from "@/lib/theme";
+import { liveChartOptions } from "@/lib/chartOptions";
 import { cn, formatPct, formatUsdCompact } from "@/lib/utils";
 import {
   WATCH_SET_MAX,
@@ -319,32 +318,14 @@ const WatchPane = memo(function WatchPane({
     if (!hasWatchlist) return;
     if (!wrapRef.current) return;
     const wrap = wrapRef.current;
-    const chart = createChart(wrap, {
-      width: wrap.clientWidth,
-      height: wrap.clientHeight,
-      localization: { locale: theme.chartLocale },
-      layout: {
-        background: { color: theme.panel },
-        textColor: theme.muted,
-        fontFamily: theme.fontMono,
-        fontSize: theme.chartFontSize,
-      },
-      grid: {
-        vertLines: { color: theme.rule },
-        horzLines: { color: theme.rule },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: {
-        borderColor: theme.rule,
-      },
-      timeScale: {
-        borderColor: theme.rule,
-        timeVisible: true,
-        secondsVisible: windowSec <= 900,
-        rightOffset: 4,
-        shiftVisibleRangeOnNewBar: true,
-      },
-    });
+    const chart = createChart(
+      wrap,
+      liveChartOptions({
+        width: wrap.clientWidth,
+        height: wrap.clientHeight,
+        timeScale: { secondsVisible: windowSec <= 900, rightOffset: 4 },
+      })
+    );
     chartRef.current = chart;
 
     const onMove = (param: { time?: unknown }) => {

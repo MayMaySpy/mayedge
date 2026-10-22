@@ -1,21 +1,17 @@
 /** Live boards: liquidations, alerts, Scan, the feed status and the send budget. */
 import { useSyncExternalStore } from "react";
-import type { AlertEvent, FundingExtremeRow, ScanActivityRow, ToneBoardRow } from "@/lib/api";
+import type {
+  AlertEvent,
+  FundingExtremeRow,
+  LiquidationEvent,
+  ScanActivityRow,
+  ToneBoardRow,
+} from "@/lib/api";
 import { liqIdentity } from "@/lib/venuePair";
 import { makeThrottledNotify } from "@/lib/live/notify";
 
-export interface LiquidationEvent {
-  trade_id: string;
-  market_index: number;
-  symbol: string;
-  kind: string;
-  side: string | null;
-  price: string;
-  size: string;
-  usd_amount: string | null;
-  fill_count?: number;
-  timestamp: number;
-}
+export type { LiquidationEvent };
+
 
 export type FeedHealth = {
   market_ws: "live" | "reconnecting" | "stale" | "down";

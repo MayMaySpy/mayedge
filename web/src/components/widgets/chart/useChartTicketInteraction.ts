@@ -3,7 +3,6 @@ import {
   createChart,
   CandlestickSeries,
   HistogramSeries,
-  CrosshairMode,
   type IChartApi,
   type ISeriesApi,
   type CandlestickData,
@@ -21,6 +20,7 @@ import { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
 import { getQuickSize } from "@/lib/quickSizes";
 import { createTicketAmend, type TicketAmendHost } from "@/lib/ticketAmend";
 import { createTicketPlace } from "@/lib/ticketPlace";
+import { liveChartOptions } from "@/lib/chartOptions";
 import { theme } from "@/lib/theme";
 import { formatSize } from "@/lib/utils";
 
@@ -142,33 +142,15 @@ export function useChartTicketInteraction(input: Refs) {
     if (!containerRef.current || !wrapRef.current) return;
 
     const wrap = wrapRef.current;
-    const chart = createChart(containerRef.current, {
-      width: wrap.clientWidth,
-      height: wrap.clientHeight,
-      localization: { locale: theme.chartLocale },
-      layout: {
-        background: { color: theme.panel },
-        textColor: theme.muted,
-        fontFamily: theme.fontMono,
-        fontSize: theme.chartFontSize,
-      },
-      grid: {
-        vertLines: { color: theme.rule },
-        horzLines: { color: theme.rule },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: {
-        borderColor: theme.rule,
-        scaleMargins: { top: 0.08, bottom: 0.08 },
-      },
-      timeScale: {
-        borderColor: theme.rule,
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: RIGHT_OFFSET,
-        shiftVisibleRangeOnNewBar: true,
-      },
-    });
+    const chart = createChart(
+      containerRef.current,
+      liveChartOptions({
+        width: wrap.clientWidth,
+        height: wrap.clientHeight,
+        rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.08 } },
+        timeScale: { secondsVisible: false, rightOffset: RIGHT_OFFSET },
+      })
+    );
 
     const series = chart.addSeries(CandlestickSeries, {
       upColor: theme.bid,
