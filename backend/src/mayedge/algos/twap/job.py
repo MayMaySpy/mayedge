@@ -300,10 +300,7 @@ class AdvancedTwapRunner:
         params = AdvancedTwapParams.from_json(raw, side=side, qty=qty)
         if not params.duration_seconds:
             raise ValueError(f"unrecoverable twap row {row.get('algo_id')}: missing duration")
-        try:
-            status = ChaseStatus(row.get("status") or "stopped")
-        except ValueError:
-            status = ChaseStatus.STOPPED
+        status = ChaseStatus.of(row.get("status"))
         self.params = params
         self.status = status
         self.market_index = int(row.get("market_index") or 0)
@@ -320,16 +317,7 @@ class AdvancedTwapRunner:
         self.error = row.get("error")
         self.algo_id = str(row.get("algo_id") or "")
         self.created_at = int(row.get("created_at") or 0)
-        self.ledger = Ledger.from_persist(
-            {
-                "next_clip": row.get("next_clip"),
-                "next_fill": row.get("next_fill"),
-                "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
-                "clips": items(row.get("clips")),
-                "fills": items(row.get("fills")),
-            }
-        )
+        self.ledger = Ledger.from_row(row)
         self._cois = {c.client_order_index for c in self.ledger.clips}
         self._stop.clear()
         self._run_gate.set()

@@ -34,5 +34,3 @@ DEFAULT_BE_BPS = 0  # live maker+taker from accountLimits; Standard is 0
 DEFAULT_REENTRY_COOLDOWN_MS = 30_000
 DEFAULT_REENTRY_BPS = 4
 DEFAULT_POST_BE_COOLDOWN_MS = 60_000
-
-AUTO_RESUME_ERRORS = frozenset({"unproven_missing_clip", "trades_reconcile_failed"})

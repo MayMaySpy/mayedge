@@ -22,6 +22,14 @@ class ChaseStatus(StrEnum):
     DONE = "done"
     ERROR = "error"
 
+    @classmethod
+    def of(cls, raw: object) -> ChaseStatus:
+        """A stored status. Anything unknown reads as stopped."""
+        try:
+            return cls(raw or "stopped")
+        except ValueError:
+            return cls.STOPPED
+
 
 ACTIVE_STATUSES = (ChaseStatus.RUNNING, ChaseStatus.PAUSED, ChaseStatus.ERROR)
 

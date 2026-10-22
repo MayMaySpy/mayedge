@@ -147,10 +147,7 @@ class PlannerRunner:
             raise ValueError(f"unrecoverable planner row {row.get('algo_id')}: no params")
         params = PlannerParams.from_json(raw)
         runtime = obj(obj(raw.get("runtime")).get("planner"))
-        try:
-            status = ChaseStatus(row.get("status") or "stopped")
-        except ValueError:
-            status = ChaseStatus.STOPPED
+        status = ChaseStatus.of(row.get("status"))
         st = PlannerState(
             status=status,
             params=params,
@@ -160,16 +157,7 @@ class PlannerRunner:
             created_at=int(row.get("created_at") or 0),
             reason=row.get("reason"),
             error=row.get("error"),
-            ledger=Ledger.from_persist(
-                {
-                    "next_clip": row.get("next_clip"),
-                    "next_fill": row.get("next_fill"),
-                    "trade_ids": row.get("trade_ids") or set(),
-                    "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
-                    "clips": items(row.get("clips")),
-                    "fills": items(row.get("fills")),
-                }
-            ),
+            ledger=Ledger.from_row(row),
         )
         st.load_runtime(runtime)
         if st.plan is None:

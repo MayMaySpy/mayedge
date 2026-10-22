@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Literal
 
 from mayedge.numbers import fmt_decimal
-from mayedge.rows import obj
+from mayedge.rows import items, obj
 
 ClipStatus = Literal["live", "filled", "cancelled"]
 ClipSide = Literal["buy", "sell"]
@@ -376,3 +377,17 @@ class Ledger:
         if ledger.fills:
             ledger.next_fill = max(ledger.next_fill, max(f.seq for f in ledger.fills) + 1)
         return ledger
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> Ledger:
+        """The ledger columns of a stored run."""
+        return cls.from_persist(
+            {
+                "next_clip": row.get("next_clip"),
+                "next_fill": row.get("next_fill"),
+                "trade_ids": row.get("trade_ids") or set(),
+                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
+                "clips": items(row.get("clips")),
+                "fills": items(row.get("fills")),
+            }
+        )

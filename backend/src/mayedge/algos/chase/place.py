@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from mayedge.algos import common
 from mayedge.algos.chase.config import (
@@ -27,6 +27,7 @@ from mayedge.algos.chase.iceberg import (
 )
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.common import venue_order_keys
+from mayedge.algos.ledger import Clip
 from mayedge.lighter.budget import BudgetRefused
 from mayedge.lighter.errors import (
     is_blocked,
@@ -42,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, StateT]):
     """Requote loop: decide, amend live clip, or place post-only child."""
+
+    LABEL: ClassVar[str] = "chase"  # how logs name the algo
 
     _lock: asyncio.Lock
     _stop: asyncio.Event
@@ -286,10 +289,31 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
     async def _cancel_working(self) -> None:
         await self._sync_fills()
         clip = self._state.ledger.working()
-        if clip is None:
+        if clip is not None:
+            await self._pull_clip(clip)
+
+    async def _cancel_clip(self, clip: Clip) -> None:
+        await self._sync_fills()
+        await self._pull_clip(clip)
+
+    def _on_clips_closed(self) -> None:
+        """A clip just closed in the ledger. Grid credits its fills here."""
+
+    def _close_gone_clip(self, clip: Clip, now: int) -> None:
+        """The venue no longer shows the clip: filled if the trades prove it, else cancelled."""
+        if self._may_invent_fill(clip, now):
+            self._close_missing_clip(clip, now=now, assume_fill=True)
+        else:
+            self._state.ledger.close_missing(clip, canceling=True, now=now)
+        self._on_clips_closed()
+        self._reconcile_master()
+
+    async def _pull_clip(self, clip: Clip) -> None:
+        if clip.status != "live":
             return
         if not self._exec().enabled:
             self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
+            self._on_clips_closed()
             self._reconcile_master()
             return
         coi = clip.client_order_index
@@ -299,12 +323,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
                 if await self._coi_open_on_venue(coi):
                     self._reconcile_master()
                     return
-                now = common.now_ms()
-                if self._may_invent_fill(clip, now):
-                    self._close_missing_clip(clip, now=now, assume_fill=True)
-                else:
-                    self._state.ledger.close_missing(clip, canceling=True, now=now)
-                self._reconcile_master()
+                self._close_gone_clip(clip, common.now_ms())
                 return
             mi, oid = target
             self._canceling = True
@@ -318,7 +337,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
                     elif self._handle_tx_err(e):
                         return
                     else:
-                        logger.exception("chase cancel failed")
+                        logger.exception("%s cancel failed", self.LABEL)
                         if await self._coi_open_on_venue(coi):
                             self._reconcile_master()
                             return
@@ -326,8 +345,7 @@ class ChasePlaceMixin[BookT: FillBook, StateT: FillState](ChaseFillMixin[BookT, 
             finally:
                 self._canceling = False
             if not await self._coi_open_on_venue(coi):
-                self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
-                self._reconcile_master()
+                self._close_gone_clip(clip, common.now_ms())
                 return
             if attempt + 1 < STOP_CANCEL_TRIES:
                 await asyncio.sleep(STOP_CANCEL_GAP_S)

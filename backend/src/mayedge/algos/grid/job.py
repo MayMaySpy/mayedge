@@ -1,28 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
 from mayedge.algos import common
-from mayedge.algos.chase.config import STOP_CANCEL_GAP_S, STOP_CANCEL_TRIES
-from mayedge.algos.chase.execution import ChaseExecution
-from mayedge.algos.chase.fills import may_invent_fill
 from mayedge.algos.chase.iceberg import Action, MarketView, leftover_is_dust
-from mayedge.algos.chase.place import ChasePlaceMixin
-from mayedge.algos.chase.state import ACTIVE_STATUSES, ChaseStatus
+from mayedge.algos.chase.state import ChaseStatus
+from mayedge.algos.clip_job import ClipJob
 from mayedge.algos.common import venue_order_keys
 from mayedge.algos.grid.config import (
     ACK_WAIT_MS,
     MIN_PLACE_GAP_MS,
     MIN_REQUOTE_MS,
     is_grid_client_order,
-)
-from mayedge.algos.grid.config import (
-    AUTO_RESUME_ERRORS as GRID_AUTO_RESUME,
 )
 from mayedge.algos.grid.decide import (
     ALGO_ID,
@@ -38,46 +30,28 @@ from mayedge.algos.grid.decide import (
     decide,
 )
 from mayedge.algos.grid.state import GridBookView, GridState
-from mayedge.algos.ledger import Clip
+from mayedge.algos.ledger import Clip, Ledger
 from mayedge.config import settings
-from mayedge.lighter.budget import BudgetRefused, budget
 from mayedge.lighter.errors import (
-    is_blocked,
-    is_invalid_nonce,
     is_min_size,
     is_order_not_found,
     is_would_cross,
 )
 from mayedge.numbers import check_notional, fmt_decimal, to_decimal
-from mayedge.rows import is_obj, items, obj
+from mayedge.rows import is_obj, obj
 
 logger = logging.getLogger(__name__)
 
 
-class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
+class GridRunner(ClipJob[GridBookView, GridState]):
     """Two-sided chase-grid job."""
 
-    def __init__(self, book: GridBookView) -> None:
-        self._book = book
-        self._state = GridState()
-        self._cois: set[int] = set()
-        self._task: asyncio.Task[None] | None = None
-        self._stop = asyncio.Event()
-        self._wake = asyncio.Event()
-        self._lock = asyncio.Lock()
-        self._canceling = False
-        self._last_tx_ms = 0
-        self._last_chase_tx_ms = 0
-        self._backoff_until = 0
-        self._backoff_reason: str | None = None
-        self._pending_trades: list[dict[str, Any]] = []
-        self._missing_refreshed: set[int] = set()
-        self._unproven_retry_at = 0
-        self._handled_clip_seqs: set[int] = set()
+    LABEL = "grid"
 
-    @property
-    def state(self) -> GridState:
-        return self._state
+    def __init__(self, book: GridBookView) -> None:
+        super().__init__(book, GridState())
+        self._last_chase_tx_ms = 0
+        self._handled_clip_seqs: set[int] = set()
 
     def _orders_cancel_keys(self, orders: Any) -> set[tuple[int, int]]:
         return set(venue_order_keys(orders, lambda coi: coi in self._cois, keep_unindexed=True))
@@ -141,6 +115,9 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             )
             rt.handled_fill_qty[clip.seq] = handled + qty
             self._handled_clip_seqs.add(clip.seq)
+
+    def _on_clips_closed(self) -> None:
+        self._process_new_fills()
 
     async def _sync_fills(self) -> None:
         self._drain_trades()
@@ -278,12 +255,6 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             "working_ask": (cs.to_dict() if (cs := self._chase_clip("sell")) else None),
         }
 
-    def _publish(self) -> None:
-        self._book.publish()
-
-    def _finish(self) -> None:
-        self._book.finish(self)
-
     def _live_fee_bps(self) -> tuple[Decimal, Decimal]:
         payload = self._exec().cached_account_payload() or {}
         maker = to_decimal(payload.get("maker_fee_bps") or "0")
@@ -298,14 +269,6 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
         be_bps = maker + taker
         if params.be_bps != be_bps:
             self._state.params = replace(params, be_bps=be_bps)
-
-    def _next_coi(self) -> int:
-        coi = self._book.alloc_coi()
-        self._cois.add(coi)
-        return coi
-
-    def _exec(self) -> ChaseExecution:
-        return self._book.execution()
 
     def _seed_inventory(self) -> None:
         payload = self._exec().cached_account_payload() or {}
@@ -429,68 +392,6 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
             return
         self._note_tx(self._clip_kind(clip))
         self._state.ledger.amend(clip, price=quote.price, now=common.now_ms())
-
-    async def _cancel_clip(self, clip: Clip) -> None:
-        await self._sync_fills()
-        if clip.status != "live":
-            return
-        if not self._exec().enabled:
-            self._state.ledger.close_missing(clip, canceling=True, now=common.now_ms())
-            self._process_new_fills()
-            self._reconcile_master()
-            return
-        coi = clip.client_order_index
-        for attempt in range(STOP_CANCEL_TRIES):
-            target = self._cancel_target(clip)
-            if target is None:
-                if await self._coi_open_on_venue(coi):
-                    return
-                now = common.now_ms()
-                if may_invent_fill(
-                    clip,
-                    now,
-                    ledger=self._state.ledger,
-                    orders_hydrated=self._exec().orders_hydrated(),
-                    grace_ms=self._book.missing_fill_grace_ms,
-                ):
-                    self._close_missing_clip(clip, now=now, assume_fill=True)
-                else:
-                    self._state.ledger.close_missing(clip, canceling=True, now=now)
-                self._process_new_fills()
-                self._reconcile_master()
-                return
-            mi, oid = target
-            self._canceling = True
-            try:
-                try:
-                    await self._exec().cancel_order(mi, oid)
-                    self._last_tx_ms = common.now_ms()
-                except Exception as e:
-                    if is_order_not_found(e) or is_min_size(e):
-                        pass
-                    elif self._handle_tx_err(e):
-                        return
-                    else:
-                        raise
-            finally:
-                self._canceling = False
-            if not await self._coi_open_on_venue(coi):
-                now = common.now_ms()
-                if may_invent_fill(
-                    clip,
-                    now,
-                    ledger=self._state.ledger,
-                    orders_hydrated=self._exec().orders_hydrated(),
-                    grace_ms=self._book.missing_fill_grace_ms,
-                ):
-                    self._close_missing_clip(clip, now=now, assume_fill=True)
-                else:
-                    self._state.ledger.close_missing(clip, canceling=True, now=now)
-                self._process_new_fills()
-                self._reconcile_master()
-                return
-            if attempt + 1 < STOP_CANCEL_TRIES:
-                await asyncio.sleep(STOP_CANCEL_GAP_S)
 
     def _keep_child_cois(self, plan: GridPlan) -> set[int]:
         keep: set[int] = set()
@@ -750,22 +651,8 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
                 "post_be_cooldown_ms": raw.get("post_be_cooldown_ms"),
             }
         )
-        try:
-            status = ChaseStatus(row.get("status") or "stopped")
-        except ValueError:
-            status = ChaseStatus.STOPPED
-        from mayedge.algos.ledger import Ledger
-
-        ledger = Ledger.from_persist(
-            {
-                "next_clip": row.get("next_clip"),
-                "next_fill": row.get("next_fill"),
-                "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
-                "clips": items(row.get("clips")),
-                "fills": items(row.get("fills")),
-            }
-        )
+        status = ChaseStatus.of(row.get("status"))
+        ledger = Ledger.from_row(row)
         runtime = GridRuntime.from_json(runtime_raw if is_obj(runtime_raw) else {})
         for clip in ledger.clips:
             if clip.seq in runtime.handled_fill_qty:
@@ -791,8 +678,7 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
         )
         self._cois = {c.client_order_index for c in ledger.clips}
         self._handled_clip_seqs = {c.seq for c in ledger.clips if c.status == "filled"}
-        self._stop.clear()
-        self._wake.clear()
+        self._reset_job()
 
     async def start(
         self,
@@ -830,156 +716,6 @@ class GridRunner(ChasePlaceMixin[GridBookView, GridState]):
         )
         self._cois.clear()
         self._handled_clip_seqs.clear()
+        self._reset_job()
         self._seed_inventory()
-        try:
-            await self._evaluate()
-        except Exception:
-            await self.stop()
-            raise
-        if self._state.status == ChaseStatus.RUNNING:
-            self._task = asyncio.create_task(self._run())
-
-    async def _run(self) -> None:
-        token = budget.enter_lane("algo")
-        try:
-            while not self._stop.is_set():
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
-                self._wake.clear()
-                if self._stop.is_set():
-                    break
-                if (
-                    self._state.status == ChaseStatus.ERROR
-                    and self._state.error in GRID_AUTO_RESUME
-                ):
-                    with contextlib.suppress(Exception):
-                        await self.unpause()
-                    continue
-                if self._state.status in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
-                    continue
-                try:
-                    await self._evaluate()
-                except Exception as e:
-                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
-                        self._handle_tx_err(e)
-                        continue
-                    logger.exception("chase-grid error")
-                    self._state.status = ChaseStatus.ERROR
-                    self._state.error = str(e)
-                    await self._cancel_algo_orders()
-                    self._publish()
-                    return
-        except asyncio.CancelledError:
-            raise
-        finally:
-            budget.leave_lane(token)
-
-    def on_gateway(self, msg: dict[str, Any]) -> None:
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        kind = msg.get("type")
-        if kind == "account_trades":
-            trades = items(msg.get("trades"))
-            if trades:
-                self._pending_trades.extend(trades)
-                self._wake.set()
-            return
-        if self._state.status != ChaseStatus.RUNNING:
-            return
-        book = (
-            kind in ("order_book", "order_book_snapshot", "order_book_delta")
-            and msg.get("market_index") == self._state.market_index
-        )
-        if book or kind == "account":
-            self._wake.set()
-
-    async def pause(self) -> None:
-        if self._state.status != ChaseStatus.RUNNING:
-            raise ValueError(f"cannot pause status={self._state.status}")
-        complete = await self._cancel_algo_orders()
-        if complete:
-            self._state.status = ChaseStatus.PAUSED
-            self._state.quote_action = Action.PAUSE.value
-            self._state.reason = "user_paused"
-            self._state.error = None
-        else:
-            self._state.status = ChaseStatus.ERROR
-            self._state.error = "pause: cancel incomplete"
-        self._wake.set()
-        self._publish()
-
-    async def unpause(self) -> None:
-        if self._state.status not in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
-            raise ValueError(f"cannot unpause status={self._state.status}")
-        if not await self._rearm_from_venue():
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            else:
-                self._wake.set()
-            self._publish()
-            return
-        self._state.status = ChaseStatus.RUNNING
-        self._state.reason = None
-        self._state.error = None
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
-        else:
-            self._wake.set()
-        await self._evaluate()
-        self._publish()
-
-    async def stop(self) -> None:
-        self._stop.set()
-        self._wake.set()
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        complete = await self._cancel_algo_orders()
-        if self._state.status in (ChaseStatus.RUNNING, ChaseStatus.PAUSED, ChaseStatus.ERROR):
-            if complete:
-                self._state.status = ChaseStatus.STOPPED
-                self._finish()
-            else:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = self._state.error or "stop: cancel incomplete"
-                self._publish()
-
-    async def drain_for_shutdown(self) -> None:
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        self._stop.set()
-        self._wake.set()
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        if self._state.status not in (ChaseStatus.RUNNING, ChaseStatus.ERROR):
-            return
-        complete = await self._cancel_algo_orders()
-        if self._state.status == ChaseStatus.RUNNING:
-            if complete:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "shutdown"
-            else:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = "shutdown: cancel incomplete"
-        self._publish()
-
-    async def resume(self) -> None:
-        if self._state.status not in ACTIVE_STATUSES:
-            raise ValueError(f"cannot resume status={self._state.status}")
-        if not self._state.symbol:
-            meta = self._exec().get_market_by_index(self._state.market_index)
-            if meta:
-                self._state.symbol = meta.symbol
-        if not await self._rearm_from_venue():
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            self._publish()
-            return
-        if self._state.status == ChaseStatus.RUNNING:
-            self._task = asyncio.create_task(self._run())
-            await self._evaluate()
+        await self._begin()

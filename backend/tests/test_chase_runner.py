@@ -738,7 +738,7 @@ class ChaseBookStopTests(IsolatedChaseTestCase):
             async def _nosleep(_: float) -> None:
                 await asyncio.sleep(0)
 
-            with patch("mayedge.algos.chase.job.asyncio.sleep", _nosleep):
+            with patch("mayedge.algos.chase.place.asyncio.sleep", _nosleep):
                 await boot.book.stop(boot.algo_id)
         self.assertGreaterEqual(boot.orders.summary_calls, 2)
         self.assertEqual(boot.job.state.status, ChaseStatus.STOPPED)

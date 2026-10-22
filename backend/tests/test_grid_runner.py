@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import IsolatedAsyncioTestCase
 
+from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.grid.config import GRID_COI_BASE
 from mayedge.algos.grid.decide import GridAction, Lot, SideQuote
 from mayedge.algos.grid.job import GridRunner
@@ -135,6 +136,28 @@ class GridRunnerDeadChildTests(IsolatedGridTestCase):
         assert live is not None
         self.assertNotEqual(live.client_order_index, dropped_coi)
         self.assertEqual(len(_chase_sells(boot.orders.open_orders)), 1)
+
+
+class GridRunnerRestoreTests(IsolatedGridTestCase):
+    async def test_error_restore_unproven_auto_resumes(self) -> None:
+        """A grid restored in a recoverable error quotes again, as chase and ladder do."""
+        boot = boot_grid_job()
+        job = cast(GridRunner, boot.job)
+        with patch_grid(boot.clock, boot.gateway, boot.orders):
+            await job._evaluate()
+            row = {
+                **job.snapshot(),
+                **job.state.ledger.to_persist(),
+                "status": "error",
+                "error": "unproven_missing_clip",
+            }
+            job.hydrate_from_row(row)
+            await job.resume()
+            self.assertEqual(job.state.status, ChaseStatus.RUNNING)
+            self.assertIsNone(job.state.error)
+            self.assertIsNotNone(job._task)
+            await job.stop()
+        self.assertEqual(job.state.status, ChaseStatus.STOPPED)
 
 
 class GridRunnerInventoryTests(IsolatedGridTestCase):

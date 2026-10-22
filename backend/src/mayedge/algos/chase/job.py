@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from typing import Any
 
 from mayedge.algos import common
-from mayedge.algos.chase.config import AUTO_RESUME_ERRORS
-from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.chase.fills import may_invent_fill
 from mayedge.algos.chase.iceberg import (
     ALGO_ID,
@@ -15,19 +11,16 @@ from mayedge.algos.chase.iceberg import (
     Action,
     ChaseIcebergParams,
 )
-from mayedge.algos.chase.place import ChasePlaceMixin
 from mayedge.algos.chase.state import (
     ACTIVE_STATUSES,
     ChaseBookView,
     ChaseState,
     ChaseStatus,
 )
+from mayedge.algos.clip_job import ClipJob
 from mayedge.algos.ledger import Ledger
 from mayedge.config import settings
-from mayedge.lighter.budget import BudgetRefused, budget
-from mayedge.lighter.errors import is_blocked, is_invalid_nonce
 from mayedge.numbers import check_notional, fmt_decimal, to_decimal
-from mayedge.rows import items, obj
 
 logger = logging.getLogger(__name__)
 
@@ -43,28 +36,11 @@ __all__ = [
 ]
 
 
-class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
+class ChaseIcebergRunner(ClipJob[ChaseBookView, ChaseState]):
     """One chase job. ChaseBook owns many of these."""
 
     def __init__(self, book: ChaseBookView) -> None:
-        self._book = book
-        self._state = ChaseState()
-        self._cois: set[int] = set()
-        self._task: asyncio.Task[None] | None = None
-        self._stop = asyncio.Event()
-        self._wake = asyncio.Event()
-        self._lock = asyncio.Lock()
-        self._canceling = False
-        self._last_tx_ms = 0
-        self._backoff_until = 0
-        self._backoff_reason: str | None = None
-        self._pending_trades: list[dict[str, Any]] = []
-        self._missing_refreshed: set[int] = set()
-        self._unproven_retry_at = 0
-
-    @property
-    def state(self) -> ChaseState:
-        return self._state
+        super().__init__(book, ChaseState())
 
     def snapshot(self, s: ChaseState | None = None) -> dict[str, Any]:
         s = s or self._state
@@ -100,12 +76,6 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             **s.ledger.to_dict(),
         }
 
-    def _publish(self) -> None:
-        self._book.publish()
-
-    def _finish(self) -> None:
-        self._book.finish(self)
-
     def hydrate_from_row(self, row: dict[str, Any]) -> None:
         """Rebuild in-memory state from a DB row (does not start the loop)."""
         side = row.get("side")
@@ -122,20 +92,8 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             price_floor=to_decimal(row["price_floor"]),
             price_ceiling=to_decimal(row["price_ceiling"]),
         )
-        try:
-            status = ChaseStatus(row.get("status") or "stopped")
-        except ValueError:
-            status = ChaseStatus.STOPPED
-        ledger = Ledger.from_persist(
-            {
-                "next_clip": row.get("next_clip"),
-                "next_fill": row.get("next_fill"),
-                "trade_ids": row.get("trade_ids") or set(),
-                "trade_qty_by_clip": obj(row.get("trade_qty_by_clip")),
-                "clips": items(row.get("clips")),
-                "fills": items(row.get("fills")),
-            }
-        )
+        status = ChaseStatus.of(row.get("status"))
+        ledger = Ledger.from_row(row)
         self._state = ChaseState(
             status=status,
             params=params,
@@ -154,171 +112,8 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             ledger=ledger,
         )
         self._cois = {c.client_order_index for c in ledger.clips}
-        self._stop.clear()
-        self._wake.clear()
-        self._last_tx_ms = 0
-        self._backoff_until = 0
-        self._backoff_reason = None
-        self._canceling = False
-        self._pending_trades.clear()
-        self._missing_refreshed.clear()
-        self._unproven_retry_at = 0
+        self._reset_job()
         self._reconcile_master()
-
-    async def resume(self) -> None:
-        """Continue a hydrated RUNNING/ERROR/PAUSED job after process restart."""
-        if self._state.status not in ACTIVE_STATUSES:
-            raise ValueError(f"cannot resume status={self._state.status}")
-        if not self._state.symbol:
-            meta = self._exec().get_market_by_index(self._state.market_index)
-            if meta:
-                self._state.symbol = meta.symbol
-
-        if not await self._rearm_from_venue():
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            self._publish()
-            return
-
-        if self._state.status == ChaseStatus.ERROR:
-            if self._state.error in AUTO_RESUME_ERRORS:
-                self._state.status = ChaseStatus.RUNNING
-                self._state.reason = None
-                self._state.error = None
-                if self._task is None or self._task.done():
-                    self._task = asyncio.create_task(self._run())
-                try:
-                    await self._evaluate()
-                except Exception:
-                    logger.exception(
-                        "chase auto-resume evaluate failed for %s", self._state.algo_id
-                    )
-                    self._state.status = ChaseStatus.ERROR
-                    self._state.error = "resume evaluate failed"
-                    self._publish()
-                    return
-                logger.info(
-                    "auto-resumed chase job %s market=%s remaining=%s",
-                    self._state.algo_id,
-                    self._state.symbol or self._state.market_index,
-                    self._state.remaining,
-                )
-                self._publish()
-                return
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            logger.info(
-                "restored error chase job %s market=%s remaining=%s (awaiting unpause)",
-                self._state.algo_id,
-                self._state.symbol or self._state.market_index,
-                self._state.remaining,
-            )
-            self._publish()
-            return
-        if self._state.status == ChaseStatus.PAUSED:
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            logger.info(
-                "restored paused chase job %s market=%s remaining=%s",
-                self._state.algo_id,
-                self._state.symbol or self._state.market_index,
-                self._state.remaining,
-            )
-            self._publish()
-            return
-        if self._state.status != ChaseStatus.RUNNING:
-            raise ValueError(f"cannot resume status={self._state.status}")
-        try:
-            await self._evaluate()
-        except Exception:
-            logger.exception("chase resume evaluate failed for %s", self._state.algo_id)
-            self._state.status = ChaseStatus.ERROR
-            self._state.error = "resume evaluate failed"
-            self._publish()
-            return
-        if self._state.status == ChaseStatus.RUNNING:
-            self._task = asyncio.create_task(self._run())
-            logger.info(
-                "restored chase job %s market=%s remaining=%s",
-                self._state.algo_id,
-                self._state.symbol or self._state.market_index,
-                self._state.remaining,
-            )
-
-    async def pause(self) -> None:
-        """User pause: pull clips and hold the master until unpause."""
-        if self._state.status != ChaseStatus.RUNNING:
-            raise ValueError(f"cannot pause status={self._state.status}")
-        complete = await self._cancel_algo_orders()
-        if complete:
-            self._state.status = ChaseStatus.PAUSED
-            self._state.quote_action = Action.PAUSE.value
-            self._state.reason = "user_paused"
-            self._state.rest_price = None
-            self._state.rest_qty = None
-            self._state.error = None
-        else:
-            self._state.status = ChaseStatus.ERROR
-            self._state.error = "pause: cancel incomplete"
-        self._wake.set()
-        self._publish()
-
-    async def unpause(self) -> None:
-        """User resume after pause or error — start quoting again."""
-        if self._state.status not in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
-            raise ValueError(f"cannot unpause status={self._state.status}")
-        if not await self._rearm_from_venue():
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(self._run())
-            else:
-                self._wake.set()
-            self._publish()
-            return
-        self._state.status = ChaseStatus.RUNNING
-        self._state.reason = None
-        self._state.error = None
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(self._run())
-        else:
-            self._wake.set()
-        try:
-            await self._evaluate()
-        except Exception:
-            logger.exception("chase unpause evaluate failed for %s", self._state.algo_id)
-            self._state.status = ChaseStatus.ERROR
-            self._state.error = "unpause evaluate failed"
-            self._publish()
-            return
-        self._publish()
-
-    def _next_coi(self) -> int:
-        coi = self._book.alloc_coi()
-        self._cois.add(coi)
-        return coi
-
-    def on_gateway(self, msg: dict[str, Any]) -> None:
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        kind = msg.get("type")
-        if kind == "account_trades":
-            trades = items(msg.get("trades"))
-            if trades:
-                self._pending_trades.extend(trades)
-                self._wake.set()
-            return
-        if self._state.status != ChaseStatus.RUNNING:
-            return
-        book = (
-            kind
-            in (
-                "order_book",
-                "order_book_snapshot",
-                "order_book_delta",
-            )
-            and msg.get("market_index") == self._state.market_index
-        )
-        if book or kind == "account":
-            self._wake.set()
 
     async def start(
         self,
@@ -352,107 +147,5 @@ class ChaseIcebergRunner(ChasePlaceMixin[ChaseBookView, ChaseState]):
             created_at=common.now_ms(),
         )
         self._cois.clear()
-        self._stop.clear()
-        self._wake.clear()
-        self._last_tx_ms = 0
-        self._backoff_until = 0
-        self._backoff_reason = None
-        self._canceling = False
-        self._pending_trades.clear()
-        self._missing_refreshed.clear()
-        self._unproven_retry_at = 0
-        try:
-            await self._evaluate()
-        except Exception:
-            await self.stop()
-            raise
-        if self._state.status == ChaseStatus.RUNNING:
-            self._task = asyncio.create_task(self._run())
-
-    async def drain_for_shutdown(self) -> None:
-        """Pull venue clips before process exit; parent state persists for restore."""
-        if self._state.status not in ACTIVE_STATUSES:
-            return
-        self._stop.set()
-        self._wake.set()
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        if self._state.status not in (ChaseStatus.RUNNING, ChaseStatus.ERROR):
-            return
-        complete = await self._cancel_algo_orders()
-        if self._state.status == ChaseStatus.RUNNING:
-            if complete:
-                self._state.quote_action = Action.PAUSE.value
-                self._state.reason = "shutdown"
-                self._state.rest_price = None
-                self._state.rest_qty = None
-                self._state.error = None
-            else:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = "shutdown: cancel incomplete"
-        self._publish()
-
-    async def stop(self) -> None:
-        self._stop.set()
-        self._wake.set()
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        complete = await self._cancel_algo_orders()
-        if self._state.status in (ChaseStatus.RUNNING, ChaseStatus.PAUSED, ChaseStatus.ERROR):
-            if complete:
-                self._state.status = ChaseStatus.STOPPED
-                self._finish()
-            else:
-                self._state.status = ChaseStatus.ERROR
-                self._state.error = self._state.error or "stop: cancel incomplete"
-                self._publish()
-
-    async def _run(self) -> None:
-        token = budget.enter_lane("algo")
-        try:
-            while not self._stop.is_set():
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._wake.wait(), timeout=1.0)
-                self._wake.clear()
-                if self._stop.is_set():
-                    break
-                if (
-                    self._state.status == ChaseStatus.ERROR
-                    and self._state.error in AUTO_RESUME_ERRORS
-                ):
-                    try:
-                        await self.unpause()
-                    except Exception:
-                        logger.exception("chase auto-resume failed for %s", self._state.algo_id)
-                    continue
-                if self._state.status in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
-                    continue
-                try:
-                    await self._evaluate()
-                except Exception as e:
-                    if isinstance(e, BudgetRefused) or is_blocked(e) or is_invalid_nonce(e):
-                        self._handle_tx_err(e)
-                        continue
-                    logger.exception("chase iceberg error")
-                    self._state.status = ChaseStatus.ERROR
-                    self._state.error = str(e)
-                    await self._cancel_algo_orders()
-                    self._publish()
-                    return
-                if self._state.status in (ChaseStatus.PAUSED, ChaseStatus.ERROR):
-                    continue
-                if self._state.status != ChaseStatus.RUNNING:
-                    break
-        except asyncio.CancelledError:
-            raise
-        finally:
-            budget.leave_lane(token)
-
-    def _exec(self) -> ChaseExecution:
-        return self._book.execution()
+        self._reset_job()
+        await self._begin()
