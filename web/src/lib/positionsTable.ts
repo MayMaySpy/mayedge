@@ -5,6 +5,39 @@ export type PosSortKey = "size" | "notional" | "pnl" | "roe";
 export type PosSortDir = "asc" | "desc";
 export type PosSort = { key: PosSortKey; dir: PosSortDir };
 
+function positivePrice(n: number | null | undefined): number | null {
+  if (n == null || !Number.isFinite(n) || !(n > 0)) return null;
+  return n;
+}
+
+/**
+ * Price a Position from the live book when it is the market on screen,
+ * otherwise from the all-market quote. The account mark is the fallback:
+ * it only moves when that quote is pushed onto the position.
+ */
+export function livePositionMark(opts: {
+  onScreen: boolean;
+  bookMid: number | null;
+  last?: number | null;
+  mark?: number | null;
+  mid?: number | null;
+  accountMark: number;
+  listed: number;
+}): number {
+  if (opts.onScreen) {
+    const book = positivePrice(opts.bookMid);
+    if (book) return book;
+  }
+  return (
+    positivePrice(opts.last) ??
+    positivePrice(opts.mark) ??
+    positivePrice(opts.mid) ??
+    positivePrice(opts.listed) ??
+    positivePrice(opts.accountMark) ??
+    0
+  );
+}
+
 export function positionNotional(size: number, mark: number, entry = 0): number {
   const px = mark > 0 ? mark : entry;
   if (!(px > 0) || !Number.isFinite(size)) return 0;
@@ -156,17 +189,10 @@ export function pnlFromRoe(roe: number, margin: number, notional: number): numbe
   return null;
 }
 
-/** Active market stays first; remaining rows follow the selected numeric sort. */
-export function sortPositionRows<T extends SortablePosition>(
-  rows: T[],
-  sort: PosSort,
-  activeMarketIndex: number | null
-): T[] {
+/** Rows follow the selected numeric sort. Missing values stay last. */
+export function sortPositionRows<T extends SortablePosition>(rows: T[], sort: PosSort): T[] {
   const sign = sort.dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
-    const aActive = activeMarketIndex != null && a.marketIndex === activeMarketIndex;
-    const bActive = activeMarketIndex != null && b.marketIndex === activeMarketIndex;
-    if (aActive !== bActive) return aActive ? -1 : 1;
     const av = sortValue(a, sort.key);
     const bv = sortValue(b, sort.key);
     if (av == null && bv == null) return 0;

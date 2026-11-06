@@ -9,7 +9,12 @@ import unittest
 from unittest.mock import patch
 
 from mayedge.lighter.gateway import LighterGateway
-from mayedge.lighter.market_ws import _tone_conn, connect_and_stream
+from mayedge.lighter.market_ws import (
+    _STATS_STALE_S,
+    _tone_conn,
+    connect_and_stream,
+    stats_resubscribe_due,
+)
 from mayedge.lighter.models import MarketMeta
 
 
@@ -153,6 +158,14 @@ class TestToneConnReadsWhileSubscribing(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+
+
+class TestStatsResubscribe(unittest.TestCase):
+    def test_quiet_stats_are_due_and_a_fresh_print_is_not(self) -> None:
+        now = 100.0
+        self.assertFalse(stats_resubscribe_due(0.0, now))
+        self.assertFalse(stats_resubscribe_due(now - 1, now))
+        self.assertTrue(stats_resubscribe_due(now - _STATS_STALE_S, now))
 
 
 if __name__ == "__main__":

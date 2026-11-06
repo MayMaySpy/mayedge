@@ -6,6 +6,7 @@ import {
   nextPosSort,
   pnlAtTrigger,
   pnlFromRoe,
+  livePositionMark,
   positionNotional,
   positionsForClose,
   protectCloseSize,
@@ -38,6 +39,33 @@ function row(
   };
 }
 
+describe("livePositionMark", () => {
+  const base = {
+    onScreen: false,
+    bookMid: null as number | null,
+    accountMark: 0.004906,
+    listed: 0.005203,
+  };
+
+  it("prices the market on screen from the book", () => {
+    expect(livePositionMark({ ...base, onScreen: true, bookMid: 0.005165, last: 0.0049 })).toBe(
+      0.005165
+    );
+  });
+
+  it("prices another market from the quote, not the stuck account mark", () => {
+    expect(livePositionMark({ ...base, last: 0.005168, mark: 0.005166 })).toBe(0.005168);
+  });
+
+  it("uses the listed price when the quote has not arrived", () => {
+    expect(livePositionMark(base)).toBe(0.005203);
+  });
+
+  it("uses the account mark when nothing else is priced", () => {
+    expect(livePositionMark({ ...base, listed: 0 })).toBe(0.004906);
+  });
+});
+
 describe("positionNotional", () => {
   it("uses mark when live", () => {
     expect(positionNotional(2, 50)).toBe(100);
@@ -55,14 +83,14 @@ describe("sortPositionRows", () => {
     row(3, { notional: 200, roe: 12, pnl: 40, sizeAbs: 2 }),
   ];
 
-  it("pins the active pair first, then sorts the rest by notional desc", () => {
-    const sorted = sortPositionRows(rows, { key: "notional", dir: "desc" }, 1);
-    expect(sorted.map((r) => r.marketIndex)).toEqual([1, 2, 3]);
+  it("sorts by notional desc", () => {
+    const sorted = sortPositionRows(rows, { key: "notional", dir: "desc" });
+    expect(sorted.map((r) => r.marketIndex)).toEqual([2, 3, 1]);
   });
 
-  it("sorts by uPnL % with active still first", () => {
-    const sorted = sortPositionRows(rows, { key: "roe", dir: "desc" }, 2);
-    expect(sorted.map((r) => r.marketIndex)).toEqual([2, 3, 1]);
+  it("sorts by uPnL % desc", () => {
+    const sorted = sortPositionRows(rows, { key: "roe", dir: "desc" });
+    expect(sorted.map((r) => r.marketIndex)).toEqual([3, 1, 2]);
   });
 
   it("sends missing roe to the bottom", () => {
@@ -71,9 +99,9 @@ describe("sortPositionRows", () => {
       row(2, { roe: null }),
       row(3, { roe: 1 }),
     ];
-    expect(
-      sortPositionRows(mixed, { key: "roe", dir: "desc" }, null).map((r) => r.marketIndex)
-    ).toEqual([1, 3, 2]);
+    expect(sortPositionRows(mixed, { key: "roe", dir: "desc" }).map((r) => r.marketIndex)).toEqual([
+      1, 3, 2,
+    ]);
   });
 });
 

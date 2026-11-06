@@ -27,10 +27,18 @@ _SUB_BATCH = 40
 _PACE_PER_MIN = 150
 _PING_EVERY = 25.0
 _SILENCE_S = 45.0
+# The venue keeps trade channels up after it stops sending market_stats/all.
+# Off-screen Positions then sit on the last mark. Retry the one channel.
+_STATS_STALE_S = 20.0
 _TONE_CONN_CAP = 450
 # Channel index only — `"trade/1"` must not match `"trade/12"`.
 _TRADE_CHANNEL_STR = re.compile(r'"channel"\s*:\s*"trade(?:_fe)?(?:@[A-Za-z0-9]+)?[:/](\d+)')
 _TRADE_CHANNEL_BYTES = re.compile(_TRADE_CHANNEL_STR.pattern.encode())
+
+
+def stats_resubscribe_due(last_at: float, now: float) -> bool:
+    """True once market_stats has been quiet for ``_STATS_STALE_S``."""
+    return last_at > 0 and now - last_at >= _STATS_STALE_S
 
 
 def skip_idle_trade(
@@ -138,6 +146,7 @@ async def connect_and_stream(gw: LighterGateway) -> None:
                                 ws, {"type": "subscribe", "channel": f"order_book/{pinned}"}
                             )
                     await ws_send(ws, {"type": "subscribe", "channel": "market_stats/all"})
+                    gw.note_market_stats()
                     gw._trade_subs_target.add(market_index)
                     try:
                         await ws_send(ws, {"type": "subscribe", "channel": f"trade/{market_index}"})
@@ -185,13 +194,24 @@ async def ping_loop(gw: LighterGateway, ws: Any) -> None:
 async def silence_watchdog(gw: LighterGateway, ws: Any) -> None:
     while True:
         await asyncio.sleep(5)
-        silent = time.monotonic() - gw._last_msg_at
+        now = time.monotonic()
+        silent = now - gw._last_msg_at
         if silent >= _SILENCE_S:
             logger.warning("market ws silent for %.0fs — forcing reconnect", silent)
             feed_health.set_market_ws("stale", trade_subs=len(gw._trade_subs))
             with contextlib.suppress(Exception):
                 await ws.close()
             return
+        if stats_resubscribe_due(gw.stats_at, now):
+            gw.note_market_stats()
+            logger.info("market_stats quiet — resubscribing")
+            try:
+                async with gw._send_lock:
+                    with contextlib.suppress(Exception):
+                        await ws_send(ws, {"type": "unsubscribe", "channel": "market_stats/all"})
+                    await ws_send(ws, {"type": "subscribe", "channel": "market_stats/all"})
+            except Exception:
+                logger.exception("market_stats resubscribe failed")
 
 
 async def pace_trade_subs(gw: LighterGateway, ws: Any) -> None:

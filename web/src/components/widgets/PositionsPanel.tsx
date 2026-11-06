@@ -19,10 +19,11 @@ import { trimQty } from "@/components/widgets/orderTicket/math";
 import { LoadingRows } from "@/components/widgets/ListControls";
 import { api, isLongPosition, type Market, type Position } from "@/lib/api";
 import { algoBlotter } from "@/lib/algos";
-import { useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo } from "@/lib/liveData";
+import { useJournalOpen, useLiveAccount, useLiveAlgos, useLiveBbo, useLiveQuotes } from "@/lib/liveData";
 import {
   positionNotional,
   exposure,
+  livePositionMark,
   positionsForClose,
   roePct,
   sortPositionRows,
@@ -61,17 +62,7 @@ function n(value: string | undefined) {
   return Number.isFinite(x) ? x : 0;
 }
 
-function liveMark(
-  p: Position,
-  selected: Market | null,
-  liveSpot: number | null,
-  markets: Market[]
-): number {
-  if (selected && p.market_index === selected.market_index && liveSpot && liveSpot > 0) {
-    return liveSpot;
-  }
-  const fromAccount = n(p.mark_price);
-  if (fromAccount > 0) return fromAccount;
+function listedPrice(p: Position, markets: Market[]): number {
   const m = markets.find((x) => x.market_index === p.market_index);
   return m?.last_trade_price || m?.mark_price || 0;
 }
@@ -146,6 +137,7 @@ export function PositionsPanel({
   const journalOpen = useJournalOpen();
   const { working: workingAlgos } = algoBlotter(algoBook);
   const bbo = useLiveBbo();
+  const quotes = useLiveQuotes();
   const feed = useTradingReady({ connected });
   const [tab, setTab] = useState("positions");
   const [historyKind, setHistoryKind] = useState<"trades" | "funding">("trades");
@@ -207,7 +199,16 @@ export function PositionsPanel({
 
   const liveRows = useMemo(() => {
     return openPositions.map((p) => {
-      const mark = liveMark(p, market, liveSpot, markets);
+      const q = quotes[p.market_index];
+      const mark = livePositionMark({
+        onScreen: Boolean(market && p.market_index === market.market_index),
+        bookMid: liveSpot,
+        last: q?.last_trade_price,
+        mark: q?.mark_price,
+        mid: q?.mid_price,
+        accountMark: n(p.mark_price),
+        listed: listedPrice(p, markets),
+      });
       const pnl = livePnl(p, mark);
       const sizeAbs = Math.abs(n(p.size));
       return {
@@ -220,11 +221,11 @@ export function PositionsPanel({
         roe: roePct(p, pnl),
       };
     });
-  }, [openPositions, market, liveSpot, markets]);
+  }, [openPositions, market, liveSpot, markets, quotes]);
 
   const sortedRows = useMemo(
-    () => sortPositionRows(liveRows, posSort, market?.market_index ?? null),
-    [liveRows, posSort, market]
+    () => sortPositionRows(liveRows, posSort),
+    [liveRows, posSort]
   );
 
   const usedMargin = openPositions.reduce((sum, p) => sum + n(p.allocated_margin), 0);

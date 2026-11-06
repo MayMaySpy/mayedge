@@ -84,6 +84,7 @@ class LighterGateway(GatewayBoards):
         self._trade_subs: set[int] = set()
         self._trade_subs_target: set[int] = set()
         self._last_msg_at = 0.0
+        self._stats_at = 0.0
         self._books = OrderBookFeed(self.broadcast, resubscribe=self._resubscribe_order_book_sync)
         self._liqs = LiquidationFeed(self.broadcast)
         self._alerts = AlertDetector(self.broadcast, held=self._held_markets)
@@ -296,6 +297,9 @@ class LighterGateway(GatewayBoards):
                 await asyncio.sleep(_MARKET_REFRESH_S)
                 await self._load_markets()
                 self._refresh_trade_targets()
+                from mayedge.lighter.account import account_service
+
+                account_service.touch_marks()
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -385,7 +389,15 @@ class LighterGateway(GatewayBoards):
             return meta
         return None
 
+    @property
+    def stats_at(self) -> float:
+        return self._stats_at
+
+    def note_market_stats(self) -> None:
+        self._stats_at = time.monotonic()
+
     def _finish_market_stats(self, dirty: list[MarketMeta]) -> None:
+        self.note_market_stats()
         if dirty:
             self.broadcast({"type": "market_stats", "markets": [m.as_quote_dict() for m in dirty]})
         self._alerts.flush()
