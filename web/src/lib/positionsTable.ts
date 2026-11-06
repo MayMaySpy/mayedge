@@ -189,11 +189,10 @@ export function realizedFor(
   return open.find((row) => row.market_index === p.market_index && row.side === side) ?? null;
 }
 
-/** The Realized cell's tooltip: what it is made of, and Net as the Journal counts it. */
+/** The Realized cell's tooltip: the breakdown of the number shown. */
 export function realizedTitle(row: OpenTripRealized, fmt: (n: number) => string): string {
   const lines = [
-    `Realized ${fmt(parseFloat(row.realized))}: closes ${fmt(parseFloat(row.pnl))}, fees ${fmt(-parseFloat(row.fees))}`,
-    `With funding ${fmt(parseFloat(row.funding))}: Net ${fmt(parseFloat(row.net))}, as the Journal counts it`,
+    `Closes ${fmt(parseFloat(row.pnl))}, fees ${fmt(-parseFloat(row.fees))}, funding ${fmt(parseFloat(row.funding))}`,
   ];
   if (row.partial) lines.push("Closes before the journal began are not in it");
   return lines.join("\n");

@@ -124,11 +124,17 @@ export function PositionsTable({
                     <TableHead
                       hideBelow="lg"
                       className="text-right"
-                      title="What this Position has closed since it opened, less fees. From the Journal, a few seconds behind a fill."
+                      title="Realized PnL: what this Position has made since it opened, even when nothing has closed. Closes, less fees, plus funding received or less funding paid. From the Journal, a few seconds behind a fill."
                     >
                       Realized
                     </TableHead>
-                    <TableHead hideBelow="2xl" className="text-right">Funding</TableHead>
+                    <TableHead
+                      hideBelow="2xl"
+                      className="text-right"
+                      title="Funding since this Position opened: received, or paid. Already inside Realized. The hour in progress is Next, and is not in this until it settles."
+                    >
+                      Funding
+                    </TableHead>
                     <TableHead
                       hideBelow="xl"
                       className="text-right"
@@ -143,9 +149,9 @@ export function PositionsTable({
                 <TableBody>
                   {sortedRows.map(({ p, mark, pnl, notional, roe }) => {
                     const long = isLongPosition(p);
-                    const fund = n(p.funding_paid);
                     const realized = realizedFor(p, journalOpen);
-                    const realizedNum = realized ? n(realized.realized) : 0;
+                    const realizedNum = realized ? n(realized.net) : 0;
+                    const fund = realized ? n(realized.funding) : null;
                     const cushion = liqCushion(p, mark);
                     const liq = n(p.liquidation_price);
                     const m = markets.find((x) => x.market_index === p.market_index) ?? market;
@@ -234,8 +240,28 @@ export function PositionsTable({
                             "—"
                           )}
                         </TableCell>
-                        <TableCell hideBelow="2xl" className={cn("text-right", signClass(fund))}>
-                          {formatSigned(p.funding_paid)}
+                        <TableCell
+                          hideBelow="2xl"
+                          className={cn(
+                            "text-right",
+                            fund != null ? signClass(fund) : "text-muted-foreground"
+                          )}
+                          title={
+                            realized
+                              ? realized.partial
+                                ? "Funding since this Position opened. Prints before the journal began are not in it."
+                                : "Funding since this Position opened"
+                              : "Not in the Journal yet"
+                          }
+                        >
+                          {fund != null ? (
+                            <>
+                              {realized?.partial ? <span className="text-muted-foreground">~</span> : null}
+                              {formatSigned(fund)}
+                            </>
+                          ) : (
+                            "—"
+                          )}
                         </TableCell>
                         <TableCell
                           hideBelow="xl"

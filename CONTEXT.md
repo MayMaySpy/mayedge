@@ -333,16 +333,16 @@ A Position in one Market from flat to flat. A flip ends one Round trip and start
 _Avoid_: trade (a Lighter trade is one fill), position (that is the live thing)
 
 **Realized**:
-What a live Position's open Round trip has closed so far: the venue's PnL on its closing fills, less its fees. Funding is apart.
-_Avoid_: closed PnL, banked, the venue's per-position `realized_pnl`
+What a live Position's open Round trip has made so far: the venue's PnL on its closing fills, less its fees, plus funding received (or less funding paid). Shown even when nothing has closed.
+_Avoid_: closed PnL, banked, the venue's per-position `realized_pnl`, Net (the Journal's name for the same sum)
 
 **Excursion**:
 How far price went against a Round trip (MAE) and for it (MFE) while it was open, from its average entry, at a named bar size. A bound, not a fill. The rules are in [docs/journal-rules.md](docs/journal-rules.md#excursion).
 _Avoid_: drawdown (that is the Summary's), runup, heat
 
 **Net**:
-Realized PnL less fees, plus funding received (or less funding paid).
-_Avoid_: PnL (unqualified), equity, a limit for Auto kill
+What a Round trip made: the venue's realized PnL, less its fees, plus funding received (or less funding paid).
+_Avoid_: PnL (unqualified), equity, a limit for Auto kill, Realized (that is the live Position's)
 
 **Exposure**:
 The open Positions' notional at mark: long, short, net (long less short) and gross (both), with gross over the Portfolio margin. The Positions bar shows net; its tooltip shows the rest.

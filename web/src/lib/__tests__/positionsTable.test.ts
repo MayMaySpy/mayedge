@@ -254,7 +254,7 @@ describe("realizedFor", () => {
   it("explains the number, and says when closes before the journal are missing", () => {
     const fmt = (n: number) => n.toFixed(2);
     expect(realizedTitle(row, fmt)).toBe(
-      "Realized 8.00: closes 10.00, fees -2.00\nWith funding -0.50: Net 7.50, as the Journal counts it"
+      "Closes 10.00, fees -2.00, funding -0.50"
     );
     expect(realizedTitle({ ...row, partial: true }, fmt)).toContain(
       "Closes before the journal began are not in it"

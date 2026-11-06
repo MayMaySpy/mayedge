@@ -30,7 +30,7 @@ const LONG: Position = {
   unrealized_pnl: "10",
   leverage: 5,
   margin_mode: "cross",
-  funding_paid: "-0.5",
+  funding_paid: "-9",
   side: "long",
 };
 
@@ -43,7 +43,7 @@ const TRIP: OpenTripRealized = {
   realized: "8",
   pnl: "10",
   fees: "2",
-  funding: "-0.5",
+  funding: "1.25",
   net: "7.5",
   partial: false,
 };
@@ -56,11 +56,19 @@ function setup() {
   );
 }
 
-function realizedCell(): HTMLElement {
-  const head = screen.getByRole("columnheader", { name: "Realized" });
+function columnCell(name: RegExp): HTMLElement {
+  const head = screen.getByRole("columnheader", { name });
   const col = Array.from(head.parentElement!.children).indexOf(head);
   const row = screen.getAllByRole("row")[1]!;
   return row.children[col] as HTMLElement;
+}
+
+function realizedCell(): HTMLElement {
+  return columnCell(/^Realized$/);
+}
+
+function fundingCell(): HTMLElement {
+  return columnCell(/^Funding$/);
 }
 
 beforeEach(() => {
@@ -82,24 +90,43 @@ afterEach(() => {
 });
 
 describe("Positions Realized", () => {
-  it("shows what the open Round trip has closed, less fees", () => {
+  it("shows Realized PnL as the open Round trip's final value, and the tooltip is the breakdown", () => {
     setJournalOpen([TRIP]);
     setup();
     const cell = realizedCell();
-    expect(cell.textContent).toBe("+8.00");
+    expect(cell.textContent).toBe("+7.50");
     expect(cell.className).toContain("text-bid");
-    expect(cell.title).toContain("Net +7.50, as the Journal counts it");
+    expect(cell.title).toBe("Closes +10.00, fees -2.00, funding +1.25");
+    const funding = fundingCell();
+    expect(funding.textContent).toBe("+1.25");
+    expect(funding.title).toBe("Funding since this Position opened");
+  });
+
+  it("shows Realized PnL when nothing has closed and only funding has printed", () => {
+    setJournalOpen([{ ...TRIP, realized: "0", pnl: "0", fees: "0", funding: "-0.5", net: "-0.5" }]);
+    setup();
+    const cell = realizedCell();
+    expect(cell.textContent).toBe("-0.50");
+    expect(cell.className).toContain("text-ask");
+    expect(cell.title).toBe("Closes 0.00, fees 0.00, funding -0.50");
+    expect(fundingCell().textContent).toBe("-0.50");
   });
 
   it("shows a dash until the journal has the Position", () => {
     setJournalOpen([{ ...TRIP, side: "short" }]);
     setup();
     expect(realizedCell().textContent).toBe("—");
+    expect(fundingCell().textContent).toBe("—");
   });
 
   it("marks a Round trip older than the journal", () => {
     setJournalOpen([{ ...TRIP, partial: true }]);
     setup();
-    expect(realizedCell().textContent).toBe("~+8.00");
+    expect(realizedCell().textContent).toBe("~+7.50");
+    const funding = fundingCell();
+    expect(funding.textContent).toBe("~+1.25");
+    expect(funding.title).toBe(
+      "Funding since this Position opened. Prints before the journal began are not in it."
+    );
   });
 });

@@ -31,12 +31,14 @@ Two Round trips are not in the headline stats. They are still listed.
 
 ## On a Position
 
-A Position's **Realized** is what its open Round trip has already closed: the venue's realized PnL on the closing fills since it opened, less every fee since it opened (the opening fills' fees too). Funding is not in it, because the Positions table shows funding in its own column, so uPnL, Realized and Funding add up to the whole Position. Net (Realized plus funding) is in the tooltip, as the Journal counts it.
+A Position's **Realized** is its open Round trip's Net, not the closing PnL on its own: the venue's realized PnL on the closing fills since it opened, less every fee since it opened (the opening fills' fees too), plus funding received or less funding paid since it opened. Nothing closed yet still shows Realized, which is then only the fees and the funding. The tooltip is the breakdown: closes, fees, funding.
+
+The Positions table's **Funding** column is that same funding: every funding print on the Market from when the Position opened through the latest one. It is already inside Realized, not an extra amount. **Next** is the hour in progress and is not in Funding until it settles. The venue's per-position funding field is not shown: it lags the latest settlement.
 
 - It comes from the journal, not from the venue's per-position `realized_pnl`. The venue does not say when that field resets or whether it counts fees.
 - The desk sends `journal_open` after every sync and once at boot, and a new tab gets the last one. A sync follows a burst of fills after 10 s of quiet, and otherwise runs every 5 minutes, so Realized can lag a fill by that much.
-- It shows only when the open Round trip's market and side match the live Position. A Position the journal has not caught up with (flipped, or opened since the last sync) shows `—`.
-- An open Round trip that is partial (its first fill is older than the journal) is marked `~`, and its tooltip says closes before the journal began are not in it.
+- It shows only when the open Round trip's market and side match the live Position. A Position the journal has not caught up with (flipped, or opened since the last sync) shows `—` for Realized and for Funding.
+- An open Round trip that is partial (its first fill is older than the journal) is marked `~` on Realized and on Funding. The Realized tooltip says closes before the journal began are not in it. The Funding tooltip says the same of funding prints.
 
 ## Algo and R
 
