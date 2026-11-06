@@ -95,5 +95,13 @@ push:
   daily_at: ""
   # A fired Price alert on an Idea also pushes: "on" or "off" (the desk toast and Idea log stay).
   ideas: "on"
+  # The Position watch (docs/position-rules.md): "on" or "off".
+  positions: "on"
+  # A Position this long without a Stop, a Planner or a Trail is named in one push.
+  no_stop_after_s: 300
+  # Funding that has cost this share of a Position's R in dollars pushes once.
+  bleed_r: 0.25
+  # HH:MM UTC for the brief of every Position. Empty stays off.
+  brief_at: "07:00"
   # Answer /status from TELEGRAM_CHAT_ID (read-only: Positions, uPnL, algos, Auto kill). off to ignore.
   commands: status

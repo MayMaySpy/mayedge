@@ -229,8 +229,16 @@ A Planner drawn on the chart before it exists: entry, stop and targets, with no 
 _Avoid_: plan (unqualified, that's the algo), ghost order, bracket
 
 **R**:
-The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R. A Round trip's R is its Net divided by the risk at that stop when it opened. Only Planner Round trips have one.
+The distance from a Planner's entry to its stop, in price. Targets, risk and size are all measured in it. One stop, one R. A Round trip's R is its Net divided by the risk at that stop when it opened. Only Planner Round trips have one. A live Position's R in the Position watch is measured from its **Plan stop** instead.
 _Avoid_: risk unit (unqualified), ATR, a second "suggested" stop, RR, risk-reward (for the result)
+
+**Plan stop**:
+The stop a live Position's R is measured from in the Position watch: its open Idea's stop, else the first Stop price seen in its Round trip. A Stop moved later does not move it. The rules are in [docs/position-rules.md](docs/position-rules.md#stops-and-r).
+_Avoid_: stop (unqualified, that is the order), invalidation (that is the Idea's text)
+
+**Position watch**:
+The pushes about the operator's own Positions: no Stop, R reached, the Idea's stop closed through, crowded funding, funding bleed, and the daily brief. It never sends an order.
+_Avoid_: monitor, risk alerts, position alerts (they are not alert rows)
 
 **Breakeven**:
 A Planner stop moved to entry plus round-trip fees, so closing there loses nothing.

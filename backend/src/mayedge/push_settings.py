@@ -51,6 +51,11 @@ class PushSettings:
     commands: str = "status"
     # Whether a fired Price alert also pushes: on or off (docs/push-rules.md).
     ideas: str = "on"
+    # The Position watch (docs/position-rules.md): on or off, and its knobs.
+    positions: str = "on"
+    no_stop_after_s: float = 300
+    bleed_r: float = 0.25
+    brief_at: str = "07:00"
 
 
 def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
@@ -76,6 +81,11 @@ def push_settings_from_dict(data: dict[str, Any] | None) -> PushSettings:
         commands="off" if str(raw.get("commands") or base.commands) == "off" else "status",
         # YAML reads a bare off as False.
         ideas="off" if raw.get("ideas") in (False, "off") else "on",
+        positions="off" if raw.get("positions") in (False, "off") else "on",
+        no_stop_after_s=_f(raw.get("no_stop_after_s"), base.no_stop_after_s),
+        bleed_r=_f(raw.get("bleed_r"), base.bleed_r),
+        # An empty brief_at is off; a missing one keeps the default.
+        brief_at=_daily_at(raw["brief_at"]) if "brief_at" in raw else base.brief_at,
     )
 
 

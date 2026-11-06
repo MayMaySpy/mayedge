@@ -40,6 +40,8 @@ from mayedge.loop_watch import set_freeze_emitter, start_loop_watch
 from mayedge.loop_watch import snapshot as loop_lag_snapshot
 from mayedge.portfolio_sync import start as start_portfolio_sync
 from mayedge.portfolio_sync import stop as stop_portfolio_sync
+from mayedge.position_watch import PositionWatch, PositionWatchLoop, WatchSettings
+from mayedge.position_watch_feed import gather as gather_positions
 from mayedge.push import TelegramPusher, boot_text, freeze_text, load_push_settings
 from mayedge.tone_compute import close as close_tone_pool
 
@@ -157,6 +159,19 @@ async def lifespan(app: FastAPI):
         await warm_journal()
     except Exception:
         logger.exception("journal warm failed")
+    push_cfg = load_push_settings()
+    position_watch = PositionWatchLoop(
+        gather_positions,
+        publish,
+        PositionWatch(
+            WatchSettings(
+                no_stop_after_s=push_cfg.no_stop_after_s,
+                bleed_r=push_cfg.bleed_r,
+                brief_at=push_cfg.brief_at,
+            )
+        ),
+    )
+    position_watch.start()
     n_algos = len(desk.algo_book().get("working") or [])
     pusher.push(
         "boot",
@@ -167,6 +182,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         set_fill_listener(None)
+        await position_watch.stop()
         await stop_journal()
         set_open_emitter(None)
         await stop_portfolio_sync()

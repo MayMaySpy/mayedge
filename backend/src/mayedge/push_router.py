@@ -102,6 +102,8 @@ class PushRouter:
             self._on_freeze(msg)
         elif kind == "idea_alert":
             self._on_idea_alert(msg)
+        elif kind == "position_watch":
+            self._on_position_watch(msg)
         self.poll()
 
     def poll(self) -> None:
@@ -278,6 +280,15 @@ class PushRouter:
         text = msg.get("text")
         if isinstance(key, str) and key and isinstance(text, str) and text:
             self._out.push(key, text)
+
+    def _on_position_watch(self, msg: dict[str, Any]) -> None:
+        """docs/position-rules.md E1–E7. `positions: off` sends none."""
+        if self._cfg.positions == "off":
+            return
+        key = msg.get("key")
+        text = msg.get("text")
+        if isinstance(key, str) and key and isinstance(text, str) and text:
+            self._out.push(key, text, urgent=bool(msg.get("urgent")))
 
     def _on_freeze(self, msg: dict[str, Any]) -> None:
         try:
