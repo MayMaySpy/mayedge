@@ -522,7 +522,17 @@ export interface LiquidationSummary {
   rows: LiquidationSummaryRow[];
 }
 
-export type AlertRule = "move" | "volume" | "oi" | "liqs" | "board" | "near_liq";
+export type AlertRule =
+  | "move"
+  | "volume"
+  | "oi"
+  | "liqs"
+  | "board"
+  | "near_liq"
+  | "week_high"
+  | "week_low"
+  | "quarter_high"
+  | "quarter_low";
 
 /** One thing an alert row states. A rule that fired has a size; what the tape showed has none. */
 export interface AlertFact {
@@ -545,6 +555,8 @@ export interface AlertFact {
   z?: number;
   /** Liquidations: basis points of open interest. */
   bps?: number;
+  /** Week or quarter level: percent from that high or low. */
+  distance?: number;
   /** Board: liquid perps counted. */
   liquid?: number;
   liquidation_price?: number;

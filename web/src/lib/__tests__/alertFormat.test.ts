@@ -99,6 +99,20 @@ describe("eventLine", () => {
     expect(line.detail).toBe("2.5× hour max · -0.60% 1m (2.2×)");
   });
 
+  it("reads a week high as the level and how close the price is", () => {
+    const line = eventLine(
+      alert("w", {
+        rule: "week_high",
+        facts: [
+          { kind: "week_high", direction: "up", value: 110, unit: "px", size: 3.3, distance: 0.09 },
+          { kind: "move", direction: "up", value: 0.55, unit: "pct", window: "1m" },
+        ],
+      })
+    );
+    expect(line.label).toBe("week high 110 · 0.09% away");
+    expect(line.detail).toBe("+0.55% 1m");
+  });
+
   it("says how far past the board a market went", () => {
     const line = eventLine(alert("a", { facts: [{ ...MOVE, value: 2.5, excess: 1.5 }] }));
     expect(line.label).toBe("+2.50% 1m");

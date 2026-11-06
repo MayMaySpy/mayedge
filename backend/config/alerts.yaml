@@ -8,11 +8,11 @@ liquidity:
 spike:
   # A spike is a minute at least this many times the biggest minute of the last window_min.
   window_min: 60
-  price_x: 2
+  price_x: 4
   volume_x: 3
   oi_x: 2
-  # Floors, so a dead tape stays quiet.
-  min_move_pct: 0.25
+  # Floors, so a dead tape stays quiet. Price was raised after a week of the record.
+  min_move_pct: 0.5
   min_volume_usd: 50000
   min_oi_usd: 250000
   min_oi_pct: 0.3
@@ -34,6 +34,13 @@ board:
 held:
   # Mark within this many percent of a Position's Liquidation price.
   liq_distance_pct: 10
+
+range:
+  # Completed UTC days before today. Today is not in either window.
+  week_days: 7
+  quarter_days: 90
+  # Last trade within this many percent of that high or low.
+  near_pct: 0.3
 
 funding:
   # On the strip when the hourly rate is this many sigma from the market's own 24h median.

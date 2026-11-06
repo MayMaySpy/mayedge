@@ -230,15 +230,15 @@ class GateTest(unittest.TestCase):
 
 
 class PriceSpikeTest(unittest.TestCase):
-    def test_a_price_spike_doubles_the_hours_biggest_minute(self) -> None:
-        # The hour's biggest minute moved 0.2%. 0.35% is its biggest, and not twice it.
+    def test_a_price_spike_is_four_times_the_hours_biggest_minute(self) -> None:
+        # The hour's biggest minute moved 0.2%. 0.7% is not four times it.
         h = Harness()
         h.market()
-        self.assertEqual(h.tick(_at(100.35)), [])
+        self.assertEqual(h.tick(_at(100.7)), [])
 
         h = Harness()
         h.market()
-        events = h.tick(_at(100.5))
+        events = h.tick(_at(101.0))
         self.assertEqual(
             [(e["rule"], e["severity"], e["direction"]) for e in events],
             [
@@ -246,8 +246,8 @@ class PriceSpikeTest(unittest.TestCase):
             ],
         )
         move = _fact(events, "move")
-        self.assertAlmostEqual(move["value"], 0.5)
-        self.assertAlmostEqual(move["multiple"], 2.5, places=2)
+        self.assertAlmostEqual(move["value"], 1.0)
+        self.assertAlmostEqual(move["multiple"], 5.0, places=2)
         self.assertAlmostEqual(events[0]["size"], 1.25, places=2)
 
     def test_a_big_minute_in_a_wild_hour_is_no_spike(self) -> None:
@@ -259,8 +259,8 @@ class PriceSpikeTest(unittest.TestCase):
         # Nothing moved all hour, so anything is many times the hour's biggest. The floor decides.
         h = Harness()
         h.market(step_pct=0.0)
-        self.assertEqual(h.tick(_at(100.2)), [])
-        self.assertEqual(len(h.tick(_at(100.3), at=_T0 + 2)), 1)
+        self.assertEqual(h.tick(_at(100.4)), [])
+        self.assertEqual(len(h.tick(_at(100.5), at=_T0 + 2)), 1)
 
     def test_no_spike_without_an_hour_behind_it(self) -> None:
         h = Harness()
@@ -272,13 +272,13 @@ class PriceSpikeTest(unittest.TestCase):
     def test_the_next_spike_has_to_beat_this_one(self) -> None:
         h = Harness()
         h.market()
-        first = h.tick(_at(100.6))
+        first = h.tick(_at(101.0))
         self.assertEqual(len(first), 1)
         # Its minute closes and becomes the hour's biggest.
-        h.det.on_minute_bars(1, [Candle(int(_T0), 100.0, 100.6, 100.0, 100.6, 300.0)])
-        self.assertEqual(h.tick(_at(100.6), at=_T0 + 70), [])
-        self.assertEqual(h.tick(_at(100.6 * 1.006), at=_T0 + 140), [])
-        bigger = h.tick(_at(100.6 * 1.006 * 1.013), at=_T0 + 210)
+        h.det.on_minute_bars(1, [Candle(int(_T0), 100.0, 101.0, 100.0, 101.0, 300.0)])
+        self.assertEqual(h.tick(_at(101.0), at=_T0 + 70), [])
+        self.assertEqual(h.tick(_at(101.0 * 1.008), at=_T0 + 140), [])
+        bigger = h.tick(_at(101.0 * 1.008 * 1.033), at=_T0 + 210)
         self.assertEqual(len(bigger), 1)
         self.assertNotEqual(bigger[0]["id"], first[0]["id"])
 
@@ -297,6 +297,92 @@ class PriceSpikeTest(unittest.TestCase):
         move = _fact(past_board, "move")
         self.assertAlmostEqual(move["value"], 2.5)
         self.assertAlmostEqual(move["excess"], 1.5)
+
+
+def _daily(
+    days: int,
+    *,
+    high: float,
+    low: float,
+    now: float = _T0,
+    recent_high: float | None = None,
+) -> list[Candle]:
+    """Completed UTC days before today. The most recent 7 can carry another high."""
+    today = int(now) // 86_400 * 86_400
+    out: list[Candle] = []
+    for ago in range(days, 0, -1):
+        bar_high = recent_high if recent_high is not None and ago <= 7 else high
+        start = today - ago * 86_400
+        out.append(Candle(start, low, bar_high, low, (bar_high + low) / 2, 1.0))
+    return out
+
+
+class WeekQuarterTest(unittest.TestCase):
+    def _into(self, bars: list[Candle], *, prev: float, price: float, at: float = _T0) -> Harness:
+        h = Harness()
+        h.market()
+        h.det.seed_daily_bars(1, bars, at)
+        h.seed(1, [_snap(at - 65, last=prev, mark=prev, mid=prev)])
+        return h
+
+    def test_a_move_into_the_week_high_raises_a_row(self) -> None:
+        # 0.55% into the week high. Under 4× the hour, so the level is the row.
+        h = self._into(_daily(7, high=110.0, low=90.0), prev=109.5, price=110.1)
+        events = h.tick(_at(110.1))
+        self.assertEqual(
+            [(e["rule"], e["severity"], e["direction"]) for e in events],
+            [("week_high", NOTABLE, "up")],
+        )
+        self.assertAlmostEqual(_fact(events, "week_high")["value"], 110.0)
+        self.assertIn("week high 110", events[0]["note"])
+        self.assertNotIn("size", _fact(events, "move"))
+
+        low = self._into(_daily(7, high=110.0, low=90.0), prev=90.7, price=90.2)
+        down = low.tick(_at(90.2))
+        self.assertEqual(down[0]["rule"], "week_low")
+
+        # Pointing the other way, or short of the price floor, or outside the band.
+        away = self._into(_daily(7, high=110.0, low=90.0), prev=110.7, price=110.1)
+        self.assertEqual(away.tick(_at(110.1)), [])
+        small = self._into(_daily(7, high=110.0, low=90.0), prev=110.0, price=110.1)
+        self.assertEqual(small.tick(_at(110.1)), [])
+        far = self._into(_daily(7, high=110.0, low=90.0), prev=109.9, price=110.5)
+        self.assertEqual(far.tick(_at(110.5)), [])
+
+    def test_a_move_into_the_quarter_high_raises_a_row(self) -> None:
+        # The quarter's high is older than the week. The week high is elsewhere.
+        bars = _daily(90, high=120.0, low=80.0, recent_high=110.0)
+        h = self._into(bars, prev=119.1, price=119.8)
+        events = h.tick(_at(119.8))
+        self.assertEqual(events[0]["rule"], "quarter_high")
+        self.assertNotIn("week_high", _kinds(events))
+
+    def test_a_short_history_has_no_week_high(self) -> None:
+        h = self._into(_daily(6, high=110.0, low=90.0), prev=109.5, price=110.1)
+        self.assertEqual(h.tick(_at(110.1)), [])
+
+    def test_today_is_not_part_of_the_week(self) -> None:
+        today = int(_T0) // 86_400 * 86_400
+        bars = [*_daily(7, high=100.0, low=90.0), Candle(today, 140.0, 150.0, 140.0, 149.0, 1.0)]
+        # Today's 150 is not the week high. A print there raises nothing.
+        forming = self._into(bars, prev=148.9, price=149.7)
+        self.assertEqual(forming.tick(_at(149.7)), [])
+        # The completed week's 100 still is.
+        level = self._into(bars, prev=99.6, price=100.2)
+        events = level.tick(_at(100.2))
+        self.assertEqual(events[0]["rule"], "week_high")
+        self.assertAlmostEqual(_fact(events, "week_high")["value"], 100.0)
+
+    def test_sitting_on_a_week_high_is_one_row(self) -> None:
+        h = self._into(_daily(7, high=110.0, low=90.0), prev=109.5, price=110.1)
+        first = h.tick(_at(110.1))
+        self.assertEqual(len(first), 1)
+        self.assertEqual(h.tick(_at(110.1), at=_T0 + 30), [])
+        self.assertEqual(h.tick(_at(110.1), at=_T0 + 200), [])
+        h.tick(_at(109.5), at=_T0 + 210)
+        again = h.tick(_at(110.1), at=_T0 + 390)
+        self.assertEqual(len(again), 1)
+        self.assertNotEqual(again[0]["id"], first[0]["id"])
 
 
 class VolumeSpikeTest(unittest.TestCase):
@@ -428,12 +514,12 @@ class HeldTest(unittest.TestCase):
     def test_a_row_on_a_held_market_is_urgent(self) -> None:
         bystander = Harness()
         bystander.market()
-        self.assertEqual(bystander.tick(_at(99.5))[0]["severity"], NOTABLE)
+        self.assertEqual(bystander.tick(_at(99.0))[0]["severity"], NOTABLE)
 
         h = Harness()
         h.held[1] = Held(side="long")
         h.market()
-        events = h.tick(_at(99.5))
+        events = h.tick(_at(99.0))
         self.assertEqual(
             [(e["severity"], e["held"], e["direction"]) for e in events],
             [
@@ -444,7 +530,7 @@ class HeldTest(unittest.TestCase):
         resting = Harness()
         resting.held[1] = Held()
         resting.market()
-        self.assertEqual(resting.tick(_at(99.5))[0]["held"], "order")
+        self.assertEqual(resting.tick(_at(99.0))[0]["held"], "order")
 
     def test_mark_near_the_liquidation_price(self) -> None:
         h = Harness()
@@ -553,12 +639,12 @@ class TapeTest(unittest.TestCase):
         h = Harness()
         h.market()
         h.det.on_minute_bars(1, [_forming(800.0)])
-        events = h.tick(_at(100.5))
+        events = h.tick(_at(101.0))
         self.assertEqual(_kinds(events), ["move", "volume"])
         self.assertEqual((events[0]["rule"], events[0]["severity"]), ("move", NOTABLE))
         self.assertNotIn("size", _fact(events, "volume"))
         self.assertEqual(
-            events[0]["note"], "+0.50% 1m · 2.5× hour max · Vol $80k 1m · 2.7× hour max"
+            events[0]["note"], "+1.00% 1m · 5.0× hour max · Vol $80k 1m · 2.7× hour max"
         )
 
         # Volume spiked and price did not. The row still says what price did.
@@ -573,18 +659,18 @@ class TapeTest(unittest.TestCase):
     def test_a_row_says_when_price_is_at_the_days_high(self) -> None:
         h = Harness()
         h.market()
-        events = h.tick(_at(100.5, daily_price_high=100.5))
+        events = h.tick(_at(101.0, daily_price_high=101.0))
         self.assertEqual(_kinds(events), ["move", "day_high"])
 
         low = Harness()
         low.market()
-        self.assertEqual(_kinds(low.tick(_at(99.5, daily_price_low=99.51))), ["move", "day_low"])
+        self.assertEqual(_kinds(low.tick(_at(99.0, daily_price_low=99.0))), ["move", "day_low"])
 
     def test_a_row_says_when_funding_is_extreme(self) -> None:
         h = Harness()
         h.market()
         h.det.seed_levels("funding", {1: [(_MINUTE - 40 + i, 0.001) for i in range(40)]})
-        events = h.tick(_at(100.5, funding_rate=0.012))
+        events = h.tick(_at(101.0, funding_rate=0.012))
         self.assertEqual(_kinds(events), ["move", "funding"])
         self.assertAlmostEqual(_fact(events, "funding")["z"], 5.5)
 

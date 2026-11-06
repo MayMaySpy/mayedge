@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 _TONE_BACKFILL = 500
 _ALERT_MINUTE_BARS = 240
+# Quarter window plus today and one spare, so a missing day still fills 90.
+_ALERT_DAY_SLACK = 2
 _SCAN_BROADCAST_S = 5.0
 
 
@@ -239,17 +241,29 @@ class GatewayBoards:
             reverse=True,
         )
         book = self._alerts.minute_book()
+        today = int(time.time()) // 86_400
+        day_count = self._alerts.settings.range_quarter_days + _ALERT_DAY_SLACK
         for meta in perps:
-            if book.seeded(meta.market_index):
+            if not book.seeded(meta.market_index):
+                try:
+                    candles = await self.get_candles(
+                        meta.market_index, "1m", _ALERT_MINUTE_BARS, lane="background"
+                    )
+                except Exception:
+                    logger.exception("alert minute seed failed market=%s", meta.market_index)
+                else:
+                    self._alerts.seed_minute_bars(meta.market_index, candles)
+            if self._alerts.daily_current(meta.market_index, today):
                 continue
             try:
-                candles = await self.get_candles(
-                    meta.market_index, "1m", _ALERT_MINUTE_BARS, lane="background"
+                daily = await self.get_candles(
+                    meta.market_index, "1d", day_count, lane="background"
                 )
             except Exception:
-                logger.exception("alert minute seed failed market=%s", meta.market_index)
+                logger.exception("alert day seed failed market=%s", meta.market_index)
                 continue
-            self._alerts.seed_minute_bars(meta.market_index, candles)
+            if daily:
+                self._alerts.seed_daily_bars(meta.market_index, daily, time.time())
 
     async def _breathe(self) -> None:
         """Let a due timer run before the next market.

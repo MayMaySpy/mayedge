@@ -6,7 +6,7 @@ Knobs are keys in `backend/config/alerts.yaml`. "code" means the number is not a
 
 An alert is a fact, shown fast, for the operator to act on by feel. No row says what it means ([ADR 0013](adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)).
 
-Last checked against the code: 2026-10-18.
+Last checked against the code: 2026-10-23.
 
 ## Gate
 
@@ -23,12 +23,22 @@ A **Spike** is a minute at least N times the biggest minute of the last hour ([A
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
 | K1 | The hour is the last 60 closed one-minute bars for price and volume, and the last 60 one-minute samples for open interest. The minute being judged is never part of it. | `spike.window_min` | `test_the_minute_being_judged_is_not_in_its_own_hour` |
-| K2 | Price spikes when the last trade is at least 0.25% from where it was 1m ago, and that move is at least 2× the biggest close-to-close minute of the hour. | `spike.price_x`, `spike.min_move_pct` | `test_a_price_spike_doubles_the_hours_biggest_minute`, `test_a_big_minute_in_a_wild_hour_is_no_spike` |
+| K2 | Price spikes when the last trade is at least 0.5% from where it was 1m ago, and that move is at least 4× the biggest close-to-close minute of the hour. | `spike.price_x`, `spike.min_move_pct` | `test_a_price_spike_is_four_times_the_hours_biggest_minute`, `test_a_big_minute_in_a_wild_hour_is_no_spike` |
 | K3 | Volume spikes when the forming minute has traded at least $50k and at least 3× the biggest minute of the hour. | `spike.volume_x`, `spike.min_volume_usd` | `test_a_volume_spike_triples_the_hours_biggest_minute` |
 | K4 | Open interest spikes when it has changed over the last 1m by at least $250k and 0.3% of itself, and at least 2× the biggest one-minute change of the hour. | `spike.oi_x`, `spike.min_oi_usd`, `spike.min_oi_pct` | `test_an_oi_spike_doubles_the_hours_biggest_change` |
 | K5 | While a **Broad move** is on, the price of a market going the same way is judged on its **Excess move**. A market that moves less than the board does not spike. | code | `test_a_market_must_beat_the_board` |
 | K6 | Price and volume need a full hour of bars. The desk loads 240 per perp at boot. Open interest loads its hour from the desk database. | `baseline.bars_1m` | `test_no_spike_without_an_hour_behind_it` |
 | K7 | A spike needs no re-arm of its own. Once its minute closes it is the hour's biggest, and the next one has to beat it. | | `test_the_next_spike_has_to_beat_this_one` |
+
+## Week and quarter
+
+A **Week high**, **Week low**, **Quarter high** or **Quarter low** is a level the price runs into. The day being lived is not part of the level ([ADR 0022](adr/0022-a-week-high-excludes-today.md)).
+
+| | Rule | Knob | Pinned by |
+|---|---|---|---|
+| W1 | The week is the 7 completed UTC days before today. The quarter is the 90. Today is in neither. A window with fewer daily bars has no level. | `range.week_days`, `range.quarter_days` | `test_a_short_history_has_no_week_high`, `test_today_is_not_part_of_the_week` |
+| W2 | The price is against a level when the last trade is within 0.3% of it, on either side, and the 1m move points at it and is at least the price floor. A minute that points the other way is not against it. | `range.near_pct`, `spike.min_move_pct` | `test_a_move_into_the_week_high_raises_a_row`, `test_a_move_into_the_quarter_high_raises_a_row` |
+| W3 | Each level is its own rule, on every liquid perp. While the price stays against it, it stays one row. It can raise again after 3 minutes away, and sooner when it gets half again as close. It is Notable unless the market is Held. | `rows.quiet_s` | `test_sitting_on_a_week_high_is_one_row` |
 
 ## Liquidations
 
@@ -118,7 +128,7 @@ Sigma is the larger of 1.4826 × MAD and the 90th-percentile deviation over 1.64
 
 ## Open
 
-1. **The multiples are from one day.** (K2 to K4) Volume and price were counted on 8.3 hours of 11 Oct 2026, a Sunday, and open interest on three days: about 220 spikes a day across 43 liquid perps. Read S5 after a week and move them.
+1. **Volume and open interest multiples are from one day.** (K3, K4) They were counted on 8.3 hours of 11 Oct 2026, a Sunday, and open interest on three days. Price was moved on the 7 days to 23 Oct 2026: at 2× the next 15 minutes went further against the spike, and at 4× with a 0.5% floor it goes with it.
 2. **Price is judged on a rolling minute against bar-to-bar minutes.** (K2) A move that straddles two bars is seen whole now and in halves in the hour behind it, so price is a little easier to spike than the wording says.
 3. **A Broad move knows no asset class.** (B2) Ten equity perps moving at the US open are a Broad move, the same as ten crypto perps.
 4. **Volume has no side.** (K3) The tape's buy and sell split is not used.

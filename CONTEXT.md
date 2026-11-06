@@ -46,6 +46,22 @@ _Avoid_: outlier, sigma, surge, unusual
 A Market's 24h high less its 24h low, in percent of the low, as the venue prints them.
 _Avoid_: ATR, volatility, sigma
 
+**Week high**:
+The highest trade in the 7 completed UTC days before today. Today is not in it.
+_Avoid_: 7d high, weekly high (if it includes today), swing high
+
+**Week low**:
+The lowest trade in those same 7 days.
+_Avoid_: 7d low, swing low
+
+**Quarter high**:
+The highest trade in the 90 completed UTC days before today. Today is not in it.
+_Avoid_: calendar quarter, all-time high, ATH
+
+**Quarter low**:
+The lowest trade in those same 90 days.
+_Avoid_: calendar quarter, all-time low
+
 **Broad move**:
 The median 5m move of the liquid perps going the same way, when at least ten are and they are most of the perps that moved. One row, named Market.
 _Avoid_: Relative Strength, BTC, the market (unqualified), the median of all perps

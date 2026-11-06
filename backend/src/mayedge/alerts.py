@@ -33,7 +33,7 @@ from mayedge.alert_settings import (
     resolve_alerts_config_path,
     thresholds_from_dict,
 )
-from mayedge.alert_stats import HourBase, LevelBook, MinuteBook
+from mayedge.alert_stats import HourBase, LevelBook, MinuteBook, completed_extremes
 from mayedge.lighter.models import Candle, MarketMeta, to_float
 
 logger = logging.getLogger(__name__)
@@ -139,6 +139,8 @@ class AlertDetector:
             log_retention_days=self._thr.log_retention_days,
         )
         self._symbols: dict[int, str] = {}
+        self._daily: dict[int, list[Candle]] = {}
+        self._daily_day: dict[int, int] = {}
         self._broad_cache: tuple[float, Broad | None] | None = None
 
     @property
@@ -188,6 +190,15 @@ class AlertDetector:
     def seed_minute_bars(self, market_index: int, bars: list[Candle]) -> None:
         self._minute.seed(market_index, bars)
         self._measure(market_index, time.time())
+
+    def daily_current(self, market_index: int, day: int) -> bool:
+        """True once this UTC day has seeded the week and quarter levels."""
+        return self._daily_day.get(market_index) == day
+
+    def seed_daily_bars(self, market_index: int, bars: list[Candle], now: float) -> None:
+        """W1. Daily bars the week and quarter are read from. Today is dropped at read time."""
+        self._daily[market_index] = list(bars)
+        self._daily_day[market_index] = int(now) // 86_400
 
     def seed_levels(self, name: str, by_market: Mapping[int, Iterable[tuple[int, float]]]) -> None:
         """K6, F3: stored minutes of funding or open interest, from before this run."""
@@ -416,12 +427,14 @@ class AlertDetector:
         # G2, G3.
         if held is not None or self._liquidity_ok(snap):
             hour = self._minute.hour(market_index, now=now, window_min=self._thr.spike_window_min)
+            move = self._move_fact(series, snap, hour, now)
             for fact in (
-                self._move_fact(series, snap, hour, now),
+                move,
                 self._volume_fact(hour),
                 self._oi_fact(market_index, series, snap, now),
                 self._liq_fact(market_index, snap, now),
                 self._near_liq_fact(snap, held),
+                *self._range_facts(market_index, snap, move, now),
             ):
                 if fact is not None:
                     facts.append(fact)
@@ -470,6 +483,51 @@ class AlertDetector:
         threshold = max(self._thr.spike_price_x * hour.max_move_pct, self._thr.spike_min_move_pct)
         if abs(judged) >= threshold:
             fact.size = abs(judged) / threshold
+        return fact
+
+    def _range_facts(
+        self, market_index: int, snap: MarketSnapshot, move: Fact | None, now: float
+    ) -> list[Fact]:
+        """W1, W2. Quarter before week, so a shared price leads with the longer level."""
+        bars = self._daily.get(market_index)
+        if not bars or move is None:
+            return []
+        out: list[Fact] = []
+        windows = (
+            (self._thr.range_quarter_days, "quarter_high", "quarter_low"),
+            (self._thr.range_week_days, "week_high", "week_low"),
+        )
+        for days, high_kind, low_kind in windows:
+            extremes = completed_extremes(bars, now=now, days=days)
+            if extremes is None:
+                continue
+            high, low = extremes
+            for level, kind, direction in (
+                (high, high_kind, "up"),
+                (low, low_kind, "down"),
+            ):
+                fact = self._against_level(snap.last, move.value, level, kind, direction)
+                if fact is not None:
+                    out.append(fact)
+        return out
+
+    def _against_level(
+        self, last: float, move_pct: float, level: float, kind: str, direction: str
+    ) -> Fact | None:
+        """W2. Within the band, and the minute points at the level by at least the price floor."""
+        if level <= 0 or last <= 0:
+            return None
+        floor = self._thr.spike_min_move_pct
+        if direction == "up" and move_pct < floor:
+            return None
+        if direction == "down" and move_pct > -floor:
+            return None
+        distance = abs(last - level) / level * 100.0
+        near = self._thr.range_near_pct
+        if distance > near:
+            return None
+        fact = Fact(kind, direction, level, "px", size=near / max(distance, 0.01))
+        fact.detail["distance"] = distance
         return fact
 
     def _volume_fact(self, hour: HourBase | None) -> Fact | None:

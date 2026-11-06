@@ -42,7 +42,8 @@ One panel, three modes — not extra mosaic tiles.
 
 An Alert states a fact and leaves the call to you ([ADR 0013](docs/adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)). Kinds:
 
-- **Spike** in price, volume or open interest: a minute at least N times the hour's biggest minute ([ADR 0014](docs/adr/0014-a-spike-is-a-multiple-of-the-hours-biggest-minute.md)).
+- **Spike** in price, volume or open interest: a minute at least N times the hour's biggest minute ([ADR 0014](docs/adr/0014-a-spike-is-a-multiple-of-the-hours-biggest-minute.md)). Price is 4× that minute and at least 0.5%.
+- **Week high**, **Week low**, **Quarter high**, **Quarter low**: a minute of at least that 0.5% running into the high or low of the 7 or 90 completed UTC days before today ([ADR 0022](docs/adr/0022-a-week-high-excludes-today.md)).
 - **Liquidations** sized against open interest.
 - **Board** — a **Broad move**; while one is on, other markets are judged on their **Excess move**.
 - **Near liquidation** on a Position.

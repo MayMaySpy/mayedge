@@ -14,6 +14,15 @@ URGENT = 3
 SPIKE_KINDS = frozenset({"move", "volume", "oi"})
 # R4: states that go on firing once they start.
 STATE_KINDS = frozenset({"liqs", "board", "near_liq"})
+# W3: a level the price is against. One row while it stays, not a toast by itself.
+RANGE_KINDS = frozenset({"week_high", "week_low", "quarter_high", "quarter_low"})
+_QUIET_KINDS = STATE_KINDS | RANGE_KINDS
+_RANGE_NAME = {
+    "week_high": "week high",
+    "week_low": "week low",
+    "quarter_high": "quarter high",
+    "quarter_low": "quarter low",
+}
 # R4: a state that keeps firing raises another row at half again its largest size.
 _ESCALATE = 1.5
 # How many times the hour's biggest a minute can be said to be.
@@ -116,6 +125,11 @@ def _usd(v: float) -> str:
     return f"${a:.0f}"
 
 
+def _px(value: float) -> str:
+    text = f"{value:.8f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def _hour(fact: Fact) -> str:
     multiple = fact.detail.get("multiple")
     return "" if multiple is None else f" · {multiple:.1f}× hour max"
@@ -143,6 +157,12 @@ def describe(fact: Fact) -> str:
         return f"Board {v:+.2f}% · {fact.window} {fact.direction}"
     if fact.kind == "near_liq":
         return f"{v:.1f}% from liquidation"
+    if fact.kind in _RANGE_NAME:
+        away = fact.detail.get("distance")
+        text = f"{_RANGE_NAME[fact.kind]} {_px(fact.value)}"
+        if away is not None:
+            text += f" · {away:.2f}% away"
+        return text
     if fact.kind == "day_high":
         return "day high"
     if fact.kind == "day_low":
@@ -256,7 +276,7 @@ class RowBook:
 
     def _is_news(self, market_index: int, fact: Fact, row: _Row | None, now: float) -> bool:
         """K7 for a spike: always. R4 for a state: when it starts, and when it grows by half."""
-        if fact.kind not in STATE_KINDS:
+        if fact.kind not in _QUIET_KINDS:
             return True
         key = (market_index, fact.kind)
         size = fact.size or 0.0

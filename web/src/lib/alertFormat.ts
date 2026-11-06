@@ -10,10 +10,24 @@ const RULE_NAME: Record<string, string> = {
   liqs: "Liquidations",
   board: "Board move",
   near_liq: "Near liquidation",
+  week_high: "Week high",
+  week_low: "Week low",
+  quarter_high: "Quarter high",
+  quarter_low: "Quarter low",
 };
 
 export function ruleName(rule: string): string {
   return RULE_NAME[rule] ?? rule;
+}
+
+function priceText(v: number): string {
+  const text = v.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+  return text || "0";
+}
+
+function rangeText(name: string, f: AlertFact): string {
+  const away = f.distance == null ? "" : ` · ${f.distance.toFixed(2)}% away`;
+  return `${name} ${priceText(f.value)}${away}`;
 }
 
 function signed(v: number, digits: number): string {
@@ -36,6 +50,14 @@ export function headlineText(f: AlertFact): string {
       return `Vol ${formatUsdCompact(f.value) || "$0"} ${f.window ?? ""}`.trim();
     case "oi":
       return `OI ${signed(f.value, 2)}% ${f.window ?? ""}`.trim();
+    case "week_high":
+      return rangeText("week high", f);
+    case "week_low":
+      return rangeText("week low", f);
+    case "quarter_high":
+      return rangeText("quarter high", f);
+    case "quarter_low":
+      return rangeText("quarter low", f);
     case "day_high":
       return "day high";
     case "day_low":

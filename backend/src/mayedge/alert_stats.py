@@ -1,4 +1,4 @@
-"""Rolling baselines: the hour a spike is judged against, and the day a level is judged against."""
+"""Rolling baselines: the hour a spike is judged against, and the days a level is judged against."""
 
 from __future__ import annotations
 
@@ -8,6 +8,22 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from mayedge.lighter.models import Candle
+
+_DAY_S = 86_400
+
+
+def completed_extremes(
+    bars: Iterable[Candle], *, now: float, days: int
+) -> tuple[float, float] | None:
+    """W1. High and low of the completed UTC days before today. Today is not in it."""
+    if days <= 0:
+        return None
+    today = int(now) // _DAY_S * _DAY_S
+    start = today - days * _DAY_S
+    chosen = [bar for bar in bars if start <= bar.time < today and bar.high > 0 and bar.low > 0]
+    if len(chosen) < days:
+        return None
+    return max(bar.high for bar in chosen), min(bar.low for bar in chosen)
 
 
 def _median(values: list[float]) -> float:
