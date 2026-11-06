@@ -435,11 +435,23 @@ class RouterTests(unittest.TestCase):
                     {
                         "id": "h1",
                         "symbol": "ETH",
-                        "rule": "price_spike",
+                        "rule": "move",
                         "severity": 2,
                         "held": "position",
                         "note": "ignored",
-                        "facts": [{"kind": "move", "multiple": 3.1, "value": 0.8}],
+                        "facts": [{"kind": "move", "multiple": 3.1, "value": 0.8, "size": 1.2}],
+                    },
+                    {
+                        "id": "h2",
+                        "symbol": "LIT",
+                        "rule": "volume",
+                        "severity": 3,
+                        "held": "long",
+                        "note": "Vol $228k 1m · 8.3× hour max",
+                        "facts": [
+                            {"kind": "volume", "size": 2.7, "multiple": 8.3, "value": 228000},
+                            {"kind": "move", "multiple": 0.6, "value": 0.2},
+                        ],
                     },
                     {
                         "id": "o1",
@@ -464,6 +476,11 @@ class RouterTests(unittest.TestCase):
                 (
                     "alert:h1",
                     "ETH spike: price 3.1× the hour's biggest minute, +0.8% · held",
+                    False,
+                ),
+                (
+                    "alert:h2",
+                    "LIT: Vol $228k 1m · 8.3× hour max · held",
                     False,
                 ),
             ],
@@ -566,6 +583,38 @@ class RouterTests(unittest.TestCase):
             ),
         )
         self.assertEqual(sink.rows[1][1], "Auto kill: flattened, 0 Positions open")
+
+    def test_boot_kill_already_settled_stays_quiet(self) -> None:
+        router, sink, _clock = self._router()
+        settled = {
+            "type": "auto_kill",
+            "fired_at": 7,
+            "fired_reason": "loss",
+            "fired_upnl": -812,
+            "loss_usd": 800,
+            "last_kill_status": "killed",
+        }
+        router.on_message(settled)
+        router.on_message({"type": "account", "positions": []})
+        self.assertEqual(sink.rows, [])
+        router.on_message({**settled, "last_kill_status": "partial"})
+        router.on_message({"type": "account", "positions": [{"symbol": "ETH", "size": "-2"}]})
+        self.assertEqual(sink.rows, [])
+        router.on_message({**settled, "fired_at": 8, "last_kill_status": "killed"})
+        router.on_message({"type": "account", "positions": []})
+        self.assertEqual(sink.rows[0][0], "autokill:8")
+        self.assertEqual(sink.rows[1][1], "Auto kill: flattened, 0 Positions open")
+
+    def test_restored_planner_history_is_only_a_seed(self) -> None:
+        router, sink, _clock = self._router()
+        done = _planner(
+            status="done",
+            fills=[_fill(1, "1.5", "2430"), _fill(3, "0.5", "2510")],
+            entry_filled="1.5",
+        )
+        router.on_message(_algo(done))
+        router.on_message(_algo(done))
+        self.assertEqual(sink.rows, [])
 
     def test_first_algo_snapshot_pushes_nothing(self) -> None:
         router, sink, _clock = self._router()

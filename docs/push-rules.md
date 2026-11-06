@@ -10,16 +10,16 @@ A push never blocks or fails a trading path. `push()` returns immediately and do
 
 ## Events
 
-The first algo snapshot after boot only seeds the diff. A restart does not replay fills that were already on the book.
+Restore holds the algo book until every family has loaded. That snapshot only seeds the diff, so a restart does not replay a fill or a done algo already on the book. A change after that snapshot still pushes.
 
 | Event | When | Text | Key | Urgent |
 |---|---|---|---|---|
 | Near liquidation | an alert row whose rule is `near_liq`, on every `alerts` mode except `off` | `🔴 ETH near liquidation — mark 2,412.5, liq 2,301 (4.6%)` | `alert:{id}` | yes |
-| Held-market alert | `alerts` is `held` or `all`, and the row names a Held market. A price spike uses the move fact; anything else uses the row note. | `ETH spike: price 3.1× the hour's biggest minute, +0.8% · held` | `alert:{id}` | no |
+| Held-market alert | `alerts` is `held` or `all`, and the row names a Held market. A row whose rule is the price spike uses the move fact. Anything else, including a move that did not spike, uses the row note. | `ETH spike: price 3.1× the hour's biggest minute, +0.8% · held` | `alert:{id}` | no |
 | Other alert | `alerts: all` sends the note. `alerts: urgent` sends a row at severity 3 or above. `alerts: held` sends neither. `off` sends nothing. | the row's note | `alert:{id}` | no |
 | Auto kill fired | `fired_at` changes after the boot seed | `⛔ Auto kill fired: uPnL −$812 crossed the −$800 floor. Stopping algos, cancelling, flattening.` A profit cross names the target instead of the floor. | `autokill:{fired_at}` | yes |
-| Auto kill flattened | the kill status is `killed` and the latest account snapshot has no open Position | `Auto kill: flattened, 0 Positions open` | `autokill:{fired_at}:result` | yes |
-| Auto kill could not flatten | the kill status is `partial` | `⚠️ Auto kill could not flatten after 3 tries — 1 Position open: ETH −2.0` | `autokill:{fired_at}:result` | yes |
+| Auto kill flattened | the kill status becomes `killed` after the boot seed, and the latest account snapshot has no open Position. A status already `killed` at boot sends nothing. | `Auto kill: flattened, 0 Positions open` | `autokill:{fired_at}:result` | yes |
+| Auto kill could not flatten | the kill status becomes `partial` after the boot seed. A status already `partial` at boot sends nothing. | `⚠️ Auto kill could not flatten after 3 tries — 1 Position open: ETH −2.0` | `autokill:{fired_at}:result` | yes |
 | Algo error | an algo's status moves to `error`. Sent for every family, on both `errors` and `lifecycle`. | `Planner ETH stopped with an error: book rejected` | `algo:{id}:error` | no |
 | Planner entry | `algos: lifecycle`, and the entry fill count rose | `Planner ETH long: entry filled 1.5 @ 2,430 · stop 2,390 · risk $60` | `algo:{id}:entry` | no |
 | Planner stop | the stop fill count rose | `Planner ETH: stop filled @ 2,300` | `algo:{id}:stop` | no |

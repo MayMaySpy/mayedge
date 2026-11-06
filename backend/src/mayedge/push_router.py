@@ -217,6 +217,8 @@ class PushRouter:
             self._kill_seeded = True
             self._kill_fired_at = fired_at
             self._kill_status = status_s
+            # Already settled before this process. Empty positions at boot are not a new flatten.
+            self._kill_announced = status_s in {"killed", "partial"}
             return
         if fired_at and fired_at != self._kill_fired_at:
             self._kill_fired_at = fired_at

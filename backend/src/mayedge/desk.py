@@ -28,6 +28,8 @@ from mayedge.lighter.orders import order_service
 logger = logging.getLogger(__name__)
 
 _broadcast: Callable[[dict[str, Any]], None] | None = None
+# Restore publishes once, after every book has loaded. An earlier book is not the push seed.
+_restoring = False
 
 
 def _created_at(snap: dict[str, Any]) -> int:
@@ -81,8 +83,9 @@ def execution() -> ChaseExecution:
 
 
 def _publish_algo_book(_payload: dict[str, Any]) -> None:
-    if _broadcast:
-        _broadcast(algo_book())
+    if _restoring or _broadcast is None:
+        return
+    _broadcast(algo_book())
 
 
 chase_book = ChaseBook(
@@ -257,6 +260,11 @@ async def stop() -> None:
 
 
 async def restore() -> None:
-    for book in books:
-        await book.restore()
+    global _restoring
+    _restoring = True
+    try:
+        for book in books:
+            await book.restore()
+    finally:
+        _restoring = False
     _publish_algo_book({})

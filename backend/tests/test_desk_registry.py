@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from mayedge import desk
@@ -101,6 +102,39 @@ class DeskRegistryAsyncTests(unittest.IsolatedAsyncioTestCase):
             await desk.stop_algo("CH-0001")
         chase.stop.assert_awaited_once_with("CH-0001")
         twap.stop.assert_awaited_once_with("CH-0001")
+
+    async def test_restore_publishes_once_after_every_book(self) -> None:
+        broadcasts: list[dict[str, Any]] = []
+        chase = MagicMock()
+        twap = MagicMock()
+
+        async def chase_restore() -> None:
+            desk._publish_algo_book({})
+
+        async def twap_restore() -> None:
+            desk._publish_algo_book({})
+
+        chase.restore = chase_restore
+        twap.restore = twap_restore
+        chase.to_dict.return_value = {
+            "working": [],
+            "history": [{"algo_id": "CH-0001", "created_at": 1, "status": "done"}],
+        }
+        twap.to_dict.return_value = {
+            "working": [],
+            "history": [{"algo_id": "TW-0001", "created_at": 2, "status": "done"}],
+        }
+        with (
+            patch.object(desk, "books", (chase, twap)),
+            patch.object(desk, "_broadcast", broadcasts.append),
+        ):
+            await desk.restore()
+        self.assertEqual(len(broadcasts), 1)
+        self.assertEqual(
+            [row["algo_id"] for row in broadcasts[0]["history"]],
+            ["TW-0001", "CH-0001"],
+        )
+        self.assertFalse(desk._restoring)
 
     async def test_pause_for_market_iterates_all_books(self) -> None:
         chase = MagicMock()

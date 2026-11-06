@@ -80,14 +80,20 @@ def _alert_text(event: dict[str, Any], mode: str) -> tuple[str | None, bool]:
     symbol = str(event.get("symbol") or "")
     note = str(event.get("note") or "")
     if held:
-        move = next((f for f in facts if f.get("kind") == "move" and f.get("multiple")), None)
-        if move is not None:
+        move = next(
+            (f for f in facts if f.get("kind") == "move" and f.get("size") is not None), None
+        )
+        # The price line is the spike. A 1m print that did not spike stays in the note.
+        if rule == "move" and move is not None and move.get("multiple") is not None:
             return (
                 f"{symbol} spike: price {float(move['multiple']):.1f}× the hour's biggest minute, "
                 f"{float(move.get('value') or 0):+.1f}% · held",
                 False,
             )
-        return f"{symbol}: {note} · held", False
+        if note:
+            return f"{symbol}: {note} · held", False
+        text = f"{symbol} {rule}".strip()
+        return (f"{text} · held" if text else None), False
     text = note or f"{symbol} {rule}".strip()
     return (text or None), False
 
