@@ -14,6 +14,7 @@ from typing import Any
 
 import lighter
 
+from mayedge.alert_rows import order_away_pct
 from mayedge.alerts import AlertDetector, Held
 from mayedge.funding_backfill import backfill_funding, backfill_funding_days
 from mayedge.lighter.budget import budget
@@ -119,12 +120,22 @@ class GatewayBoards:
             }
 
     def _held_markets(self) -> dict[int, Held]:
-        """Markets with a Position or a working order, for the alert rules."""
+        """H1. Markets with a Position, or a working order near filling, for the alert rules."""
         from mayedge.lighter.account import account_service
 
+        near = self._alerts.settings.held_order_near_pct
         held: dict[int, Held] = {}
         for order in account_service.list_open_orders():
-            held.setdefault(order.market_index, Held())
+            meta = self._markets.get(order.market_index)
+            away = order_away_pct(
+                side=order.side,
+                price=to_float(order.price),
+                trigger=to_float(order.trigger_price),
+                last=meta.last_trade_price if meta else None,
+                mark=meta.mark_price if meta else None,
+            )
+            if away is None or away <= near:
+                held.setdefault(order.market_index, Held())
         for pos in account_service.cached_summary().positions:
             if to_float(pos.size) == 0:
                 continue

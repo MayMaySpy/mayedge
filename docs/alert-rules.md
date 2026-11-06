@@ -6,7 +6,7 @@ Knobs are keys in `backend/config/alerts.yaml`. "code" means the number is not a
 
 An alert is a fact, shown fast, for the operator to act on by feel. No row says what it means ([ADR 0013](adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)).
 
-Last checked against the code: 2026-10-23.
+Last checked against the code: 2026-11-06.
 
 ## Gate
 
@@ -24,8 +24,8 @@ A **Spike** is a minute at least N times the biggest minute of the last hour ([A
 |---|---|---|---|
 | K1 | The hour is the last 60 closed one-minute bars for price and volume, and the last 60 one-minute samples for open interest. The minute being judged is never part of it. | `spike.window_min` | `test_the_minute_being_judged_is_not_in_its_own_hour` |
 | K2 | Price spikes when the last trade is at least 0.5% from where it was 1m ago, and that move is at least 4× the biggest close-to-close minute of the hour. | `spike.price_x`, `spike.min_move_pct` | `test_a_price_spike_is_four_times_the_hours_biggest_minute`, `test_a_big_minute_in_a_wild_hour_is_no_spike` |
-| K3 | Volume spikes when the forming minute has traded at least $50k and at least 3× the biggest minute of the hour. | `spike.volume_x`, `spike.min_volume_usd` | `test_a_volume_spike_triples_the_hours_biggest_minute` |
-| K4 | Open interest spikes when it has changed over the last 1m by at least $250k and 0.3% of itself, and at least 2× the biggest one-minute change of the hour. | `spike.oi_x`, `spike.min_oi_usd`, `spike.min_oi_pct` | `test_an_oi_spike_doubles_the_hours_biggest_change` |
+| K3 | Volume spikes when the forming minute has traded at least $250k and at least 3× the biggest minute of the hour. | `spike.volume_x`, `spike.min_volume_usd` | `test_a_volume_spike_triples_the_hours_biggest_minute` |
+| K4 | Open interest spikes when it has changed over the last 1m by at least $250k and 0.3% of itself, and at least 3× the biggest one-minute change of the hour. | `spike.oi_x`, `spike.min_oi_usd`, `spike.min_oi_pct` | `test_an_oi_spike_triples_the_hours_biggest_change` |
 | K5 | While a **Broad move** is on, the price of a market going the same way is judged on its **Excess move**. A market that moves less than the board does not spike. | code | `test_a_market_must_beat_the_board` |
 | K6 | Price and volume need a full hour of bars. The desk loads 240 per perp at boot. Open interest loads its hour from the desk database. | `baseline.bars_1m` | `test_no_spike_without_an_hour_behind_it` |
 | K7 | A spike needs no re-arm of its own. Once its minute closes it is the hour's biggest, and the next one has to beat it. | | `test_the_next_spike_has_to_beat_this_one` |
@@ -53,13 +53,13 @@ A **Week high**, **Week low**, **Quarter high** or **Quarter low** is a level th
 |---|---|---|---|
 | B1 | A mover is a liquid perp beyond 0.3% over 5m. | `board.move_pct` | |
 | B2 | A **Broad move** is on when at least 10 perps are movers and at least 80% of the movers go the same way. Its size is the median 5m move of that side. | `board.min_movers`, `board.agree` | `test_a_board_move_is_counted_among_the_movers`, `test_a_split_board_is_no_broad_move` |
-| B3 | Board fires when the Broad move is at least 0.5%. It is one row, named Market. Opening it opens BTC. | `board.median_pct` | `test_a_board_move_is_one_row` |
+| B3 | Board fires when the Broad move is at least 0.8%. It is one row, named Market. Opening it opens BTC. | `board.median_pct` | `test_a_board_move_is_one_row` |
 
 ## Held
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| H1 | A **Held market** has a **Position** or a working order on it. | code | `test_a_position_or_a_working_order_makes_a_market_held` |
+| H1 | A **Held market** has a **Position** on it, or a working order within 2% of filling. A limit is measured from the last trade, a Stop or Take Profit from mark to its trigger, and an order already through is 0. An order with no price to measure from counts as near. | `held.order_near_pct` | `test_a_position_or_a_working_order_makes_a_market_held`, `test_a_far_order_does_not_make_a_market_held` |
 | H2 | Near liquidation fires when mark is within 10% of a Position's **Liquidation price**. The direction is toward that price. | `held.liq_distance_pct` | `test_mark_near_the_liquidation_price` |
 | H3 | A row on a Held market says which side is held, and whether a move runs with it or against it. | code | `test_a_row_on_a_held_market_is_urgent` |
 
@@ -71,7 +71,7 @@ A row is one alert in the panel. Each rule that fires has a size: how many times
 |---|---|---|---|
 | R1 | A row opens when a rule fires on a market with no row still taking updates, and the cap has room (R6). | | |
 | R2 | A row takes updates for 2 minutes from its start. Rules that fire on that market in that time join it, each kept at its largest. It is sent again when its size (to 0.1), its headline, its count of rules or its severity changes. Then it is final. | `rows.merge_s` | `test_rules_within_two_minutes_are_one_row`, `test_an_unchanged_row_is_not_sent_again`, `test_a_final_row_is_not_rewritten` |
-| R3 | A row is Urgent when two or more spikes are on it, when Liquidations, Board or Near liquidation is on it, or when the market is Held. Otherwise it is Notable. | code | `test_two_spikes_at_once_are_urgent`, `test_a_row_on_a_held_market_is_urgent` |
+| R3 | A row is Urgent when the market is Held, or when Liquidations or Near liquidation is on it. Otherwise it is Notable: two spikes at once, a Board move and a Week or Quarter level are Notable ([ADR 0023](adr/0023-a-toast-is-for-what-the-operator-has-on.md)). | code | `test_two_spikes_at_once_are_notable`, `test_a_row_on_a_held_market_is_urgent`, `test_a_board_move_is_one_row` |
 | R4 | Liquidations, Board and Near liquidation are states that go on firing. Each raises one row when it starts. While it keeps firing it raises another only at half again its largest size so far. It starts afresh after 3 minutes without firing. | `rows.quiet_s`; half again is code | `test_a_standing_state_is_one_row`, `test_a_state_that_grows_by_half_is_a_new_row` |
 | R5 | Every market row carries the 1m price move. It carries the minute's volume and its change in open interest when each is over its floor and at least the hour's biggest, whether or not it spiked. | code | `test_a_row_carries_what_the_tape_showed` |
 | R6 | At most 6 new rows in any minute, across all markets. The seventh is dropped, not held. | `rows.max_new_per_min` | `test_rate_cap` |
@@ -136,7 +136,7 @@ Sigma is the larger of 1.4826 × MAD and the 90th-percentile deviation over 1.64
 6. **Premium still forgets normal at a restart.** (A3) Funding is stored. Premium is not.
 7. **Left and Against stop at 15 minutes.** (S2)
 8. **Tones are listed, not scored.** (T1) Measured once on 9 days of 30m bars: blue was followed by +0.05% over the next 30m against +0.01% for any bar, orange by a small move the wrong way.
-9. **Working orders make a market Held.** (H1, R3) Every spike on a market with a resting order far from the price raises a toast.
+9. **A near order is measured on the price, not the book.** (H1) A thin market whose book sits far from its last trade can make a far order look near, or a near one far.
 10. **Funding is extreme against its own day only.** (F1) A market whose funding has been stretched all day is not on the strip.
 11. **A volume spike points nowhere.** (S4) It has no Left or Against, and it is the most common row. Only Opened says whether those rows are worth raising.
-12. **Every Board row is a toast.** (B3, R3) Replaying 6.4 hours of 11 Oct 2026 raised ten, most of them between 0.5% and 0.6%.
+12. **The thresholds were raised on one record.** (K3, K4, B3) The what-if on the 30 days to 6 Nov 2026 kept 85 of 1,305 Board rows at 0.8%, 464 of 2,259 volume rows at $250k, and 539 of 1,205 open interest rows at 3×. It can only tighten, so it cannot say what a looser value would have missed.

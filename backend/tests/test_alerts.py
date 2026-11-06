@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import patch
 
 from mayedge.alert_log import AlertLog, MemoryLogStore
+from mayedge.alert_rows import order_away_pct
 from mayedge.alerts import (
     BROAD_INDEX,
     NOTABLE,
@@ -198,8 +199,54 @@ class HeldMarketsTest(unittest.TestCase):
             patch.object(account_service.cached_summary(), "positions", book),
         ):
             held = LighterGateway()._held_markets()
-        # A closed Position is not held. A resting order is, with no side.
+        # A closed Position is not held. A resting order with no price to measure is, with no side.
         self.assertEqual(held, {1: Held("short", 112.5), 2: Held()})
+
+    def test_a_far_order_does_not_make_a_market_held(self) -> None:
+        def order(market_index: int, side: str, price: str, trigger: str = "") -> OpenOrder:
+            return OpenOrder(
+                order_index=market_index,
+                client_order_index=market_index,
+                market_index=market_index,
+                symbol=f"M{market_index}",
+                side=side,
+                price=price,
+                size="1",
+                remaining="1",
+                order_type="stop_loss" if trigger else "limit",
+                reduce_only=bool(trigger),
+                trigger_price=trigger,
+            )
+
+        orders = [
+            order(1, "buy", "90"),  # 10% under the last trade
+            order(2, "buy", "98.5"),  # 1.5% under it
+            order(3, "sell", "99"),  # already through
+            order(4, "sell", "0", trigger="97"),  # a Stop 3% from mark
+            order(5, "sell", "0", trigger="98.5"),  # a Stop 1.5% from mark
+        ]
+        gw = LighterGateway()
+        for mi in range(1, 6):
+            gw._markets[mi] = _meta(market_index=mi, symbol=f"M{mi}")
+        with (
+            patch.object(account_service, "list_open_orders", return_value=orders),
+            patch.object(account_service.cached_summary(), "positions", []),
+        ):
+            held = gw._held_markets()
+        self.assertEqual(sorted(held), [2, 3, 5])
+
+    def test_order_away_is_measured_like_the_orders_tab(self) -> None:
+        self.assertAlmostEqual(
+            order_away_pct(side="buy", price=98.0, trigger=0.0, last=100.0, mark=101.0) or 0, 2.0
+        )
+        # No last trade: the limit is measured from mark.
+        self.assertAlmostEqual(
+            order_away_pct(side="sell", price=102.0, trigger=0.0, last=None, mark=100.0) or 0, 2.0
+        )
+        self.assertIsNone(order_away_pct(side="buy", price=98.0, trigger=0.0, last=None, mark=None))
+        self.assertIsNone(
+            order_away_pct(side="sell", price=0.0, trigger=97.0, last=100.0, mark=None)
+        )
 
 
 class ThresholdYamlTest(unittest.TestCase):
@@ -396,7 +443,9 @@ class VolumeSpikeTest(unittest.TestCase):
     def test_a_volume_spike_triples_the_hours_biggest_minute(self) -> None:
         # $80k is the hour's biggest minute, and not three times it.
         self.assertEqual(self._trade(800.0), [])
-        events = self._trade(1_000.0)
+        # $100k is over three times it, and under the $250k floor.
+        self.assertEqual(self._trade(1_000.0), [])
+        events = self._trade(2_600.0)
         self.assertEqual(
             [(e["rule"], e["severity"], e["direction"]) for e in events],
             [
@@ -404,8 +453,8 @@ class VolumeSpikeTest(unittest.TestCase):
             ],
         )
         volume = _fact(events, "volume")
-        self.assertAlmostEqual(volume["value"], 100_000.0)
-        self.assertAlmostEqual(volume["multiple"], 100_000.0 / 30_060.0, places=2)
+        self.assertAlmostEqual(volume["value"], 260_000.0)
+        self.assertAlmostEqual(volume["multiple"], 260_000.0 / 30_060.0, places=2)
 
     def test_a_quiet_hour_still_needs_real_money(self) -> None:
         h = Harness()
@@ -422,9 +471,11 @@ class OiSpikeTest(unittest.TestCase):
         h.det.seed_levels("oi", {1: _oi_hour()})
         return h.tick(_meta(open_interest=oi_now))
 
-    def test_an_oi_spike_doubles_the_hours_biggest_change(self) -> None:
+    def test_an_oi_spike_triples_the_hours_biggest_change(self) -> None:
         self.assertEqual(self._change(50_350_000.0), [])
-        events = self._change(49_500_000.0)
+        # 2.5 times the hour's biggest change is no longer enough.
+        self.assertEqual(self._change(49_500_000.0), [])
+        events = self._change(49_300_000.0)
         self.assertEqual(
             [(e["rule"], e["severity"], e["direction"]) for e in events],
             [
@@ -432,9 +483,9 @@ class OiSpikeTest(unittest.TestCase):
             ],
         )
         oi = _fact(events, "oi")
-        self.assertAlmostEqual(oi["value"], -1.0)
-        self.assertAlmostEqual(oi["usd"], -500_000.0)
-        self.assertAlmostEqual(oi["multiple"], 2.5)
+        self.assertAlmostEqual(oi["value"], -1.4)
+        self.assertAlmostEqual(oi["usd"], -700_000.0)
+        self.assertAlmostEqual(oi["multiple"], 3.5)
 
     def test_a_small_change_on_a_big_book_is_no_spike(self) -> None:
         # $300k is over the dollar floor and under 0.3% of a $200M book.
@@ -479,14 +530,14 @@ class LiquidationsTest(unittest.TestCase):
 
 class BoardTest(unittest.TestCase):
     def test_a_board_move_is_counted_among_the_movers(self) -> None:
-        # Twelve perps are up 0.8%. Eighteen sit flat, so the median of all thirty is zero.
+        # Twelve perps are up 0.9%. Eighteen sit flat, so the median of all thirty is zero.
         h = Harness()
-        h.seed_board(range(1, 13), last=100.8)
+        h.seed_board(range(1, 13), last=100.9)
         h.seed_board(range(13, 31), last=100.0)
         events = h.tick(_meta(market_index=30, symbol="AAPL"))
         self.assertEqual([e["market_index"] for e in events], [BROAD_INDEX])
         board = _fact(events, "board")
-        self.assertAlmostEqual(board["value"], 0.8)
+        self.assertAlmostEqual(board["value"], 0.9)
         self.assertEqual(board["window"], "12/12")
         self.assertEqual(board["liquid"], 30)
 
@@ -506,7 +557,8 @@ class BoardTest(unittest.TestCase):
         h.seed_board(range(1, 21), last=98.8)
         events = h.tick(_at(98.8, market_index=1))
         self.assertEqual([(e["market_index"], e["symbol"]) for e in events], [(BROAD_INDEX, "BTC")])
-        self.assertEqual((events[0]["severity"], events[0]["direction"]), (URGENT, "down"))
+        # A Board move is a row, not a toast (ADR 0023).
+        self.assertEqual((events[0]["severity"], events[0]["direction"]), (NOTABLE, "down"))
         self.assertIn("20/20 down", events[0]["note"])
 
 
@@ -595,14 +647,15 @@ class RowBookTest(unittest.TestCase):
         self.assertEqual([f["kind"] for f in later.facts], ["volume"])
         self.assertEqual((later.started_at, later.price), (later.ts, 103.0))
 
-    def test_two_spikes_at_once_are_urgent(self) -> None:
+    def test_two_spikes_at_once_are_notable(self) -> None:
         book = self._book()
         one = book.ingest(1, "ETH", [_spike("volume", 1.4, "flat")], [], _T0, price=100.0)
         two = book.ingest(1, "ETH", [_spike("move", 1.1)], [], _T0 + 20, price=100.0)
         assert one is not None and two is not None
         self.assertEqual((one.severity, one.direction), (NOTABLE, "flat"))
         # The volume spike is the larger rule. The row still points the way price went.
-        self.assertEqual((two.severity, two.rule, two.direction), (URGENT, "volume", "up"))
+        # Two spikes on a market the operator does not hold are still no toast (ADR 0023).
+        self.assertEqual((two.severity, two.rule, two.direction), (NOTABLE, "volume", "up"))
 
     def test_a_standing_state_is_one_row(self) -> None:
         book = self._book()
@@ -636,7 +689,9 @@ class RowBookTest(unittest.TestCase):
 class TapeTest(unittest.TestCase):
     def test_a_row_carries_what_the_tape_showed(self) -> None:
         # Price spiked. Volume was the hour's biggest minute and no more: shown, not a rule.
-        h = Harness()
+        # R5 is about what the row carries, so the volume floor is the old $50k here.
+        low_floor = AlertSettings(spike_min_volume_usd=50_000.0)
+        h = Harness(low_floor)
         h.market()
         h.det.on_minute_bars(1, [_forming(800.0)])
         events = h.tick(_at(101.0))
@@ -648,7 +703,7 @@ class TapeTest(unittest.TestCase):
         )
 
         # Volume spiked and price did not. The row still says what price did.
-        flat = Harness()
+        flat = Harness(low_floor)
         flat.market()
         flat.det.on_minute_bars(1, [_forming(1_000.0)])
         events = flat.tick(_at(100.04))

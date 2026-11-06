@@ -23,6 +23,8 @@ _RANGE_NAME = {
     "quarter_high": "quarter high",
     "quarter_low": "quarter low",
 }
+# R3: rules that are Urgent on any market. Board is a state and is not one of them.
+_URGENT_KINDS = frozenset({"liqs", "near_liq"})
 # R4: a state that keeps firing raises another row at half again its largest size.
 _ESCALATE = 1.5
 # How many times the hour's biggest a minute can be said to be.
@@ -52,6 +54,26 @@ class Held:
 
     side: str = ""
     liquidation_price: float = 0.0
+
+
+def order_away_pct(
+    *, side: str, price: float, trigger: float, last: float | None, mark: float | None
+) -> float | None:
+    """H1. How far a working order is from filling, in percent. None when there is no price.
+
+    A limit is measured from the last trade (mark when there is none), and is 0 once through.
+    A Stop or Take Profit is measured from mark to its trigger.
+    """
+    if trigger > 0:
+        if not mark or mark <= 0:
+            return None
+        return abs(mark - trigger) / mark * 100.0
+    ref = last if last and last > 0 else mark
+    if not ref or ref <= 0 or price <= 0:
+        return None
+    if side == "buy":
+        return 0.0 if price >= ref else (ref - price) / ref * 100.0
+    return 0.0 if price <= ref else (price - ref) / ref * 100.0
 
 
 @dataclass
@@ -190,9 +212,8 @@ class _Row:
         return self.headline().size or 0.0
 
     def severity(self) -> int:
-        """R3."""
-        spikes = sum(1 for kind in self.rules if kind in SPIKE_KINDS)
-        if spikes >= 2 or self.held or any(kind in STATE_KINDS for kind in self.rules):
+        """R3. Only what the operator has on is Urgent (ADR 0023)."""
+        if self.held or any(kind in _URGENT_KINDS for kind in self.rules):
             return URGENT
         return NOTABLE
 

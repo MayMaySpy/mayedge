@@ -48,7 +48,7 @@ An Alert states a fact and leaves the call to you ([ADR 0013](docs/adr/0013-an-a
 - **Board** — a **Broad move**; while one is on, other markets are judged on their **Excess move**.
 - **Near liquidation** on a Position.
 
-Only liquid perps alert, plus any **Held market**, which always toasts. Rules that fire on a market within 2 minutes are one row. Show All or Urgent, Favorites only, mute a market. The **Funding strip** above the list names every market whose funding is far from its own day; it raises nothing.
+Only liquid perps alert, plus any **Held market**. Only a Held market, Near liquidation and Liquidations toast ([ADR 0023](docs/adr/0023-a-toast-is-for-what-the-operator-has-on.md)); everything else is a row. Rules that fire on a market within 2 minutes are one row. Show All or Urgent, Favorites only, mute a market. The **Funding strip** above the list names every market whose funding is far from its own day; it raises nothing.
 
 Every row is written to the desk database. **Left** and **Against** score it from the price it fired at over the next 15 minutes ([ADR 0012](docs/adr/0012-an-alert-is-scored-from-the-price-it-fired-at.md)), and **Opened** counts the ones you clicked through. The panel shows each rule's 24h record. Every threshold is a knob in [`backend/config/alerts.yaml`](backend/config/alerts.yaml); the rules are [docs/alert-rules.md](docs/alert-rules.md).
 

@@ -10,10 +10,11 @@ spike:
   window_min: 60
   price_x: 4
   volume_x: 3
-  oi_x: 2
+  oi_x: 3
   # Floors, so a dead tape stays quiet. Price was raised after a week of the record.
   min_move_pct: 0.5
-  min_volume_usd: 50000
+  # Volume and open interest were raised on the 30 days to 6 Nov 2026 (ADR 0023).
+  min_volume_usd: 250000
   min_oi_usd: 250000
   min_oi_pct: 0.3
 
@@ -29,11 +30,13 @@ board:
   # Share of the movers that must go the same way.
   agree: 0.8
   # Median 5m move of that side, in percent.
-  median_pct: 0.5
+  median_pct: 0.8
 
 held:
   # Mark within this many percent of a Position's Liquidation price.
   liq_distance_pct: 10
+  # A working order makes its market Held only while it is within this many percent of filling.
+  order_near_pct: 2
 
 range:
   # Completed UTC days before today. Today is not in either window.

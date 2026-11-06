@@ -21,9 +21,9 @@ class AlertSettings:
     spike_window_min: int = 60
     spike_price_x: float = 4.0
     spike_volume_x: float = 3.0
-    spike_oi_x: float = 2.0
+    spike_oi_x: float = 3.0
     spike_min_move_pct: float = 0.5
-    spike_min_volume_usd: float = 50_000.0
+    spike_min_volume_usd: float = 250_000.0
     spike_min_oi_usd: float = 250_000.0
     spike_min_oi_pct: float = 0.3
     liq_oi_bps: float = 20.0
@@ -32,8 +32,9 @@ class AlertSettings:
     board_move_pct: float = 0.3
     board_min_movers: int = 10
     board_agree: float = 0.8
-    board_median_pct: float = 0.5
+    board_median_pct: float = 0.8
     held_liq_distance_pct: float = 10.0
+    held_order_near_pct: float = 2.0
     range_week_days: int = 7
     range_quarter_days: int = 90
     range_near_pct: float = 0.3
@@ -93,6 +94,7 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
         board_agree=_f(board.get("agree"), base.board_agree),
         board_median_pct=_f(board.get("median_pct"), base.board_median_pct),
         held_liq_distance_pct=_f(held.get("liq_distance_pct"), base.held_liq_distance_pct),
+        held_order_near_pct=_f(held.get("order_near_pct"), base.held_order_near_pct),
         range_week_days=int(_f(ranges.get("week_days"), base.range_week_days)),
         range_quarter_days=int(_f(ranges.get("quarter_days"), base.range_quarter_days)),
         range_near_pct=_f(ranges.get("near_pct"), base.range_near_pct),

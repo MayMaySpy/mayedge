@@ -71,7 +71,7 @@ A Market's move less the Broad move, while one is on and the Market goes the sam
 _Avoid_: alpha, Relative Strength, beta, residual (unqualified)
 
 **Held market**:
-A Market with a Position or a working order on it. Every alert on it raises a toast.
+A Market with a Position on it, or a working order within 2% of filling. Every alert on it raises a toast.
 _Avoid_: Favorites, Watchlist, exposure
 
 **Funding strip**:
