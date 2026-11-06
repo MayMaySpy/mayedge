@@ -283,7 +283,7 @@ Why the Idea should work: the narrative in the operator's words, its Catalysts a
 _Avoid_: reason, note (unqualified; a Round trip's note is the Journal's), narrative (for the whole of it)
 
 **Catalyst**:
-A dated event the Thesis leans on: an unlock, a listing, a mainnet, a vote. Date in UTC, optional.
+A dated event the Thesis leans on: an unlock, a listing, a mainnet, a vote. Date and an optional time, both UTC, and an optional link.
 _Avoid_: event (unqualified), news
 
 **Plan**:
@@ -291,7 +291,7 @@ An Idea's Entry, Stop and Targets, and the Trigger that says when to enter. Pric
 _Avoid_: plan (lowercase, unqualified: that is the Planner algo), Draft (that is the chart's), setup, bracket
 
 **Entry zone**:
-The price range the Plan enters in, low to high. A single price is a zone with low equal to high. Its plan entry is the midpoint: R, R multiples and the Draft all use it.
+The price range the Plan enters in, low to high. A single price is a zone with low equal to high. Its plan entry is the midpoint: R and R multiples are measured from it. A wider zone goes to the desk as a Ladder across the zone; a single price goes as a Limit.
 _Avoid_: entry (unqualified, that's the Planner's), buy zone, area
 
 **Trigger**:

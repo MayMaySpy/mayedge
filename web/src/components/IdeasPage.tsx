@@ -48,12 +48,14 @@ const KEYS: [string, string][] = [
   ["Esc", "Close, then clear search"],
 ];
 
+const NARROW = "(max-width: 1023px)";
+
 function useNarrow(): boolean {
-  const [narrow, setNarrow] = useState(false);
+  // Read on the first render, so a narrow screen never mounts the wide column's detail too.
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1023px)");
+    const mq = window.matchMedia(NARROW);
     const apply = () => setNarrow(mq.matches);
-    apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
   }, []);
@@ -259,7 +261,8 @@ export function IdeasPage() {
                 />
               )}
             </div>
-            <div className="hidden h-full min-h-0 lg:block lg:overflow-y-auto">{detail}</div>
+            {/* One detail at a time: this column when wide, the Sheet below when narrow. */}
+            {narrow ? null : <div className="h-full min-h-0 lg:overflow-y-auto">{detail}</div>}
           </div>
         )}
         <Sheet

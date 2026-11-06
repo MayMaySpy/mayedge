@@ -161,7 +161,14 @@ export function IdeaList({
                     {idea.tags.length > 2 ? <span className="text-muted-foreground">+{idea.tags.length - 2}</span> : null}
                   </span>
                 </TableCell>
-                <TableCell hideBelow="xl" title={catalyst ? `${catalyst.text} · ${catalyst.date} UTC` : undefined}>
+                <TableCell
+                  hideBelow="xl"
+                  title={
+                    catalyst
+                      ? `${catalyst.text} · ${catalyst.time ? `${catalyst.date} ${catalyst.time}` : catalyst.date} UTC`
+                      : undefined
+                  }
+                >
                   {catalyst ? (catalyst.days === 0 ? "today" : `in ${catalyst.days}d`) : "—"}
                 </TableCell>
                 <TableCell className="text-right" title={`${utcDateTime(idea.updated_at)} UTC`}>

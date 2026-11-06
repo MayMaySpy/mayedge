@@ -198,6 +198,19 @@ class IdeasApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stale.json()["detail"]["message"], "Changed elsewhere, reloaded")
         self.assertEqual(got.json()["idea"]["thesis"], idea["thesis"])
 
+    async def test_a_patch_cannot_move_market_or_side(self) -> None:
+        async with self._client() as client:
+            idea = (await client.post("/api/ideas", json=_body())).json()["idea"]
+            for field, value in (("symbol", "ETH"), ("side", "short")):
+                moved = await client.patch(
+                    f"/api/ideas/{idea['id']}",
+                    json={"seen_updated_at": idea["updated_at"], field: value},
+                )
+                self.assertEqual(moved.status_code, 422, field)
+            got = (await client.get(f"/api/ideas/{idea['id']}")).json()["idea"]
+        self.assertEqual((got["symbol"], got["side"]), ("ZRO", "long"))
+        self.assertEqual(got["updated_at"], idea["updated_at"])
+
     async def test_a_review_is_optional(self) -> None:
         async with self._client() as client:
             idea = (await client.post("/api/ideas", json=_body())).json()["idea"]

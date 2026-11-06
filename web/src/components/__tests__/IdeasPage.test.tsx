@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@/test/dom";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IdeasPage as Page } from "@/components/IdeasPage";
@@ -188,6 +188,60 @@ describe("IdeasPage", () => {
     await user.type(stop, "3");
     expect(screen.getByText("A long stop sits below the entry.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("draws the detail once on a narrow screen", async () => {
+    rows = [ZRO];
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: true,
+          media: query,
+          onchange: null,
+          addEventListener() {},
+          removeEventListener() {},
+          addListener() {},
+          removeListener() {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList,
+    );
+    render(<IdeasPage />);
+    await userEvent.click(await screen.findByRole("row", { name: /ZRO/ }));
+    expect(await screen.findAllByRole("button", { name: "Draft on chart" })).toHaveLength(1);
+  });
+
+  it("adds a catalyst with a time and a link, and not an empty one", async () => {
+    rows = [ZRO];
+    const user = userEvent.setup();
+    let stamp = ZRO.updated_at;
+    const patch = vi.spyOn(api, "ideaPatch").mockImplementation(async (_id, body) => {
+      stamp += 1;
+      return {
+        idea: {
+          ...ZRO,
+          catalysts: (body.catalysts ?? []) as Idea["catalysts"],
+          updated_at: stamp,
+        },
+        log: [],
+      };
+    });
+    render(<IdeasPage />);
+    await user.click(await screen.findByRole("row", { name: /ZRO/ }));
+    await user.click(await screen.findByRole("button", { name: "Add catalyst" }));
+    expect(patch).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("Catalyst"), "Unlock");
+    await user.tab();
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Catalyst date"), { target: { value: "2026-11-01" } });
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText("Catalyst time"), { target: { value: "14:30" } });
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(3));
+    await user.type(screen.getByLabelText("Catalyst link"), "https://example.com/unlock");
+    await user.tab();
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(4));
+    expect(patch.mock.calls[3]?.[1].catalysts).toEqual([
+      { text: "Unlock", date: "2026-11-01", time: "14:30", url: "https://example.com/unlock" },
+    ]);
   });
 
   it("pings the desk and opens a tab when nobody answers", async () => {

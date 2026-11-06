@@ -16,6 +16,7 @@ from mayedge.ideas import (
     Refusal,
     algo_text,
     blank_plan,
+    catalyst_row,
     computed,
     log_text,
     move,
@@ -27,9 +28,8 @@ from mayedge.ideas import (
     status_line,
 )
 
+# What a patch may change. Not the Market or the side (I8).
 _FIELDS = (
-    "symbol",
-    "side",
     "thesis",
     "conviction",
     "horizon",
@@ -436,7 +436,7 @@ def _put(
             idea.trigger,
             json.dumps(list(idea.tags), ensure_ascii=False),
             json.dumps(
-                [{"text": item.text, "date": item.date} for item in idea.catalysts],
+                [catalyst_row(item) for item in idea.catalysts],
                 ensure_ascii=False,
             ),
             idea.entry_low,
@@ -561,7 +561,7 @@ def _pack(
         "invalidation": idea.invalidation,
         "trigger": idea.trigger,
         "tags": list(idea.tags),
-        "catalysts": [{"text": item.text, "date": item.date} for item in idea.catalysts],
+        "catalysts": [catalyst_row(item) for item in idea.catalysts],
         "entry_low": idea.entry_low,
         "entry_high": idea.entry_high,
         "stop": idea.stop,

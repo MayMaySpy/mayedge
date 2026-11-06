@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DRAFT_OPEN_LAPSE_MS,
+  ackChartDraftOpen,
   applyDraftClick,
   chartDraftFor,
+  chartDraftOpenFor,
   clearChartDraft,
   clickChartDraft,
   draftDistancePct,
@@ -14,6 +17,7 @@ import {
   emptyChartDraft,
   moveChartDraft,
   moveDraftLine,
+  requestChartDraftOpen,
   setChartDraft,
 } from "@/lib/chartDraft";
 import { theme } from "@/lib/theme";
@@ -25,6 +29,10 @@ function drafted(entry: number, stop: number) {
 beforeEach(() => {
   clearChartDraft("ETH");
   clearChartDraft("BTC");
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("chart draft", () => {
@@ -119,6 +127,47 @@ describe("chart draft", () => {
     clearChartDraft("ETH");
     expect(draftIdea("ETH")).toBeNull();
     expect(chartDraftFor("ETH").entry).toBeNull();
+  });
+
+  it("asks to open the Planner on one Market, and the ask lapses (D3)", () => {
+    vi.useFakeTimers();
+    requestChartDraftOpen("ETH");
+    expect(chartDraftOpenFor()).toBe("ETH");
+    ackChartDraftOpen("BTC");
+    expect(chartDraftOpenFor()).toBe("ETH");
+    vi.advanceTimersByTime(DRAFT_OPEN_LAPSE_MS - 1);
+    expect(chartDraftOpenFor()).toBe("ETH");
+    vi.advanceTimersByTime(1);
+    expect(chartDraftOpenFor()).toBeNull();
+    requestChartDraftOpen("ETH");
+    clearChartDraft("ETH");
+    expect(chartDraftOpenFor()).toBeNull();
+    requestChartDraftOpen("BTC");
+    ackChartDraftOpen("BTC");
+    expect(chartDraftOpenFor()).toBeNull();
+  });
+
+  it("opens a zone as a ladder and a price as a limit", () => {
+    expect(
+      draftToForm(
+        { entry: 2.19, stop: 2.08, ladder: { from: 2.2, to: 2.18 }, targets: [{ r: "2", pct: "50" }] },
+        2,
+        null,
+      ),
+    ).toMatchObject({
+      side: "buy",
+      entryType: "ladder",
+      entryLadder: { from: "2.20", to: "2.18", rungs: "5", strength: "even" },
+      stop: "2.08",
+    });
+    const lines = draftOverlays({
+      draft: { entry: 2.19, stop: 2.08, ladder: { from: 2.2, to: 2.18 }, targets: [] },
+      decimals: 2,
+      positionEntry: null,
+      size: "20",
+    });
+    expect(lines.map((line) => line.label)).toEqual(["FROM 2.20 20", "TO 2.18", "STOP 2.08 5.02%"]);
+    expect(draftToForm(drafted(100, 95), 2, null)?.entryType).toBe("limit");
   });
 
   it("fills the dialog from the same prices", () => {

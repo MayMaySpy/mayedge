@@ -174,7 +174,7 @@ export const ChartWidget = memo(function ChartWidget({
     onDraftClearRef.current = () => clearChartDraft(symbol);
     onDraftEnterRef.current = () => {
       if (!draftReady(chartDraftFor(symbol))) return false;
-      requestChartDraftOpen();
+      requestChartDraftOpen(symbol);
       return true;
     };
   }, [symbol]);

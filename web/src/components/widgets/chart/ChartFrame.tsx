@@ -480,7 +480,7 @@ export function ChartFrame(props: {
               variant="secondary"
               size="sm"
               className="h-6 px-2 font-mono text-sm"
-              onClick={() => requestChartDraftOpen()}
+              onClick={() => requestChartDraftOpen(symbol)}
             >
               Open in Planner
             </Button>

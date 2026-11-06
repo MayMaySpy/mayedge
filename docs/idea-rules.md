@@ -12,9 +12,10 @@ Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means th
 | I2 | An Idea cannot be saved without a Thesis of at least 10 characters after trimming. Everything else is optional at creation. | code | test_an_idea_needs_a_thesis |
 | I3 | More than one Idea per Market is allowed (a long and a short, or a new one after a Closed one). The page warns when a second open Idea (Watching or Active) is made on the same Market and side. It still saves. | | test_a_second_open_idea_on_a_market_warns |
 | I4 | Tags are lower case, trimmed, 1–24 characters, at most 8 per Idea, de-duplicated. They are the narratives ("ai", "l2", "rwa", "unlock"). | code | test_tags_are_normalised |
-| I5 | Catalysts are at most 12 per Idea: text up to 120 characters and an optional UTC date (`YYYY-MM-DD`). Sorted by date, undated last. | code | test_catalysts_sort_by_date |
+| I5 | Catalysts are at most 12 per Idea: text up to 120 characters, an optional UTC date (`YYYY-MM-DD`), an optional UTC time (`HH:MM`, only with a date), and an optional link (`http://` or `https://`, at most 300 characters). Sorted by date, then time, undated last. A blank text is not a catalyst. | code | test_catalysts_sort_by_date, `IdeasPage` tests |
 | I6 | Prices are stored as decimal strings, as typed, and never as floats. | | test_prices_round_trip_as_typed |
 | I7 | Conviction is 1, 2 or 3. A new Idea is 2. Horizon is scalp, swing or position. A new Idea is swing. | code | test_a_new_idea_is_watching |
+| I8 | An Idea's Market and side are fixed once it is saved. A patch that names either is refused; a different Market or side is a new Idea. | | test_a_patch_cannot_move_market_or_side |
 
 ## Plan
 
@@ -33,7 +34,7 @@ A long ZRO plan, zone 2.18–2.20 with the stop at 2.08:
 | P5 | Target sizes are optional percents of the Position that add up to 100 or less. No targets: the Draft uses the Planner's default, 2R at 50% and 3R at 50%. Targets and no percents: each gets an equal whole-percent share of 100, the last taking the remainder (two targets is 50/50). Stated percents are handed through; an unsized target then shares what is left of 100. | code | test_target_shares_add_up_to_100_or_less, `web: ideas.test.ts` |
 | P6 | A Plan is complete with a zone and a stop. Only a complete Plan can go to the chart (D1). | | test_a_plan_needs_a_zone_and_a_stop |
 
-The Draft carries the plan entry, the stop and the Targets. It does not carry the zone's low and high. A Ladder entry across the zone is not this hand-off; it waits until a Draft can carry from and to.
+The Draft carries the plan entry, the stop and the Targets. A zone wider than one price also carries its two ends, and the desk opens that as a Ladder (D1). A single price opens as a Limit.
 
 ## Status
 
@@ -46,11 +47,11 @@ Watching, Active, Closed, Dropped. Stored in lower case.
 | S3 | The desk never moves a status on price. In zone and Past stop are shown, never acted on. | | test_price_never_moves_a_status |
 | S4 | Every status move and every Plan change writes one Idea log line, with Last at that moment if the desk has one. A Plan change line names what moved: `Entry 2.30–2.35 → 2.28–2.33 · Stop 2.08 → 2.12`. Empty when nothing in the Plan moved, and then no line is written. | | test_a_plan_change_is_logged, test_plan_diff_names_what_moved |
 | S5 | Closed and Dropped Ideas ask for a Review: outcome Worked, Failed, Missed (never entered, it went without us) or Wrong (invalidated before entry), and free text. Optional, editable later. A reopen does not clear it. | | test_a_review_is_optional, test_review_outcomes |
-| S6 | Delete removes an Idea and its log for good. The page asks first and names the Idea. Dropped is the normal way out. | | test_delete_removes_the_log |
+| S6 | Delete removes an Idea and its log for good. The page asks first and names the Idea. Dropped is the normal way out. A delete that fails leaves the dialog open and a toast says why. | | test_delete_removes_the_log, `IdeasPage` tests |
 
 Times are milliseconds.
 
-A patch of the Idea sends the `updated_at` the page last saw (`seen_updated_at`). An older one is refused with 409 and the page reloads that Idea. Pinned by `test_a_stale_patch_is_409`.
+A patch of the Idea sends the `updated_at` the page last saw (`seen_updated_at`). An older one is refused with 409 and the page reloads that Idea. The page sends one write per Idea at a time (patches, status moves, log lines), each after the answer to the one before, so its own quick edits never refuse each other. Pinned by `test_a_stale_patch_is_409` and `useIdeasPage` tests.
 
 ## Live
 
@@ -71,9 +72,9 @@ The Draft is a copy of the Plan at send time. Later edits to the Idea do not mov
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| D1 | **Draft on chart** sends one message on the desk channel: symbol, side, plan entry, stop, Targets as R multiples with their percents, and the Idea id. Only for a complete Plan (P6). | | `deskBridge` tests |
+| D1 | **Draft on chart** sends one message on the desk channel: symbol, side, plan entry, stop, Targets as R multiples with their percents, and the Idea id. A zone with two prices also sends those ends and opens the Planner as a Ladder: a long from the high down to the low, a short from the low up to the high, 5 rungs, even Strength. A single price (low = high) opens as a Limit at that price. Only for a complete Plan (P6). With a Position already open the dialog still Attaches. Each multiple is measured from the Target's stored price to 6 decimal places, not P3's rounded 2, so the Planner puts the Target back on the Idea's price. | code | `deskBridge` tests, `web: ideas.test.ts`, `web: chartDraft.test.ts` |
 | D2 | The desk answers a ping within 500 ms when its tab is open. Without an answer, the page opens the desk at `/{SYMBOL}` in a new tab and sends the Draft once that tab says hello. One desk tab, never two. | code | `IdeasPage` tests |
-| D3 | The desk switches to the Market, replaces that Market's Draft with the Idea's (a toast says so when it replaced one), and opens the Planner dialog. Nothing reaches the venue until **Start** ([ADR 0018](adr/0018-the-chart-drafts-a-planner.md)). A Market where a Planner already runs shows the dialog's own refusal ([ADR 0015](adr/0015-planner-owns-the-exit.md)). | | `chartDraft` tests |
+| D3 | The desk switches to the Market, replaces that Market's Draft with the Idea's (a toast says so when it replaced one), and opens the Planner dialog. Nothing reaches the venue until **Start** ([ADR 0018](adr/0018-the-chart-drafts-a-planner.md)). A Market where a Planner already runs shows the dialog's own refusal ([ADR 0015](adr/0015-planner-owns-the-exit.md)). The request to open names the Market: it opens the dialog only on that Market once its Draft is ready, and lapses after 10 seconds or when that Draft is cleared, so it never opens the dialog later on its own. | code | `chartDraft` tests |
 | D4 | When a Planner starts from that Draft, the desk writes `POST /api/ideas/{id}/planner` with the algo id. The Idea goes Active (S2) and its log names the Planner. The write is idempotent per algo id. If the write fails, the Planner still runs; a toast says the Idea was not updated. | | test_a_planner_start_marks_the_idea_active |
 | D5 | An Idea's Round trips are the Journal's on its Market whose open time is at or after the Idea's creation, and before it was Closed or Dropped if it was. A journal timestamp below 10^12 is seconds. | code | `web: ideas.test.ts` |
 

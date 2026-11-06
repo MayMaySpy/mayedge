@@ -135,6 +135,10 @@ function halfUp(n: number, places: number): string {
   return (n < 0 ? -rounded : rounded).toFixed(places);
 }
 
+function trimZeros(text: string): string {
+  return text.includes(".") ? text.replace(/0+$/, "").replace(/\.$/, "") : text;
+}
+
 export function rAtPrice(entry: string, stop: string, price: string): string | null {
   const e = Number(entry);
   const risk = Math.abs(e - Number(stop));
@@ -190,15 +194,30 @@ export function ideaToDraft(idea: Idea, _decimals: number): ChartDraft | null {
   const entry = Number(idea.plan_entry);
   const stop = Number(idea.stop);
   if (!(entry > 0) || !(stop > 0) || entry === stop) return null;
-  if (idea.targets.length === 0) return { entry, stop, targets: defaultDraftTargets() };
-  const rs = idea.r_multiples ?? [];
-  if (rs.length !== idea.targets.length) return null;
+  const ladder = zoneLadder(idea);
+  if (idea.targets.length === 0) return { entry, stop, targets: defaultDraftTargets(), ladder };
+  // D1: from the stored prices to 6 places, so the Planner lands each Target back on its price.
+  const risk = Math.abs(entry - stop);
+  const rs = idea.targets.map((target) => {
+    const price = Number(target.price);
+    return price > 0 ? trimZeros(halfUp(Math.abs(price - entry) / risk, 6)) : null;
+  });
+  if (rs.some((r) => r == null || Number(r) <= 0)) return null;
   const pcts = targetPercents(idea.targets);
   return {
     entry,
     stop,
-    targets: rs.map((r, i) => ({ r, pct: pcts[i] ?? "0" })),
+    ladder,
+    targets: rs.map((r, i) => ({ r: r ?? "0", pct: pcts[i] ?? "0" })),
   };
+}
+
+/** D1. A long's first rung is the high; a short's is the low. A single price is a Limit. */
+function zoneLadder(idea: Idea): { from: number; to: number } | null {
+  const low = Number(idea.entry_low);
+  const high = Number(idea.entry_high);
+  if (!(low > 0) || !(high > 0) || low === high) return null;
+  return idea.side === "short" ? { from: low, to: high } : { from: high, to: low };
 }
 
 /** D5. open time at or after creation, and before close when the Idea ended. */
@@ -257,12 +276,17 @@ export function sortIdeas(
 export function nextCatalyst(
   idea: Idea,
   now = Date.now(),
-): { text: string; date: string; days: number } | null {
+): { text: string; date: string; time: string | null; days: number } | null {
   const today = new Date(now).toISOString().slice(0, 10);
-  const hit = idea.catalysts.find((c) => c.date != null && c.date >= today);
+  const clock = new Date(now).toISOString().slice(11, 16);
+  const hit = idea.catalysts.find((c) => {
+    if (c.date == null || c.date < today) return false;
+    if (c.date > today || !c.time) return true;
+    return c.time >= clock;
+  });
   if (!hit?.date) return null;
   const days = Math.round((Date.parse(`${hit.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY);
-  return { text: hit.text, date: hit.date, days };
+  return { text: hit.text, date: hit.date, time: hit.time ?? null, days };
 }
 
 export function relativeAge(ts: number, now: number): string {

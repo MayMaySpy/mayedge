@@ -74,16 +74,31 @@ export function isDeskMessage(value: unknown): value is DeskMessage {
 
 function isIdeaDraft(value: unknown): value is ChartDraft {
   if (!value || typeof value !== "object") return false;
-  const row = value as { entry?: unknown; stop?: unknown; targets?: unknown };
+  const row = value as { entry?: unknown; stop?: unknown; targets?: unknown; ladder?: unknown };
   const price = (n: unknown) => n == null || (typeof n === "number" && n > 0);
   if (!price(row.entry) || !price(row.stop)) return false;
   if (typeof row.entry !== "number" || typeof row.stop !== "number") return false;
-  if (!Array.isArray(row.targets)) return false;
-  return row.targets.every((target) => {
-    if (!target || typeof target !== "object") return false;
-    const item = target as { r?: unknown; pct?: unknown };
-    return typeof item.r === "string" && typeof item.pct === "string";
-  });
+  if (!Array.isArray(row.targets) || !row.targets.every(isDraftTarget)) return false;
+  return isDraftLadder(row.ladder);
+}
+
+function isDraftTarget(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const item = target as { r?: unknown; pct?: unknown };
+  return typeof item.r === "string" && typeof item.pct === "string";
+}
+
+function isDraftLadder(value: unknown): boolean {
+  if (value == null) return true;
+  if (!value || typeof value !== "object") return false;
+  const ends = value as { from?: unknown; to?: unknown };
+  return (
+    typeof ends.from === "number" &&
+    ends.from > 0 &&
+    typeof ends.to === "number" &&
+    ends.to > 0 &&
+    ends.from !== ends.to
+  );
 }
 
 let chan: BroadcastChannel | null | undefined;
@@ -286,7 +301,7 @@ export function useDeskIdeasBridge({ onSymbol }: { onSymbol: (symbol: string) =>
         onSymbolRef.current(msg.symbol);
         if (replaced) notifyOk(`Draft replaced with the ${msg.symbol} Idea's plan`);
         setChartPlanArmed(true);
-        requestChartDraftOpen();
+        requestChartDraftOpen(msg.symbol);
       }
     });
   }, []);

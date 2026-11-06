@@ -4,6 +4,7 @@ import {
   blendedR,
   ideaToDraft,
   ideaTrips,
+  nextCatalyst,
   inZone,
   marketLast,
   pastStop,
@@ -17,6 +18,7 @@ import {
   toEntryPct,
   zoneBarMarks,
 } from "@/lib/ideas";
+import { draftTargetPrice } from "@/lib/chartDraft";
 
 function idea(over: Partial<Idea> = {}): Idea {
   return {
@@ -153,9 +155,50 @@ describe("the Plan", () => {
       { r: "3", pct: "50" },
     ]);
     expect(bare?.entry).toBe(2.19);
+    expect(bare?.ladder).toEqual({ from: 2.2, to: 2.18 });
     expect(ideaToDraft(idea({ plan_entry: null, r: null }), 4)).toBeNull();
     const drafted = ideaToDraft(idea(), 4);
-    expect(drafted?.targets).toEqual([{ r: "1.91", pct: "100" }]);
+    expect(drafted?.targets).toEqual([{ r: "1.909091", pct: "100" }]);
+    expect(drafted?.ladder).toEqual({ from: 2.2, to: 2.18 });
+    const price = ideaToDraft(
+      idea({ entry_low: "100", entry_high: "100", plan_entry: "100", stop: "99", r: "1" }),
+      2,
+    );
+    expect(price?.ladder).toBeNull();
+    const short = ideaToDraft(
+      idea({ side: "short", stop: "2.30", plan_entry: "2.19", r: "0.11", targets: [], r_multiples: [] }),
+      2,
+    );
+    expect(short?.ladder).toEqual({ from: 2.18, to: 2.2 });
+  });
+
+  it("names the next catalyst that has not passed", () => {
+    const now = Date.parse("2026-10-22T15:00:00Z");
+    const row = idea({
+      catalysts: [
+        { text: "morning", date: "2026-10-22", time: "09:00", url: null },
+        { text: "unlock", date: "2026-10-22", time: null, url: null },
+        { text: "vote", date: "2026-11-01", time: "14:30", url: "https://example.com/vote" },
+      ],
+    });
+    expect(nextCatalyst(row, now)).toMatchObject({ text: "unlock", days: 0 });
+    expect(nextCatalyst(idea({ catalysts: [row.catalysts[2]!] }), now)?.text).toBe("vote");
+  });
+
+  it("puts a drafted target back on the Idea's price, not the rounded multiple's", () => {
+    // Plan entry 100, stop 99 (R = 1), target 112.345 is 12.345R; P3's 12.35R would land at 112.35.
+    const row = idea({
+      entry_low: "100",
+      entry_high: "100",
+      plan_entry: "100",
+      stop: "99",
+      r: "1",
+      targets: [{ price: "112.345", pct: null }],
+      r_multiples: ["12.35"],
+    });
+    const drafted = ideaToDraft(row, 3);
+    expect(drafted?.targets[0]?.r).toBe("12.345");
+    expect(draftTargetPrice(100, 99, Number(drafted?.targets[0]?.r))).toBeCloseTo(112.345, 9);
   });
 });
 

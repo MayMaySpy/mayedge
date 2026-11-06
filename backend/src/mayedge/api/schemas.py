@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 TradeSide = Literal["buy", "sell"]
 
@@ -107,6 +107,8 @@ class IdeaTargetIn(BaseModel):
 class IdeaCatalystIn(BaseModel):
     text: str = ""
     date: str | None = None
+    time: str | None = None
+    url: str | None = None
 
 
 class IdeaBody(BaseModel):
@@ -126,9 +128,11 @@ class IdeaBody(BaseModel):
 
 
 class IdeaPatch(BaseModel):
+    """I8: no symbol or side. A patch that names either is refused, not dropped quietly."""
+
+    model_config = ConfigDict(extra="forbid")
+
     seen_updated_at: int
-    symbol: str | None = None
-    side: Literal["long", "short"] | None = None
     thesis: str | None = None
     conviction: int | None = None
     horizon: Literal["scalp", "swing", "position"] | None = None

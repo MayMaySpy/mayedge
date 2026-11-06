@@ -169,7 +169,7 @@ function ChartPanel({
     accountSnap?.positions.find((p) => p.symbol === symbol && parseFloat(p.size) !== 0) ?? null;
   const positionEntry = position ? parseFloat(position.entry_price) : null;
   const draftEntry = positionEntry != null && positionEntry > 0 ? positionEntry : null;
-  const { armed: planArmed, openSeq, pendingOpen } = useChartPlan();
+  const { armed: planArmed, openFor } = useChartPlan();
   const openIdeas = useOpenIdeas();
   const [ideasOn] = chartIdeas.useFlag();
   const draft = useChartDraft(symbol);
@@ -200,17 +200,13 @@ function ChartPanel({
     (move: DraftMove) => moveChartDraft(symbol, move.overlayId, move.price, draftEntry),
     [symbol, draftEntry],
   );
-  const [seenOpen, setSeenOpen] = useState(openSeq);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  // D3: only a request for this Market, and only once its Draft is ready. It lapses on its own.
   useEffect(() => {
-    if (!pendingOpen || !draftForm) return;
-    ackChartDraftOpen();
+    if (openFor !== symbol || !draftForm) return;
+    ackChartDraftOpen(symbol);
     setPlannerOpen(true);
-  }, [pendingOpen, draftForm]);
-  if (openSeq !== seenOpen && draftForm) {
-    setSeenOpen(openSeq);
-    setPlannerOpen(true);
-  }
+  }, [openFor, symbol, draftForm]);
 
   const overlays = useMemo(() => {
     const lines: ChartOverlay[] = [];
@@ -525,7 +521,7 @@ export function Dashboard() {
       const replaced = setChartDraft(detail.idea.symbol, draft, detail.idea.id);
       if (replaced) notifyOk(`Draft replaced with the ${detail.idea.symbol} Idea's plan`);
       setChartPlanArmed(true);
-      requestChartDraftOpen();
+      requestChartDraftOpen(detail.idea.symbol);
     }).catch((e: unknown) => {
       if (live) notifyErr(e instanceof Error ? e.message : "No such Idea.");
     });

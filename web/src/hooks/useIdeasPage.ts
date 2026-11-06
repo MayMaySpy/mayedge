@@ -15,6 +15,16 @@ import {
 import { notifyErr } from "@/lib/notify";
 
 const MARKETS_MS = 10_000;
+
+function withPatch(idea: Idea, body: Omit<IdeaPatch, "seen_updated_at">): Idea {
+  return {
+    ...idea,
+    ...body,
+    tags: body.tags ?? idea.tags,
+    catalysts: body.catalysts ?? idea.catalysts,
+    targets: body.targets ?? idea.targets,
+  } as Idea;
+}
 const IDEAS_MS = 60_000;
 
 export type IdeaSeed = { symbol: string; entry: string; stop: string; targets: string[] };
@@ -57,12 +67,27 @@ export function useIdeasPage() {
     replace(known ? rows.map((row) => (row.id === idea.id ? idea : row)) : [idea, ...rows]);
   }, [replace]);
 
+  // Edits sent but not answered yet. A server answer is shown with them on top, so a field
+  // typed after it does not flicker back to its old value.
+  const pending = useRef(new Map<string, Omit<IdeaPatch, "seen_updated_at">[]>());
+  const shown = useCallback((idea: Idea) => {
+    let row = idea;
+    for (const body of pending.current.get(idea.id) ?? []) row = withPatch(row, body);
+    return row;
+  }, []);
+  const settle = useCallback((idea: Idea) => upsert(shown(idea)), [shown, upsert]);
+  const forget = (id: string, body: Omit<IdeaPatch, "seen_updated_at">) => {
+    const rows = (pending.current.get(id) ?? []).filter((row) => row !== body);
+    if (rows.length) pending.current.set(id, rows);
+    else pending.current.delete(id);
+  };
+
   const loadDetail = useCallback(async (id: string) => {
     const detail = await api.idea(id);
-    upsert(detail.idea);
+    settle(detail.idea);
     if (selectedRef.current === id) setLog(detail.log);
     return detail;
-  }, [upsert]);
+  }, [settle]);
 
   useEffect(() => {
     let live = true;
@@ -112,7 +137,7 @@ export function useIdeasPage() {
       .idea(selectedId)
       .then((detail) => {
         if (!live) return;
-        upsert(detail.idea);
+        settle(detail.idea);
         setLog(detail.log);
       })
       .catch((e: unknown) => {
@@ -121,7 +146,7 @@ export function useIdeasPage() {
     return () => {
       live = false;
     };
-  }, [selectedId, upsert]);
+  }, [selectedId, settle]);
 
   useEffect(() => {
     const pull = () => {
@@ -132,7 +157,7 @@ export function useIdeasPage() {
       if (document.visibilityState !== "visible") return;
       void api
         .ideas("all")
-        .then((body) => replace(body.ideas))
+        .then((body) => replace(body.ideas.map(shown)))
         .catch(() => undefined);
       const id = selectedRef.current;
       if (id) void loadDetail(id).catch(() => undefined);
@@ -151,7 +176,7 @@ export function useIdeasPage() {
       window.clearInterval(ideasTimer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [loadDetail, replace]);
+  }, [loadDetail, replace, shown]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -179,29 +204,44 @@ export function useIdeasPage() {
     if (sort === defaultIdeaSort(status)) setSort(defaultIdeaSort(next));
   };
 
-  const fail = async (id: string, before: Idea | undefined, e: unknown) => {
-    if (before) upsert(before);
-    if (e instanceof ApiError && e.status === 409) {
-      await loadDetail(id).catch(() => undefined);
-      setFormEpoch((n) => n + 1);
-      notifyErr(e.message);
-    } else if (!(e instanceof ApiError && e.field)) {
-      notifyErr(message(e, "Not saved, retry"));
-    }
-    throw e;
-  };
+  // One write per Idea at a time: each patch sends the updated_at of the answer before it,
+  // so the page's own quick edits never refuse each other (docs/idea-rules.md, the patch rule).
+  const queues = useRef(new Map<string, Promise<unknown>>());
+  const queued = useCallback(<T,>(id: string, work: () => Promise<T>): Promise<T> => {
+    const next = (queues.current.get(id) ?? Promise.resolve()).then(work, work);
+    const tail = next.catch(() => undefined);
+    queues.current.set(id, tail);
+    void tail.then(() => {
+      if (queues.current.get(id) === tail) queues.current.delete(id);
+    });
+    return next;
+  }, []);
 
-  const patch = async (id: string, body: Omit<IdeaPatch, "seen_updated_at">) => {
-    const before = ideasRef.current.find((row) => row.id === id);
-    if (!before) throw new Error("Not saved, retry");
-    upsert({ ...before, ...body, tags: body.tags ?? before.tags, catalysts: body.catalysts ?? before.catalysts, targets: body.targets ?? before.targets } as Idea);
-    try {
-      const saved = await api.ideaPatch(id, { ...body, seen_updated_at: before.updated_at });
-      upsert(saved.idea);
-      return saved.idea;
-    } catch (e) {
-      return fail(id, before, e);
-    }
+  const patch = (id: string, body: Omit<IdeaPatch, "seen_updated_at">) => {
+    const current = ideasRef.current.find((row) => row.id === id);
+    if (!current) return Promise.reject(new Error("Not saved, retry"));
+    upsert(withPatch(current, body));
+    pending.current.set(id, [...(pending.current.get(id) ?? []), body]);
+    return queued(id, async () => {
+      const seen = ideasRef.current.find((row) => row.id === id)?.updated_at ?? current.updated_at;
+      try {
+        const saved = await api.ideaPatch(id, { ...body, seen_updated_at: seen });
+        forget(id, body);
+        settle(saved.idea);
+        return saved.idea;
+      } catch (e) {
+        forget(id, body);
+        // The desk's copy wins: a refused edit drops out of the row.
+        await loadDetail(id).catch(() => undefined);
+        if (e instanceof ApiError && e.status === 409) {
+          setFormEpoch((n) => n + 1);
+          notifyErr(e.message);
+        } else if (!(e instanceof ApiError && e.field)) {
+          notifyErr(message(e, "Not saved, retry"));
+        }
+        throw e;
+      }
+    });
   };
 
   const create = async (body: IdeaBody) => {
@@ -219,45 +259,53 @@ export function useIdeasPage() {
     return saved.idea;
   };
 
-  const moveStatus = async (id: string, body: IdeaStatusBody) => {
-    const before = ideasRef.current.find((row) => row.id === id);
-    try {
-      const saved = await api.ideaStatus(id, body);
-      upsert(saved.idea);
-      await loadDetail(id);
-      return saved.idea;
-    } catch (e) {
-      notifyErr(message(e, "That status move is not allowed."));
-      if (before) upsert(before);
-      throw e;
-    }
-  };
+  const moveStatus = (id: string, body: IdeaStatusBody) =>
+    queued(id, async () => {
+      try {
+        const saved = await api.ideaStatus(id, body);
+        settle(saved.idea);
+        await loadDetail(id).catch(() => undefined);
+        return saved.idea;
+      } catch (e) {
+        notifyErr(message(e, "That status move is not allowed."));
+        await loadDetail(id).catch(() => undefined);
+        throw e;
+      }
+    });
 
-  const saveReview = async (id: string, body: IdeaReviewBody) => {
-    const before = ideasRef.current.find((row) => row.id === id);
-    try {
-      const saved = await api.ideaReview(id, body);
-      upsert(saved.idea);
-      return saved.idea;
-    } catch (e) {
-      if (before) upsert(before);
-      notifyErr(message(e, "Not saved, retry"));
-      throw e;
-    }
-  };
+  const saveReview = (id: string, body: IdeaReviewBody) =>
+    queued(id, async () => {
+      try {
+        const saved = await api.ideaReview(id, body);
+        settle(saved.idea);
+        return saved.idea;
+      } catch (e) {
+        notifyErr(message(e, "Not saved, retry"));
+        await loadDetail(id).catch(() => undefined);
+        throw e;
+      }
+    });
 
-  const addLog = async (id: string, body: string) => {
-    const saved = await api.ideaLog(id, { body });
-    setLog((rows) => [saved.line, ...rows]);
-    await loadDetail(id).catch(() => undefined);
-    return saved.line;
-  };
+  const addLog = (id: string, body: string) =>
+    queued(id, async () => {
+      const saved = await api.ideaLog(id, { body });
+      setLog((rows) => [saved.line, ...rows]);
+      await loadDetail(id).catch(() => undefined);
+      return saved.line;
+    });
 
-  const remove = async (id: string) => {
-    await api.ideaDelete(id);
-    replace(ideasRef.current.filter((row) => row.id !== id));
-    if (selectedRef.current === id) setSelectedId(null);
-  };
+  /** S6: a failed delete says why and keeps the Idea. */
+  const remove = (id: string) =>
+    queued(id, async () => {
+      try {
+        await api.ideaDelete(id);
+      } catch (e) {
+        notifyErr(message(e, "Not deleted, retry"), "Delete failed");
+        throw e;
+      }
+      replace(ideasRef.current.filter((row) => row.id !== id));
+      if (selectedRef.current === id) setSelectedId(null);
+    });
 
   const openCreate = (next: IdeaSeed | null = null) => {
     setSeed(next);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -33,6 +34,10 @@ _ARROW = " \u2192 "
 _SEP = " \u00b7 "
 
 
+_CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_LINK_MAX = 300
+
+
 class Refusal(Exception):
     """A body that breaks a rule. ``field`` is the input that breaks it."""
 
@@ -46,6 +51,12 @@ class Refusal(Exception):
 class Catalyst:
     text: str
     date: str | None
+    time: str | None = None
+    url: str | None = None
+
+
+def catalyst_row(item: Catalyst) -> dict[str, str | None]:
+    return {"text": item.text, "date": item.date, "time": item.time, "url": item.url}
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,11 +390,48 @@ def _catalysts(raw: object) -> tuple[Catalyst, ...]:
         text = text.strip()
         if len(text) > 120:
             raise Refusal(f"catalysts.{index}", "A catalyst is at most 120 characters.")
-        items.append(Catalyst(text, _day(item.get("date"), f"catalysts.{index}")))
+        field = f"catalysts.{index}"
+        day = _day(item.get("date"), field)
+        items.append(
+            Catalyst(
+                text,
+                day,
+                _clock(item.get("time"), field, day is not None),
+                _link(item.get("url"), field),
+            )
+        )
     dated = [item for item in items if item.date is not None]
     undated = [item for item in items if item.date is None]
-    dated.sort(key=lambda item: item.date or "")
+    dated.sort(key=lambda item: (item.date or "", item.time or ""))
     return tuple(dated + undated)
+
+
+def _clock(raw: object, field: str, has_date: bool) -> str | None:
+    if raw is None or raw == "":
+        return None
+    if not has_date:
+        raise Refusal(field, "A catalyst time needs a date.")
+    if not isinstance(raw, str):
+        raise Refusal(field, "A catalyst time is UTC HH:MM.")
+    text = raw.strip()
+    if len(text) == 8 and text[5:6] == ":":
+        text = text[:5]
+    if _CLOCK.match(text) is None:
+        raise Refusal(field, "A catalyst time is UTC HH:MM.")
+    return text
+
+
+def _link(raw: object, field: str) -> str | None:
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raise Refusal(field, "A catalyst link starts with http:// or https://.")
+    text = raw.strip()
+    if len(text) > _LINK_MAX:
+        raise Refusal(field, "A catalyst link is at most 300 characters.")
+    if not text.startswith(("http://", "https://")) or any(ch.isspace() for ch in text):
+        raise Refusal(field, "A catalyst link starts with http:// or https://.")
+    return text
 
 
 def _day(raw: object, field: str) -> str | None:

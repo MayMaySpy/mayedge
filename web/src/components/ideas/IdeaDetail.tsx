@@ -295,7 +295,8 @@ export function IdeaDetail({
               type="button"
               variant="destructive"
               onClick={() => {
-                void onDelete().then(() => setConfirmDelete(false));
+                // A failure toasts in the page and keeps this dialog open (S6).
+                void onDelete().then(() => setConfirmDelete(false), () => undefined);
               }}
             >
               Delete
@@ -342,10 +343,11 @@ function Thesis({
 
   const save = async (body: Omit<IdeaPatch, "seen_updated_at">) => {
     try {
-      await onPatch(body);
+      const saved = await onPatch(body);
       setNote("Saved");
+      return saved;
     } catch (e) {
-      setNote(savedLine(e));
+      setNote(e instanceof ApiError ? e.message : "Not saved, retry");
       throw e;
     }
   };
@@ -454,10 +456,13 @@ function Thesis({
       </div>
       <Catalysts
         rows={catalysts}
-        onChange={(next) => {
-          setCatalysts(next);
-          void save({ catalysts: next }).catch(() => setCatalysts(idea.catalysts));
+        saved={idea.catalysts}
+        onEdit={setCatalysts}
+        onSave={async (next) => {
+          const saved = await save({ catalysts: next });
+          return saved.catalysts;
         }}
+        onNote={setNote}
       />
       <label className="flex flex-col gap-1">
         <span className="text-muted-foreground">Invalidation</span>
@@ -479,38 +484,113 @@ function Thesis({
   );
 }
 
-function Catalysts({ rows, onChange }: { rows: IdeaCatalyst[]; onChange: (rows: IdeaCatalyst[]) => void }) {
+function cleanCatalysts(rows: IdeaCatalyst[]): IdeaCatalyst[] {
+  return rows.flatMap((row) => {
+    const text = row.text.trim();
+    if (!text) return [];
+    return [{ text, date: row.date || null, time: row.time || null, url: row.url?.trim() || null }];
+  });
+}
+
+function Catalysts({
+  rows,
+  saved,
+  onEdit,
+  onSave,
+  onNote,
+}: {
+  rows: IdeaCatalyst[];
+  saved: IdeaCatalyst[];
+  onEdit: (rows: IdeaCatalyst[]) => void;
+  onSave: (rows: IdeaCatalyst[]) => Promise<IdeaCatalyst[]>;
+  onNote: (note: string) => void;
+}) {
   const today = new Date().toISOString().slice(0, 10);
+  const edit = (index: number, patch: Partial<IdeaCatalyst>) =>
+    onEdit(rows.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  const persist = async (next: IdeaCatalyst[]) => {
+    onEdit(next);
+    const clean = cleanCatalysts(next);
+    if (JSON.stringify(clean) === JSON.stringify(saved)) return;
+    try {
+      const stored = await onSave(clean);
+      onEdit([...stored, ...next.filter((row) => !row.text.trim())]);
+    } catch {
+      // The note already says why. The row stays so a bad link can be fixed.
+    }
+  };
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       <span className="text-muted-foreground">Catalysts, UTC</span>
       {rows.map((row, index) => {
         const soon = row.date != null && row.date >= today && Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`) <= 7 * 86_400_000;
         const past = row.date != null && row.date < today;
         const days = row.date ? Math.round((Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) : null;
+        const link = row.url?.trim() ?? "";
+        const open = /^https?:\/\/\S+$/.test(link);
         return (
-          <div key={index} className="flex items-center gap-1">
-            <Input
-              aria-label="Catalyst date"
-              type="date"
-              className="h-7 w-36"
-              value={row.date ?? ""}
-              onChange={(e) => {
-                const date = e.target.value || null;
-                if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-                onChange(rows.map((item, i) => (i === index ? { ...item, date } : item)));
-              }}
-            />
+          <div key={index} className="flex flex-col gap-1">
+            <div className="flex items-center gap-1">
+              <Input
+                aria-label="Catalyst date"
+                type="date"
+                className="h-7 w-36"
+                value={row.date ?? ""}
+                onChange={(e) => {
+                  const date = e.target.value || null;
+                  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+                  void persist(rows.map((item, i) => (i === index ? { ...item, date } : item)));
+                }}
+              />
+              <Input
+                aria-label="Catalyst time"
+                type="time"
+                className="h-7 w-28"
+                value={row.time ?? ""}
+                onChange={(e) => {
+                  const time = e.target.value ? e.target.value.slice(0, 5) : null;
+                  void persist(rows.map((item, i) => (i === index ? { ...item, time } : item)));
+                }}
+              />
+              {soon && days != null ? <span className="text-warn">{days === 0 ? "today" : `in ${days}d`}</span> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-6"
+                aria-label="Remove catalyst"
+                onClick={() => void persist(rows.filter((_, i) => i !== index))}
+              >
+                ×
+              </Button>
+            </div>
             <Input
               aria-label="Catalyst"
               className={cn("h-7", past && "text-muted-foreground")}
               value={row.text}
-              onChange={(e) => onChange(rows.map((item, i) => (i === index ? { ...item, text: e.target.value } : item)))}
+              placeholder="Unlock, listing, vote"
+              onChange={(e) => edit(index, { text: e.target.value })}
+              onBlur={(e) =>
+                void persist(rows.map((item, i) => (i === index ? { ...item, text: e.target.value } : item)))
+              }
             />
-            {soon && days != null ? <span className="text-warn">{days === 0 ? "today" : `in ${days}d`}</span> : null}
-            <Button type="button" variant="ghost" size="sm" className="h-6" aria-label="Remove catalyst" onClick={() => onChange(rows.filter((_, i) => i !== index))}>
-              ×
-            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label="Catalyst link"
+                className="h-7"
+                value={row.url ?? ""}
+                placeholder="https://"
+                onChange={(e) => edit(index, { url: e.target.value || null })}
+                onBlur={(e) =>
+                  void persist(rows.map((item, i) => (i === index ? { ...item, url: e.target.value || null } : item)))
+                }
+              />
+              {open ? (
+                <a href={link} target="_blank" rel="noopener noreferrer" className="shrink-0 underline">
+                  Open
+                </a>
+              ) : null}
+            </div>
           </div>
         );
       })}
@@ -520,8 +600,11 @@ function Catalysts({ rows, onChange }: { rows: IdeaCatalyst[]; onChange: (rows: 
         size="sm"
         className="h-6 self-start"
         onClick={() => {
-          if (rows.length >= 12) return;
-          onChange([...rows, { text: "", date: null }]);
+          if (rows.length >= 12) {
+            onNote("An Idea has at most 12 catalysts.");
+            return;
+          }
+          onEdit([...rows, { text: "", date: null, time: null, url: null }]);
         }}
       >
         Add catalyst

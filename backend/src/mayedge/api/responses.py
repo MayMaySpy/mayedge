@@ -310,6 +310,8 @@ class IdeaTarget(_Shape):
 class IdeaCatalyst(_Shape):
     text: str
     date: str | None
+    time: str | None
+    url: str | None
 
 
 class Idea(_Shape):

@@ -92,14 +92,60 @@ class IdeaRuleTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            [(item.text, item.date) for item in idea.catalysts],
+            [(item.text, item.date, item.time) for item in idea.catalysts],
             [
-                ("unlock", "2026-10-20"),
-                ("listing", "2026-10-20"),
-                ("vote", "2026-11-01"),
-                ("no date", None),
+                ("unlock", "2026-10-20", None),
+                ("listing", "2026-10-20", None),
+                ("vote", "2026-11-01", None),
+                ("no date", None, None),
             ],
         )
+        timed = _idea(
+            catalysts=[
+                {"text": "afternoon", "date": "2026-10-20", "time": "15:00"},
+                {"text": "morning", "date": "2026-10-20", "time": "09:00:00"},
+                {
+                    "text": "vote",
+                    "date": "2026-11-01",
+                    "time": "14:30",
+                    "url": "https://example.com/vote",
+                },
+            ]
+        )
+        self.assertEqual(
+            [(item.text, item.time, item.url) for item in timed.catalysts],
+            [
+                ("morning", "09:00", None),
+                ("afternoon", "15:00", None),
+                ("vote", "14:30", "https://example.com/vote"),
+            ],
+        )
+        self.assertEqual(
+            _refused("catalysts.0", catalysts=[{"text": "call", "time": "14:30"}]).field,
+            "catalysts.0",
+        )
+        self.assertEqual(
+            _refused(
+                "catalysts.0", catalysts=[{"text": "call", "date": "2026-10-20", "time": "25:00"}]
+            ).field,
+            "catalysts.0",
+        )
+        self.assertEqual(
+            _refused("catalysts.0", catalysts=[{"text": "call", "url": "example.com"}]).field,
+            "catalysts.0",
+        )
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old = settings.db_path
+        store.close_db()
+        settings.db_path = str(Path(tmp.name) / "ideas.db")
+        self.addCleanup(self._restore, old)
+        saved, _warning = idea_insert(timed, None)
+        self.assertEqual(saved["catalysts"][0]["time"], "09:00")
+        self.assertEqual(saved["catalysts"][2]["url"], "https://example.com/vote")
+        again = idea_get(saved["id"])
+        assert again is not None
+        self.assertEqual(again["idea"]["catalysts"][2]["url"], "https://example.com/vote")
         self.assertEqual(_refused("catalysts", catalysts=[{"text": "x"}] * 13).field, "catalysts")
         self.assertEqual(
             _refused("catalysts.0", catalysts=[{"text": "y" * 121, "date": None}]).field,

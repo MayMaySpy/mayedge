@@ -120,11 +120,15 @@ export interface IdeaBody {
 export interface IdeaCatalyst {
   text: string;
   date: string | null;
+  time: string | null;
+  url: string | null;
 }
 
 export interface IdeaCatalystIn {
   text?: string;
   date?: string | null;
+  time?: string | null;
+  url?: string | null;
 }
 
 export interface IdeaCreated {
@@ -155,8 +159,6 @@ export interface IdeaLogged {
 
 export interface IdeaPatch {
   seen_updated_at: number;
-  symbol?: string | null;
-  side?: "long" | "short" | null;
   thesis?: string | null;
   conviction?: number | null;
   horizon?: "scalp" | "swing" | "position" | null;

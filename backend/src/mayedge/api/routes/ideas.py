@@ -97,14 +97,10 @@ async def post_idea(body: IdeaBody) -> dict[str, Any]:
 async def patch_idea(idea_id: str, body: IdeaPatch) -> dict[str, Any]:
     fields = body.model_dump(exclude_unset=True)
     seen = int(fields.pop("seen_updated_at"))
-    symbol = fields.get("symbol")
-    last_symbol = symbol if isinstance(symbol, str) and symbol.strip() else None
-    if last_symbol is None:
-        current = await asyncio.to_thread(idea_get, idea_id)
-        if current is None:
-            raise HTTPException(404, "No such Idea.")
-        last_symbol = str(current["idea"]["symbol"])
-    idea = await _call(idea_update, idea_id, fields, seen, _last(last_symbol))
+    current = await asyncio.to_thread(idea_get, idea_id)
+    if current is None:
+        raise HTTPException(404, "No such Idea.")
+    idea = await _call(idea_update, idea_id, fields, seen, _last(str(current["idea"]["symbol"])))
     return {"idea": idea}
 
 

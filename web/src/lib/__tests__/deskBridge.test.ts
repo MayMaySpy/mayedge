@@ -27,7 +27,15 @@ describe("isDeskMessage", () => {
         symbol: "ZRO",
         ideaId: "idea-1",
         draft: { entry: 2.19, stop: 2.08, targets: [{ r: "1.91", pct: "100" }] },
-      })
+      }),
+    ).toBe(true);
+    expect(
+      isDeskMessage({
+        type: "idea-draft",
+        symbol: "ZRO",
+        ideaId: "idea-1",
+        draft: { entry: 2.19, stop: 2.08, ladder: { from: 2.2, to: 2.18 }, targets: [{ r: "1.91", pct: "100" }] },
+      }),
     ).toBe(true);
   });
 
@@ -38,5 +46,13 @@ describe("isDeskMessage", () => {
     expect(isDeskMessage({ type: "desk-symbol", symbol: "" })).toBe(false);
     expect(isDeskMessage({ type: "idea-draft", symbol: "ZRO", ideaId: "idea-1", draft: { entry: 1, stop: 0, targets: [] } })).toBe(false);
     expect(isDeskMessage({ type: "idea-draft", symbol: "ZRO", ideaId: "idea-1", draft: { entry: 1, stop: 2, targets: [{ r: 1, pct: "50" }] } })).toBe(false);
+    expect(
+      isDeskMessage({
+        type: "idea-draft",
+        symbol: "ZRO",
+        ideaId: "idea-1",
+        draft: { entry: 2, stop: 1, ladder: { from: 2, to: 2 }, targets: [] },
+      }),
+    ).toBe(false);
   });
 });

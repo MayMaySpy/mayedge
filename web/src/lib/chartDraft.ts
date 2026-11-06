@@ -11,6 +11,8 @@ export interface ChartDraft {
   entry: number | null;
   stop: number | null;
   targets: { r: string; pct: string }[];
+  /** D1: the zone's two ends. Absent on a single price, which opens as a Limit. */
+  ladder?: { from: number; to: number } | null;
 }
 
 export function defaultDraftTargets(): { r: string; pct: string }[] {
@@ -137,6 +139,21 @@ export function draftToForm(
   }));
   const stop = formatDraftPrice(draft.stop, decimals);
   if (attached) return { side, stop, targets };
+  const ladder = draft.ladder;
+  if (ladder && ladder.from > 0 && ladder.to > 0 && ladder.from !== ladder.to) {
+    const base = defaultPlannerForm(side);
+    return {
+      side,
+      entryType: "ladder",
+      entryLadder: {
+        ...base.entryLadder,
+        from: formatDraftPrice(ladder.from, decimals),
+        to: formatDraftPrice(ladder.to, decimals),
+      },
+      stop,
+      targets,
+    };
+  }
   return {
     side,
     entryType: "limit",
@@ -167,13 +184,36 @@ export function draftOverlays(opts: {
   const entry = attached ? opts.positionEntry : opts.draft.entry;
   const lines: ChartOverlay[] = [];
   const side = entry != null && opts.draft.stop != null ? draftSide(entry, opts.draft.stop) : null;
-  if (!attached && opts.draft.entry != null && opts.draft.entry > 0) {
+  const color = side === "sell" ? theme.ask : side === "buy" ? theme.bid : theme.muted;
+  const ladder = !attached ? opts.draft.ladder : null;
+  if (ladder && ladder.from > 0 && ladder.to > 0 && ladder.from !== ladder.to) {
+    const from = formatDraftPrice(ladder.from, opts.decimals);
+    const to = formatDraftPrice(ladder.to, opts.decimals);
+    lines.push(
+      {
+        id: "draft-ladder-from",
+        kind: "draft",
+        price: Number(from),
+        color,
+        label: ["FROM", from, opts.size ?? ""].filter(Boolean).join(" "),
+        interactive: false,
+      },
+      {
+        id: "draft-ladder-to",
+        kind: "draft",
+        price: Number(to),
+        color,
+        label: ["TO", to].join(" "),
+        interactive: false,
+      },
+    );
+  } else if (!attached && opts.draft.entry != null && opts.draft.entry > 0) {
     const price = formatDraftPrice(opts.draft.entry, opts.decimals);
     lines.push({
       id: "draft-entry",
       kind: "draft",
       price: Number(price),
-      color: side === "sell" ? theme.ask : side === "buy" ? theme.bid : theme.muted,
+      color,
       label: ["ENTRY", price, opts.size ?? ""].filter(Boolean).join(" "),
       interactive: true,
     });
@@ -210,14 +250,16 @@ type Snap = {
   armed: boolean;
   drafts: Record<string, ChartDraft>;
   notices: Record<string, string>;
-  openSeq: number;
-  pendingOpen: boolean;
+  openFor: string | null;
 };
 
-const serverSnap: Snap = { armed: false, drafts: {}, notices: {}, openSeq: 0, pendingOpen: false };
+/** D3: an unanswered request to open the Planner lapses after this long. */
+export const DRAFT_OPEN_LAPSE_MS = 10_000;
+
+const serverSnap: Snap = { armed: false, drafts: {}, notices: {}, openFor: null };
 let armed = false;
-let openSeq = 0;
-let pendingOpen = false;
+let openFor: string | null = null;
+let openTimer: ReturnType<typeof setTimeout> | null = null;
 const drafts = new Map<string, ChartDraft>();
 const ideaIds = new Map<string, string>();
 const notices = new Map<string, string>();
@@ -229,8 +271,7 @@ function emit() {
     armed,
     drafts: Object.fromEntries(drafts),
     notices: Object.fromEntries(notices),
-    openSeq,
-    pendingOpen,
+    openFor,
   };
   for (const listener of listeners) listener();
 }
@@ -297,9 +338,11 @@ export function moveChartDraft(
 
 export function clearChartDraft(symbol: string) {
   const hadIdea = ideaIds.delete(symbol);
-  if (!drafts.has(symbol) && !notices.has(symbol) && !hadIdea) return;
+  const hadOpen = openFor === symbol;
+  if (!drafts.has(symbol) && !notices.has(symbol) && !hadIdea && !hadOpen) return;
   drafts.delete(symbol);
   notices.delete(symbol);
+  if (hadOpen) dropOpen();
   emit();
 }
 
@@ -310,21 +353,37 @@ export function setChartDraftNotice(symbol: string, text: string) {
   emit();
 }
 
-export function requestChartDraftOpen() {
-  openSeq += 1;
-  pendingOpen = true;
+function dropOpen() {
+  openFor = null;
+  if (openTimer != null) clearTimeout(openTimer);
+  openTimer = null;
+}
+
+/** D3: open the Planner on this Market once its Draft is ready. Lapses unanswered. */
+export function requestChartDraftOpen(symbol: string) {
+  dropOpen();
+  openFor = symbol;
+  openTimer = setTimeout(() => {
+    if (openFor !== symbol) return;
+    dropOpen();
+    emit();
+  }, DRAFT_OPEN_LAPSE_MS);
   emit();
 }
 
-export function ackChartDraftOpen() {
-  if (!pendingOpen) return;
-  pendingOpen = false;
+export function chartDraftOpenFor(): string | null {
+  return openFor;
+}
+
+export function ackChartDraftOpen(symbol: string) {
+  if (openFor !== symbol) return;
+  dropOpen();
   emit();
 }
 
 export function useChartPlan() {
   const current = useSyncExternalStore(subscribe, () => snap, () => serverSnap);
-  return { armed: current.armed, setArmed: setChartPlanArmed, openSeq: current.openSeq, pendingOpen: current.pendingOpen };
+  return { armed: current.armed, setArmed: setChartPlanArmed, openFor: current.openFor };
 }
 
 export function useChartDraft(symbol: string): ChartDraft {
