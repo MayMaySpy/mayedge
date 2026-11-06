@@ -8,6 +8,8 @@ export const LIQ_HOURS = [
   { value: 24, label: "24h" },
   { value: 168, label: "7d" },
   { value: 720, label: "30d" },
+  { value: 2160, label: "90d" },
+  { value: 8760, label: "1y" },
 ] as const satisfies readonly { value: LiquidationSummaryHours; label: string }[];
 
 function isLiqHour(n: number): n is LiquidationSummaryHours {

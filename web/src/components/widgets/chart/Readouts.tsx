@@ -1,4 +1,5 @@
 import type { LiquidationSummaryHours } from "@/lib/api";
+import { LIQ_HOURS } from "@/lib/liqHours";
 import { formatBarVolume } from "@/lib/chartCandles";
 import type { FillMark } from "@/lib/fillMarks";
 import { cn, formatApr, formatPct, formatPrice, formatSize, formatUsdCompact } from "@/lib/utils";
@@ -102,9 +103,7 @@ function OhlcField({
 }
 
 function liqWindowLabel(hours: LiquidationSummaryHours): string {
-  if (hours === 168) return "7d";
-  if (hours === 720) return "30d";
-  return `${hours}h`;
+  return LIQ_HOURS.find((h) => h.value === hours)?.label ?? `${hours}h`;
 }
 
 export function LiqsReadout({ hours }: { hours: LiquidationSummaryHours }) {

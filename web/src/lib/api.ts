@@ -504,7 +504,7 @@ export interface LiquidationEvent {
   timestamp: number;
 }
 
-export type LiquidationSummaryHours = 1 | 4 | 24 | 168 | 720;
+export type LiquidationSummaryHours = 1 | 4 | 24 | 168 | 720 | 2160 | 8760;
 
 export interface LiquidationSummaryRow {
   symbol: string;
@@ -517,8 +517,11 @@ export interface LiquidationSummaryRow {
 }
 
 export interface LiquidationSummary {
-  hours: number;
+  /** Preset length in hours. Null when the window is a from–to span. */
+  hours: number | null;
   since: number;
+  /** Exclusive end, ms. Null when the window runs up to now. */
+  until: number | null;
   rows: LiquidationSummaryRow[];
 }
 
@@ -696,16 +699,36 @@ export const api = {
   activateMarket: (symbol: string) =>
     request<{ status: string }>(`/markets/${symbol}/activate`, { method: "POST" }),
   account: () => request<Account>("/account"),
-  liquidations: (opts?: { limit?: number; min_usd?: number; market_index?: number }) => {
+  liquidations: (opts?: {
+    limit?: number;
+    min_usd?: number;
+    market_index?: number;
+    /** Next page: fills strictly older than this timestamp, ms. */
+    before?: number;
+    since?: number;
+    until?: number;
+  }) => {
     const q = new URLSearchParams();
     if (opts?.limit != null) q.set("limit", String(opts.limit));
     if (opts?.min_usd != null) q.set("min_usd", String(opts.min_usd));
     if (opts?.market_index != null) q.set("market_index", String(opts.market_index));
+    if (opts?.before != null) q.set("before", String(opts.before));
+    if (opts?.since != null) q.set("since", String(opts.since));
+    if (opts?.until != null) q.set("until", String(opts.until));
     const qs = q.toString();
     return request<LiquidationEvent[]>(`/liquidations${qs ? `?${qs}` : ""}`);
   },
-  liquidationSummary: (hours: LiquidationSummaryHours) =>
-    request<LiquidationSummary>(`/liquidations/summary?hours=${hours}`),
+  liquidationSummary: (
+    opts: { hours: LiquidationSummaryHours } | { since: number; until: number }
+  ) => {
+    const q = new URLSearchParams();
+    if ("hours" in opts) q.set("hours", String(opts.hours));
+    else {
+      q.set("since", String(opts.since));
+      q.set("until", String(opts.until));
+    }
+    return request<LiquidationSummary>(`/liquidations/summary?${q}`);
+  },
   alerts: (opts?: { limit?: number }) => {
     const q = new URLSearchParams();
     if (opts?.limit != null) q.set("limit", String(opts.limit));

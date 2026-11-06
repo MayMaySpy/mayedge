@@ -10,7 +10,7 @@ from mayedge.db import _connect, _lock, reading
 
 logger = logging.getLogger(__name__)
 
-LIQ_SUMMARY_HOURS = (1, 4, 24, 168, 720)
+LIQ_SUMMARY_HOURS = (1, 4, 24, 168, 720, 90 * 24, 365 * 24)
 LIQ_DAY_MS = 86_400_000
 LIQ_DETAIL_MS = 30 * LIQ_DAY_MS
 
@@ -49,7 +49,8 @@ foldable AS (
 
 def liquidation_summary_since_ms(hours: int, now_ms: int | None = None) -> int:
     if hours not in LIQ_SUMMARY_HOURS:
-        raise ValueError("hours must be 1, 4, 24, 168, or 720")
+        allowed = ", ".join(str(h) for h in LIQ_SUMMARY_HOURS)
+        raise ValueError(f"hours must be {allowed}")
     now = int(now_ms if now_ms is not None else time.time() * 1000)
     return now - hours * 3_600_000
 
@@ -93,7 +94,11 @@ def list_liquidations(
     limit: int = 200,
     min_usd: float | None = None,
     market_index: int | None = None,
+    before_ms: int | None = None,
+    since_ms: int | None = None,
+    until_ms: int | None = None,
 ) -> list[dict[str, Any]]:
+    """Newest fills first. ``before_ms`` is the next page: strictly older than that timestamp."""
     limit = max(1, min(int(limit), 1000))
     clauses: list[str] = []
     params: list[Any] = []
@@ -103,6 +108,15 @@ def list_liquidations(
     if min_usd is not None and min_usd > 0:
         clauses.append("CAST(COALESCE(NULLIF(usd_amount, ''), '0') AS REAL) >= ?")
         params.append(float(min_usd))
+    if since_ms is not None:
+        clauses.append("ts >= ?")
+        params.append(int(since_ms))
+    if until_ms is not None:
+        clauses.append("ts < ?")
+        params.append(int(until_ms))
+    if before_ms is not None:
+        clauses.append("ts < ?")
+        params.append(int(before_ms))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     with reading() as conn:
@@ -141,17 +155,28 @@ def _first_day_index(since_ms: int) -> int:
     return (cutoff + LIQ_DAY_MS - 1) // LIQ_DAY_MS
 
 
-def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
+def summarize_liquidations(*, since_ms: int, until_ms: int | None = None) -> list[dict[str, Any]]:
     """Aggregate the window: raw fills, plus Liquidation days fully inside it.
 
     long = sell, short = buy. largest_usd is one liquidation (one taker order).
     A 30-day window never reaches a folded day; those days are fully older than the detail horizon.
+    ``until_ms`` is exclusive. A folded day counts only when it starts inside the window.
     """
     cutoff = int(since_ms)
+    until = int(until_ms) if until_ms is not None else None
     first_day = _first_day_index(cutoff)
+    last_day = None if until is None else until // LIQ_DAY_MS
+    fill_until = "" if until is None else " AND ts < ?"
+    day_until = "" if last_day is None else " AND day_index < ?"
+    params: list[Any] = [cutoff]
+    if until is not None:
+        params.append(until)
+    params.append(first_day)
+    if last_day is not None:
+        params.append(last_day)
     with reading() as conn:
         rows = conn.execute(
-            """
+            f"""
             WITH fills AS (
                 SELECT
                     symbol,
@@ -160,7 +185,7 @@ def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
                     CAST(COALESCE(NULLIF(usd_amount, ''), '0') AS REAL) AS usd,
                     COALESCE(NULLIF(group_id, ''), 't' || trade_id) AS gid
                 FROM liquidations
-                WHERE ts >= ?
+                WHERE ts >= ?{fill_until}
             ),
             raw AS (
                 SELECT
@@ -189,7 +214,7 @@ def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
                     fill_count,
                     largest_usd
                 FROM liquidation_days
-                WHERE day_index >= ?
+                WHERE day_index >= ?{day_until}
             ),
             combined AS (
                 SELECT * FROM raw
@@ -209,7 +234,7 @@ def summarize_liquidations(*, since_ms: int) -> list[dict[str, Any]]:
             HAVING total_usd > 0
             ORDER BY total_usd DESC, symbol ASC
             """,
-            (cutoff, first_day),
+            params,
         ).fetchall()
     return [
         {

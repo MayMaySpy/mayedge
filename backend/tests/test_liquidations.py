@@ -258,8 +258,30 @@ class LiquidationSummaryTests(unittest.TestCase):
         self.assertEqual(
             liquidation_summary_since_ms(720, now_ms=1_700_000_000_000), 1_697_408_000_000
         )
+        self.assertEqual(
+            liquidation_summary_since_ms(90 * 24, now_ms=1_700_000_000_000),
+            1_700_000_000_000 - 90 * 24 * 3_600_000,
+        )
+        self.assertEqual(
+            liquidation_summary_since_ms(365 * 24, now_ms=1_700_000_000_000),
+            1_700_000_000_000 - 365 * 24 * 3_600_000,
+        )
         with self.assertRaises(ValueError):
             liquidation_summary_since_ms(2, now_ms=1_700_000_000_000)
+
+    def test_pages_fills_older_than_a_timestamp(self) -> None:
+        now = 1_700_000_000_000
+        store.insert_liquidations(
+            [
+                _row(trade_id=1, usd_amount="1000", ts=now - 3_000),
+                _row(trade_id=2, usd_amount="2000", ts=now - 2_000),
+                _row(trade_id=3, usd_amount="3000", ts=now - 1_000),
+            ]
+        )
+        page = store.list_liquidations(limit=1, before_ms=now - 1_000)
+        self.assertEqual([r["trade_id"] for r in page], ["2"])
+        window = store.list_liquidations(since_ms=now - 2_500, until_ms=now - 1_500)
+        self.assertEqual([r["trade_id"] for r in window], ["2"])
 
     def test_schema_v4_flips_stored_sides_once(self) -> None:
         now = 1_700_000_000_000
@@ -347,6 +369,19 @@ class LiquidationFoldTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["total_usd"], 2500.0)
         self.assertEqual(rows[0]["fill_count"], 1)
+
+    def test_a_90_day_window_includes_a_folded_day(self) -> None:
+        from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS
+
+        now = 1_700_000_000_000
+        day_start = ((now - LIQ_DETAIL_MS) // LIQ_DAY_MS - 1) * LIQ_DAY_MS
+        store.insert_liquidations([_row(trade_id=1, usd_amount="9000", ts=day_start + 5_000)])
+        store.fold_liquidations(now_ms=now)
+        inside = store.summarize_liquidations(since_ms=now - 90 * LIQ_DAY_MS)
+        self.assertEqual(inside[0]["total_usd"], 9000.0)
+        # The day starts at day_start, so an until of that midnight leaves it out.
+        outside = store.summarize_liquidations(since_ms=day_start - LIQ_DAY_MS, until_ms=day_start)
+        self.assertEqual(outside, [])
 
     def test_midnight_cross_stays_on_the_start_day(self) -> None:
         from mayedge.persist_liq import LIQ_DAY_MS, LIQ_DETAIL_MS

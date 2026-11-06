@@ -473,7 +473,7 @@ A forced close of shorts. Stored as `side: buy`.
 _Avoid_: long squeeze, bid print (unqualified)
 
 **Liquidation window**:
-A 1h, 4h, 24h, 7-day, or 30-day lookback. Each liquidation in that span is still a fill.
+A 1h, 4h, 24h, 7-day, 30-day, 90-day, or 1-year lookback, or a from–to span in UTC days. Fills cover the last 30 days. Older days in the window are **Liquidation days**.
 _Avoid_: ring, tape, cluster (the 2-minute alert window)
 
 **Liquidation day**:

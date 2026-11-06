@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -42,28 +43,57 @@ async def get_liquidations(
     limit: int = 200,
     min_usd: float | None = None,
     market_index: int | None = None,
+    before: int | None = None,
+    since: int | None = None,
+    until: int | None = None,
 ) -> list[dict[str, Any]]:
     cap = max(1, min(int(limit), 1000))
+    paged = before is not None or since is not None or until is not None
     ring = gateway.recent_liquidations()
-    if ring and min_usd is None and market_index is None:
+    if ring and not paged and min_usd is None and market_index is None:
         return ring[:cap]
     return await asyncio.to_thread(
-        store.list_liquidations, limit=limit, min_usd=min_usd, market_index=market_index
+        store.list_liquidations,
+        limit=cap,
+        min_usd=min_usd,
+        market_index=market_index,
+        before_ms=before,
+        since_ms=since,
+        until_ms=until,
     )
 
 
 @router.get("/api/liquidations/summary")
-async def get_liquidation_summary(hours: int = 24) -> dict[str, Any]:
-    try:
-        since = liquidation_summary_since_ms(hours)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+async def get_liquidation_summary(
+    hours: int | None = None,
+    since: int | None = None,
+    until: int | None = None,
+) -> dict[str, Any]:
+    now = int(time.time() * 1000)
+    if since is not None:
+        start = int(since)
+        end = int(until) if until is not None else now
+        if start < 0 or end <= start:
+            raise HTTPException(400, "since must be before until")
+        span_hours = None
+    else:
+        span_hours = 24 if hours is None else hours
+        try:
+            start = liquidation_summary_since_ms(span_hours, now_ms=now)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        end = None
 
     def load() -> list[dict[str, Any]]:
         store.fold_liquidations_if_due()
-        return store.summarize_liquidations(since_ms=since)
+        return store.summarize_liquidations(since_ms=start, until_ms=end)
 
-    return {"hours": hours, "since": since, "rows": await asyncio.to_thread(load)}
+    return {
+        "hours": span_hours,
+        "since": start,
+        "until": end,
+        "rows": await asyncio.to_thread(load),
+    }
 
 
 @router.get("/api/markets")

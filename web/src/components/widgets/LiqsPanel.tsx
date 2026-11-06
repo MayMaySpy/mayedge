@@ -28,7 +28,7 @@ const SIG_USD_KEY = "mayedge-liqs-sig-usd";
 const SIG_COLOR_KEY = "mayedge-liqs-sig-color";
 const DEFAULT_MIN_USD = 1000;
 const DEFAULT_SIG_USD = 25_000;
-const MAX_ROWS = 80;
+const SHOWN = 80;
 
 function loadMinUsd(): number {
   try {
@@ -92,7 +92,7 @@ export const LiqsPanel = memo(function LiqsPanel({ onOpenPair, onClose }: LiqsPa
   const [sigColor, setSigColor] = useState(loadSigColor);
 
   const rows = useMemo(
-    () => all.filter((l) => liqUsd(l) >= minUsd).slice(0, MAX_ROWS),
+    () => all.filter((l) => liqUsd(l) >= minUsd).slice(0, SHOWN),
     [all, minUsd]
   );
 

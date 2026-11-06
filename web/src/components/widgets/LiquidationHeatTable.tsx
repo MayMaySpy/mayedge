@@ -24,6 +24,13 @@ import { useStoredSort, type SortCol } from "@/lib/tableSort";
 import { cn, formatUsdCompact, signClass } from "@/lib/utils";
 
 const SORT_KEY = "mayedge-scan-liq-sort";
+const DAY_MS = 86_400_000;
+
+/** A `YYYY-MM-DD` value as UTC midnight, ms. */
+function utcDayMs(iso: string): number {
+  const [y, m, d] = iso.split("-").map(Number);
+  return Date.UTC(y, (m ?? 1) - 1, d ?? 1);
+}
 
 const SORTS: readonly LiqHeatSort[] = ["total", "long", "short", "net", "share", "largest"];
 
@@ -141,18 +148,30 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
 }: LiquidationHeatTableProps) {
   const [sort, setSortMode] = useStoredSort(SORT_KEY, SORTS, "total");
   const [raw, setRaw] = useState<LiquidationHeatInput[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const selected = symbol.toUpperCase();
+  const custom = from !== "" && to !== "" && from <= to;
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      api
-        .liquidationSummary(hours)
+      const req = custom
+        ? api.liquidationSummary({ since: utcDayMs(from), until: utcDayMs(to) + DAY_MS })
+        : api.liquidationSummary({ hours });
+      req
         .then((data) => {
-          if (!cancelled) setRaw(data.rows);
+          if (!cancelled) {
+            setRaw(data.rows);
+            setFailed(false);
+          }
         })
         .catch(() => {
-          if (!cancelled) setRaw([]);
+          if (!cancelled) {
+            setRaw([]);
+            setFailed(true);
+          }
         });
     };
     load();
@@ -161,7 +180,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
       cancelled = true;
       clearInterval(id);
     };
-  }, [hours]);
+  }, [hours, custom, from, to]);
 
   const openInterest = useMemo(() => {
     const out: Record<string, number> = {};
@@ -194,18 +213,20 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
   );
 
   const selectHours = (next: LiquidationSummaryHours) => {
+    setFrom("");
+    setTo("");
     persistLiqHours(next);
     onHoursChange(next);
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-7 shrink-0 items-center border-b border-border px-2">
+      <div className="flex min-h-7 shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1">
         <ToggleGroup
           type="single"
           size="sm"
           spacing={0}
-          value={String(hours)}
+          value={custom ? "" : String(hours)}
           onValueChange={(v) => {
             const n = parseInt(v, 10);
             if (LIQ_HOURS.some((h) => h.value === n)) selectHours(n as LiquidationSummaryHours);
@@ -221,6 +242,27 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          From
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)}
+            className="h-5 rounded-sm border border-border bg-transparent px-1 font-mono text-xs text-foreground"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          To
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => setTo(e.target.value)}
+            className="h-5 rounded-sm border border-border bg-transparent px-1 font-mono text-xs text-foreground"
+          />
+          <span>UTC</span>
+        </label>
       </div>
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
         <Table>
@@ -280,7 +322,7 @@ export const LiquidationHeatTable = memo(function LiquidationHeatTable({
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
-                  No liquidations in this window
+                  {failed ? "Couldn't load this window" : "No liquidations in this window"}
                 </TableCell>
               </TableRow>
             ) : (

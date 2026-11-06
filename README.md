@@ -27,7 +27,7 @@ One panel, three modes — not extra mosaic tiles.
 - **Price chart** — candles, volume, Top of Book, with optional Open interest and **Fund pane**s underneath. **Pinned timeframes** (cap 7), including custom ones folded from a native resolution. **MayRekt** colors each candle by its **Tone**. Working Tickets draw on the chart: drag the line to Amend, click X to cancel. Clips, Planner and Trail lines are display-only. Armed **Axis** click on the price scale rests a GTT Ticket at Quick size (below live price buys, above sells). Your fills mark their candles; **Fills** in the chart header hides them.
 - **Scan** — four boards of the liquid perps. Nothing on Scan alerts.
   - **Relative Strength** vs BTC.
-  - Liquidation heat over a 1h / 4h / 24h / 7d / 30d window: **Window share**, **Liquidation intensity**, **Largest liquidation**.
+  - Liquidation heat over a 1h / 4h / 24h / 7d / 30d / 90d / 1y window, or a UTC from–to span: **Window share**, **Liquidation intensity**, **Largest liquidation**. Fills are kept 30 days; older days in the window are **Liquidation days**.
   - **Activity** — what every liquid perp's tape shows now: the 5m move and its share of the **Day range**, the volume multiple, the 5m change in open interest, funding and premium.
   - **Tones board** — perps whose last closed bar on a **Tone timeframe** (default 30m and 4h, at most two) is blue or orange.
 - **Watch** — **Path** charts for a **Watch Set** (cap 8), up to four **Watch panes**. Can undock to its own window; the popout shares the desk feed and dies with the desk tab.
