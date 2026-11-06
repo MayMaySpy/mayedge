@@ -18,6 +18,11 @@ import {
   roeFromPnl,
   sortPositionRows,
   chartOrderPrice,
+  fillDistancePct,
+  nextOrderSort,
+  orderNotional,
+  restingSideTotals,
+  sortOpenOrders,
   stopTakeKind,
   triggerFromPnl,
   triggerOnCorrectSide,
@@ -180,6 +185,200 @@ describe("chartOrderPrice", () => {
 
   it("uses the limit price for a resting Ticket", () => {
     expect(chartOrderPrice({ order_type: "limit", price: "100", trigger_price: "" })).toBe(100);
+  });
+});
+
+describe("fillDistancePct", () => {
+  const m = { last_trade_price: 100, mark_price: 100.2, mid_price: 100.1 };
+
+  it("measures a limit from Last", () => {
+    expect(fillDistancePct({ side: "buy", order_type: "limit", price: "98" }, m)).toBeCloseTo(2);
+    expect(fillDistancePct({ side: "sell", order_type: "limit", price: "103" }, m)).toBeCloseTo(3);
+  });
+
+  it("is 0 when a limit is already through", () => {
+    expect(fillDistancePct({ side: "buy", order_type: "limit", price: "101" }, m)).toBe(0);
+    expect(fillDistancePct({ side: "sell", order_type: "limit", price: "99" }, m)).toBe(0);
+  });
+
+  it("falls back to mark, then mid, when Last is missing", () => {
+    expect(
+      fillDistancePct(
+        { side: "buy", order_type: "limit", price: "98" },
+        { last_trade_price: null, mark_price: 100, mid_price: 99 }
+      )
+    ).toBeCloseTo(2);
+    expect(
+      fillDistancePct(
+        { side: "sell", order_type: "limit", price: "102" },
+        { last_trade_price: 0, mark_price: 0, mid_price: 100 }
+      )
+    ).toBeCloseTo(2);
+  });
+
+  it("measures a Stop or Take Profit from mark to the trigger", () => {
+    expect(
+      fillDistancePct(
+        { side: "sell", order_type: "stop-loss", price: "94", trigger_price: "95" },
+        m
+      )
+    ).toBeCloseTo(((100.2 - 95) / 100.2) * 100);
+    expect(
+      fillDistancePct(
+        { side: "sell", order_type: "take-profit", price: "110", trigger_price: "110" },
+        m
+      )
+    ).toBeCloseTo(((110 - 100.2) / 100.2) * 100);
+    expect(
+      fillDistancePct(
+        { side: "buy", order_type: "stop-loss", price: "105", trigger_price: "105" },
+        { last_trade_price: 100, mark_price: 100 }
+      )
+    ).toBeCloseTo(5);
+  });
+
+  it("is 0 when a trigger is already through mark", () => {
+    expect(
+      fillDistancePct(
+        { side: "sell", order_type: "stop-loss", price: "105", trigger_price: "105" },
+        m
+      )
+    ).toBe(0);
+  });
+
+  it("is unknown without a reference, and a Stop does not borrow Last", () => {
+    expect(fillDistancePct({ side: "buy", order_type: "limit", price: "98" }, null)).toBeNull();
+    expect(
+      fillDistancePct(
+        { side: "buy", order_type: "limit", price: "98" },
+        { last_trade_price: null, mark_price: null, mid_price: null }
+      )
+    ).toBeNull();
+    expect(
+      fillDistancePct(
+        { side: "sell", order_type: "stop-loss", price: "95", trigger_price: "95" },
+        { last_trade_price: 100, mark_price: null }
+      )
+    ).toBeNull();
+    expect(fillDistancePct({ side: "buy", order_type: "limit", price: "0" }, m)).toBeNull();
+  });
+});
+
+describe("nextOrderSort", () => {
+  it("starts remaining at the largest notional and away at the closest", () => {
+    expect(nextOrderSort(null, "notional")).toEqual({ key: "notional", dir: "desc" });
+    expect(nextOrderSort(null, "away")).toEqual({ key: "away", dir: "asc" });
+  });
+
+  it("flips the active column and resets the other", () => {
+    const away = nextOrderSort(null, "away");
+    expect(nextOrderSort(away, "away")).toEqual({ key: "away", dir: "desc" });
+    expect(nextOrderSort(away, "notional")).toEqual({ key: "notional", dir: "desc" });
+  });
+});
+
+describe("sortOpenOrders", () => {
+  const btc = { last_trade_price: 100, mark_price: 100, mid_price: 100 };
+  const cheap = { last_trade_price: 1, mark_price: 1, mid_price: 1 };
+  const quote = (id: number) => (id === 1 ? btc : id === 2 ? cheap : null);
+
+  function ord(partial: {
+    symbol: string;
+    market_index?: number;
+    side?: string;
+    order_type?: string;
+    price: string;
+    remaining: string;
+    trigger_price?: string;
+  }) {
+    return {
+      symbol: partial.symbol,
+      market_index: partial.market_index ?? 1,
+      side: partial.side ?? "buy",
+      order_type: partial.order_type ?? "limit",
+      price: partial.price,
+      remaining: partial.remaining,
+      trigger_price: partial.trigger_price,
+    };
+  }
+
+  it("leaves feed order until a column is chosen", () => {
+    const rows = [
+      ord({ symbol: "B", price: "90", remaining: "1" }),
+      ord({ symbol: "A", price: "50", remaining: "10" }),
+    ];
+    expect(sortOpenOrders(rows, null, quote)).toEqual(rows);
+  });
+
+  it("sorts remaining by notional, not base size", () => {
+    const bigBase = ord({ symbol: "CHEAP", market_index: 2, price: "1", remaining: "100" });
+    const bigUsd = ord({ symbol: "BTC", market_index: 1, price: "100", remaining: "2" });
+    expect(
+      sortOpenOrders([bigBase, bigUsd], { key: "notional", dir: "desc" }, quote).map((o) => o.symbol)
+    ).toEqual(["BTC", "CHEAP"]);
+  });
+
+  it("prices a Stop at its trigger", () => {
+    expect(
+      orderNotional({ order_type: "stop-loss", price: "89", trigger_price: "95", remaining: "2" })
+    ).toBe(190);
+  });
+
+  it("sorts away closest first and keeps a missing reference last", () => {
+    const close = ord({ symbol: "C", price: "99", remaining: "1" });
+    const far = ord({ symbol: "F", price: "90", remaining: "1" });
+    const unknown = ord({ symbol: "U", market_index: 9, price: "50", remaining: "1" });
+    const rows = [far, unknown, close];
+    expect(sortOpenOrders(rows, { key: "away", dir: "asc" }, quote).map((o) => o.symbol)).toEqual([
+      "C",
+      "F",
+      "U",
+    ]);
+    expect(sortOpenOrders(rows, { key: "away", dir: "desc" }, quote).map((o) => o.symbol)).toEqual([
+      "F",
+      "C",
+      "U",
+    ]);
+  });
+});
+
+describe("restingSideTotals", () => {
+  function ord(partial: {
+    side: string;
+    price: string;
+    remaining: string;
+    order_type?: string;
+    trigger_price?: string;
+  }) {
+    return {
+      side: partial.side,
+      order_type: partial.order_type ?? "limit",
+      price: partial.price,
+      remaining: partial.remaining,
+      trigger_price: partial.trigger_price,
+    };
+  }
+
+  it("weights the average by remaining, bids then asks", () => {
+    expect(
+      restingSideTotals([
+        ord({ side: "sell", price: "110", remaining: "1" }),
+        ord({ side: "buy", price: "100", remaining: "10" }),
+        ord({ side: "buy", price: "110", remaining: "30" }),
+      ])
+    ).toEqual([
+      { side: "buy", size: 40, price: 107.5 },
+      { side: "sell", size: 1, price: 110 },
+    ]);
+  });
+
+  it("leaves a Stop or Take Profit out, and drops a side with none", () => {
+    expect(
+      restingSideTotals([
+        ord({ side: "sell", price: "90", remaining: "5", order_type: "stop-loss", trigger_price: "95" }),
+        ord({ side: "buy", price: "0", remaining: "5" }),
+      ])
+    ).toEqual([]);
   });
 });
 

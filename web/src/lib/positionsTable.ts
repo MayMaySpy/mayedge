@@ -1,5 +1,6 @@
 import { isLongPosition, type Position } from "@/lib/api";
 import type { OpenTripRealized } from "@/lib/liveData";
+import { compareSortValues, type TableSort } from "@/lib/tableSort";
 
 export type PosSortKey = "size" | "notional" | "pnl" | "roe";
 export type PosSortDir = "asc" | "desc";
@@ -125,6 +126,136 @@ export function chartOrderPrice(order: {
   }
   const px = parseFloat(order.price);
   return px > 0 ? px : null;
+}
+
+/** Last: last trade, else mark, else mid. Missing is unknown, not 0. */
+function orderLast(market: {
+  last_trade_price?: number | null;
+  mark_price?: number | null;
+  mid_price?: number | null;
+}): number | null {
+  return (
+    positivePrice(market.last_trade_price) ??
+    positivePrice(market.mark_price) ??
+    positivePrice(market.mid_price)
+  );
+}
+
+/**
+ * Away: percent the reference must move before this order can fill.
+ * A limit is measured from Last. A Stop or Take Profit is measured from mark, to its trigger.
+ * 0 when that price is already through. Missing reference is null, not 0.
+ */
+export function fillDistancePct(
+  order: { side: string; order_type: string; price: string; trigger_price?: string },
+  market:
+    | {
+        last_trade_price?: number | null;
+        mark_price?: number | null;
+        mid_price?: number | null;
+      }
+    | null
+    | undefined
+): number | null {
+  const px = chartOrderPrice(order);
+  if (px == null || market == null) return null;
+  const kind = stopTakeKind(order.order_type);
+  const ref = kind ? positivePrice(market.mark_price) : orderLast(market);
+  if (ref == null) return null;
+  if (kind) {
+    if (!triggerOnCorrectSide(kind, order.side !== "buy", px, ref)) return 0;
+    return (Math.abs(px - ref) / ref) * 100;
+  }
+  const gap = order.side === "buy" ? (ref - px) / ref : (px - ref) / ref;
+  return gap > 0 ? gap * 100 : 0;
+}
+
+export type OrderSortKey = "notional" | "away";
+
+const ORDER_SORT_FIRST: Record<OrderSortKey, TableSort<OrderSortKey>["dir"]> = {
+  notional: "desc",
+  away: "asc",
+};
+
+/** First click: largest remaining notional, or closest Away. The next click flips. */
+export function nextOrderSort(
+  current: TableSort<OrderSortKey> | null,
+  key: OrderSortKey
+): TableSort<OrderSortKey> {
+  if (current?.key === key) return { key, dir: current.dir === "desc" ? "asc" : "desc" };
+  return { key, dir: ORDER_SORT_FIRST[key] };
+}
+
+/** Remaining times the working price. A Stop or Take Profit uses its trigger. */
+export function orderNotional(order: {
+  order_type: string;
+  price: string;
+  remaining: string;
+  trigger_price?: string;
+}): number | null {
+  const px = chartOrderPrice(order);
+  const rem = parseFloat(order.remaining);
+  if (px == null || !Number.isFinite(rem) || !(rem > 0)) return null;
+  return rem * px;
+}
+
+export type RestingSide = { side: "buy" | "sell"; size: number; price: number };
+
+/** Bids then asks: total remaining and the size-weighted average. A Stop or Take Profit stays out. */
+export function restingSideTotals(
+  orders: readonly {
+    side: string;
+    order_type: string;
+    price: string;
+    remaining: string;
+    trigger_price?: string;
+  }[]
+): RestingSide[] {
+  const acc = {
+    buy: { notional: 0, size: 0 },
+    sell: { notional: 0, size: 0 },
+  };
+  for (const order of orders) {
+    if (stopTakeKind(order.order_type)) continue;
+    const side = order.side === "buy" ? "buy" : order.side === "sell" ? "sell" : null;
+    if (side == null) continue;
+    const notional = orderNotional(order);
+    const size = parseFloat(order.remaining);
+    if (notional == null || !(size > 0)) continue;
+    acc[side].notional += notional;
+    acc[side].size += size;
+  }
+  return (["buy", "sell"] as const).flatMap((side) =>
+    acc[side].size > 0 ? [{ side, size: acc[side].size, price: acc[side].notional / acc[side].size }] : []
+  );
+}
+
+type SortableOrder = {
+  symbol: string;
+  market_index: number;
+  side: string;
+  order_type: string;
+  price: string;
+  remaining: string;
+  trigger_price?: string;
+};
+
+/** Feed order until a column is chosen. A missing Away or notional stays last. */
+export function sortOpenOrders<T extends SortableOrder>(
+  orders: readonly T[],
+  sort: TableSort<OrderSortKey> | null,
+  quote: (
+    marketIndex: number
+  ) => {
+    last_trade_price?: number | null;
+    mark_price?: number | null;
+    mid_price?: number | null;
+  } | null | undefined
+): T[] {
+  if (sort == null) return [...orders];
+  const value = (order: T): number | null =>
+    sort.key === "notional" ? orderNotional(order) : fillDistancePct(order, quote(order.market_index));
+  return [...orders].sort((a, b) => compareSortValues(a, b, value(a), value(b), sort.dir));
 }
 
 export function workingProtectOrders<

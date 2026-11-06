@@ -14,13 +14,13 @@ export function SortHead<K extends string>({
 }: {
   label: string;
   column: K;
-  sort: TableSort<K>;
+  sort: TableSort<K> | null;
   onSort: (key: K) => void;
   title?: string;
   hideBelow?: HideBelow;
   align?: "start" | "end";
 }) {
-  const active = sort.key === column;
+  const active = sort?.key === column;
   return (
     <TableHead hideBelow={hideBelow} className={align === "end" ? "text-right" : undefined}>
       <button
@@ -34,7 +34,7 @@ export function SortHead<K extends string>({
         )}
       >
         {label}
-        {active ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
+        {active && sort ? (sort.dir === "desc" ? " ↓" : " ↑") : null}
       </button>
     </TableHead>
   );

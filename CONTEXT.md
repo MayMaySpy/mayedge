@@ -172,6 +172,10 @@ _Avoid_: using “BBO” for the price-only snapshot; mid; quote; calling the Bo
 An operator-placed working order on a Market. Not a Clip. Bulk side cancel pulls Tickets only.
 _Avoid_: parent (unqualified), manual order, limit (for the working order itself)
 
+**Away**:
+How far a working order is from filling, in percent of the reference. A limit is measured from Last. A Stop or Take Profit is measured from mark, to its trigger. Zero when that price is already through. A missing reference is unknown, not zero.
+_Avoid_: Trail distance, slippage, distance (unqualified)
+
 **Quick size**:
 The single size the floating Buy/Sell buttons and an armed price-axis rest both use.
 _Avoid_: preset, clip size, ticket size (that's the Order panel)

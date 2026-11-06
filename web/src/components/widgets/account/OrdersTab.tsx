@@ -4,13 +4,23 @@ import { OrderRemainingEditor } from "@/components/widgets/OrderRemainingEditor"
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableName, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableName, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScopeToggle } from "@/components/widgets/ListControls";
+import { SortHead } from "@/components/widgets/SortableHeads";
 import { api, type Market, type OpenOrder } from "@/lib/api";
 import { algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
-import { protectOrderLabel, stopTakeKind } from "@/lib/positionsTable";
-import { cn, formatSize } from "@/lib/utils";
+import {
+  fillDistancePct,
+  nextOrderSort,
+  protectOrderLabel,
+  restingSideTotals,
+  sortOpenOrders,
+  stopTakeKind,
+  type OrderSortKey,
+} from "@/lib/positionsTable";
+import type { TableSort } from "@/lib/tableSort";
+import { cn, formatPctAbs, formatSize } from "@/lib/utils";
 import { marketPrice } from "@/lib/marketFormat";
 
 function orderQtyEditable(order: OpenOrder): boolean {
@@ -44,6 +54,7 @@ export function OrdersTab({
   onSymbolChange,
 }: OrdersTabProps) {
   const [orderScope, setOrderScope] = useState<"all" | "pair">("all");
+  const [orderSort, setOrderSort] = useState<TableSort<OrderSortKey> | null>(null);
   const [editingOrder, setEditingOrder] = useState<string | number | null>(null);
 
   const marketByIndex = useMemo(
@@ -141,6 +152,14 @@ export function OrdersTab({
   const bidTickets = scopedTickets.filter((o) => o.side === "buy").length;
   const askTickets = scopedTickets.filter((o) => o.side === "sell").length;
   const visibleOrders = orderScope === "pair" ? pairOrders : allOrders;
+  const shownOrders = useMemo(
+    () => sortOpenOrders(visibleOrders, orderSort, (id) => marketByIndex.get(id)),
+    [visibleOrders, orderSort, marketByIndex]
+  );
+  const sideBooks = useMemo(
+    () => (orderScope === "pair" ? restingSideTotals(visibleOrders) : []),
+    [orderScope, visibleOrders]
+  );
 
   return (
           <ScrollArea className="h-full">
@@ -200,16 +219,30 @@ export function OrdersTab({
                     <TableHead>Market</TableHead>
                     <TableHead hideBelow="sm">Side</TableHead>
                     <TableHead className="text-right">Price</TableHead>
-                    <TableHead className="text-right">Remaining</TableHead>
+                    <SortHead
+                      label="Away"
+                      column="away"
+                      sort={orderSort}
+                      onSort={(key) => setOrderSort((current) => nextOrderSort(current, key))}
+                      title="Percent to fill, closest first"
+                    />
+                    <SortHead
+                      label="Remaining"
+                      column="notional"
+                      sort={orderSort}
+                      onSort={(key) => setOrderSort((current) => nextOrderSort(current, key))}
+                      title="Remaining notional, largest first"
+                    />
                     <TableHead className="text-right" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visibleOrders.map((o) => {
+                  {shownOrders.map((o) => {
                     const algoKind = algoOrderKind(o.client_order_index, {
                       reduceOnly: o.reduce_only,
                     });
                     const sltp = !algoKind ? stopTakeKind(o.order_type) : null;
+                    const away = fillDistancePct(o, marketByIndex.get(o.market_index));
                     return (
                     <TableRow key={o.order_index} accent={o.side === "buy" ? "bid" : "ask"}>
                       <TableCell className="pl-2.5">
@@ -254,6 +287,9 @@ export function OrdersTab({
                             : o.price,
                           o.symbol
                         )}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {away == null ? "—" : formatPctAbs(away, 2)}
                       </TableCell>
                       <TableCell className="relative text-right">
                         {orderQtyEditable(o) && tradingEnabled ? (
@@ -302,6 +338,28 @@ export function OrdersTab({
                     );
                   })}
                 </TableBody>
+                {sideBooks.length > 0 ? (
+                  <TableFooter className="sticky bottom-0 z-10 bg-background">
+                    {sideBooks.map((book) => (
+                      <TableRow
+                        key={book.side}
+                        accent={book.side === "buy" ? "bid" : "ask"}
+                        className="hover:bg-transparent"
+                      >
+                        <TableCell className={cn("pl-2.5", book.side === "buy" ? "text-bid" : "text-ask")}>
+                          {book.side === "buy" ? "Bids" : "Asks"}
+                        </TableCell>
+                        <TableCell hideBelow="sm" />
+                        <TableCell className="text-right" title="Size-weighted average">
+                          {marketPrice(book.price, market?.symbol)}
+                        </TableCell>
+                        <TableCell />
+                        <TableCell className="text-right">{formatSize(book.size)}</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    ))}
+                  </TableFooter>
+                ) : null}
               </Table>
             )}
           </ScrollArea>
