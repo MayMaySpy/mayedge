@@ -395,7 +395,7 @@ export function ChartFrame(props: {
           </ToggleGroupItem>
           <ToggleGroupItem
             value="scan"
-            title="Scan: Rel vs BTC, liquidations, activity and tones"
+            title="Scan: Rel vs BTC, liquidations, activity, tones and setups"
             className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
           >
             Scan
@@ -448,6 +448,13 @@ export function ChartFrame(props: {
                 className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
               >
                 Tones
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="setups"
+                title="Setups: positioning and range on closed hours and days, rebuilt hourly"
+                className="h-5 rounded-sm px-1.5 font-mono text-xs data-[state=on]:bg-rule"
+              >
+                Setups
               </ToggleGroupItem>
             </ToggleGroup>
           ) : null}
@@ -579,7 +586,7 @@ export function ChartFrame(props: {
         ) : (
           <Suspense
             fallback={
-              <BoardFallback title="Scan" detail="Relative strength, liquidations, activity, tones." />
+              <BoardFallback title="Scan" detail="Relative strength, liquidations, activity, tones, setups." />
             }
           >
             <ScanBoard

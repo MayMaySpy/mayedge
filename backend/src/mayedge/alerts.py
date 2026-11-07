@@ -195,6 +195,10 @@ class AlertDetector:
         """True once this UTC day has seeded the week and quarter levels."""
         return self._daily_day.get(market_index) == day
 
+    def daily_bars(self, market_index: int) -> list[Candle]:
+        """The daily bars W1 reads, for the Setups board (setup-rules X4, X5)."""
+        return list(self._daily.get(market_index) or [])
+
     def seed_daily_bars(self, market_index: int, bars: list[Candle], now: float) -> None:
         """W1. Daily bars the week and quarter are read from. Today is dropped at read time."""
         self._daily[market_index] = list(bars)

@@ -407,6 +407,29 @@ def _v17(conn: sqlite3.Connection) -> None:
     _run(conn, IDEA_ALERTS_SQL)
 
 
+SETUP_ROWS_SQL = """
+CREATE TABLE IF NOT EXISTS setup_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    market_index INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    size REAL NOT NULL,
+    price REAL NOT NULL,
+    note TEXT NOT NULL,
+    facts TEXT NOT NULL,
+    first_at INTEGER NOT NULL,
+    last_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_setup_rows_last ON setup_rows(last_at);
+CREATE INDEX IF NOT EXISTS idx_setup_rows_market ON setup_rows(market_index, kind, last_at)
+"""
+
+
+def _v18(conn: sqlite3.Connection) -> None:
+    _run(conn, SETUP_ROWS_SQL)
+
+
 STEPS: tuple[Step, ...] = (
     Step(1, "liquidation columns, algo venue", _v1),
     Step(2, "algo type, params and clip side", _v2),
@@ -425,6 +448,7 @@ STEPS: tuple[Step, ...] = (
     Step(15, "journal excursions", _v15),
     Step(16, "ideas", _v16),
     Step(17, "idea price alerts", _v17),
+    Step(18, "setup rows", _v18),
 )
 
 LATEST = STEPS[-1].version

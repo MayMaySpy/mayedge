@@ -17,7 +17,7 @@ export const RIGHT_OFFSET = 8;
 
 export const CHART_MODES = ["price", "scan", "watch"] as const;
 export type ChartMode = (typeof CHART_MODES)[number];
-export const SCAN_TABS = ["rel", "liqs", "act", "tones"] as const;
+export const SCAN_TABS = ["rel", "liqs", "act", "tones", "setups"] as const;
 
 export function loadVol(): boolean {
   try {

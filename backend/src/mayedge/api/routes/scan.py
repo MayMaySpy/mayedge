@@ -20,6 +20,14 @@ async def get_scan_tones() -> list[dict[str, Any]]:
     return await gateway.paced_tone_board()
 
 
+@router.get("/api/scan/setups")
+async def get_scan_setups() -> dict[str, Any]:
+    """docs/setup-rules.md: the board as last rebuilt. It changes once an hour."""
+    from mayedge.setups_board import current_view
+
+    return current_view()
+
+
 @router.get("/api/scan/tones/timeframes")
 async def get_tone_timeframes() -> dict[str, Any]:
     return gateway.tone_timeframes_view()

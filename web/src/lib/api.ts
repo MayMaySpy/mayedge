@@ -643,6 +643,25 @@ export interface ToneBoardRow {
   close: number;
 }
 
+/** docs/setup-rules.md: one row of the Setups board. */
+export type SetupKind = "oi_price" | "funding" | "board" | "coil" | "reclaim" | "flush";
+
+export interface SetupRow {
+  kind: SetupKind;
+  market_index: number;
+  symbol: string;
+  direction: "up" | "down" | "flat";
+  size: number;
+  price: number;
+  note: string;
+}
+
+export interface SetupBoard {
+  /** When the board was last rebuilt, ms. Null until the first build. */
+  built_at: number | null;
+  rows: SetupRow[];
+}
+
 export interface ToneTimeframes {
   timeframes: string[];
   choices: string[];
@@ -755,6 +774,7 @@ export const api = {
   pushTest: () => request<{ ok: boolean; error?: string }>("/push/test", { method: "POST" }),
   scanActivity: () => request<ScanActivityRow[]>("/scan/activity"),
   toneBoard: () => request<ToneBoardRow[]>("/scan/tones"),
+  setups: () => request<SetupBoard>("/scan/setups"),
   toneTimeframes: () => request<ToneTimeframes>("/scan/tones/timeframes"),
   setToneTimeframes: (timeframes: string[]) =>
     request<ToneTimeframes>("/scan/tones/timeframes", {

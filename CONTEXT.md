@@ -236,6 +236,10 @@ _Avoid_: risk unit (unqualified), ATR, a second "suggested" stop, RR, risk-rewar
 The stop a live Position's R is measured from in the Position watch: its open Idea's stop, else the first Stop price seen in its Round trip. A Stop moved later does not move it. The rules are in [docs/position-rules.md](docs/position-rules.md#stops-and-r).
 _Avoid_: stop (unqualified, that is the order), invalidation (that is the Idea's text)
 
+**Setup**:
+A fact about a liquid perp's positioning or range on closed hours and days, listed on the Setups board and written down for scoring. It raises nothing. The rules are in [docs/setup-rules.md](docs/setup-rules.md).
+_Avoid_: signal, trade idea, opportunity, alert (it is not an alert row)
+
 **Position watch**:
 The pushes about the operator's own Positions: no Stop, R reached, the Idea's stop closed through, crowded funding, funding bleed, and the daily brief. It never sends an order.
 _Avoid_: monitor, risk alerts, position alerts (they are not alert rows)

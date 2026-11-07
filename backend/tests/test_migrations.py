@@ -174,8 +174,23 @@ class MigrationTests(unittest.TestCase):
             shape = _shape(conn)
             version = migrations.stored_version(conn)
         self.assertEqual(shape, fresh)
-        self.assertEqual(version, 17)
+        self.assertEqual(version, store.SCHEMA_VERSION)
         self.assertIn("idea_alerts", shape)
+
+    def test_step_18_adds_setup_rows_to_a_version_17_file(self) -> None:
+        fresh = self._fresh_shape()
+        store.init_db()
+        with store._lock:
+            conn = store._connect()
+            conn.execute("DROP TABLE IF EXISTS setup_rows")
+            store._set_meta(conn, "schema_version", "17")
+            conn.commit()
+            store._migrate(conn)
+            shape = _shape(conn)
+            version = migrations.stored_version(conn)
+        self.assertEqual(shape, fresh)
+        self.assertEqual(version, 18)
+        self.assertIn("setup_rows", shape)
 
     def test_a_failed_step_leaves_the_file_at_the_step_before(self) -> None:
         store.init_db()

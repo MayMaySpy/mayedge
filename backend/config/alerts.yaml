@@ -76,6 +76,26 @@ outcomes:
   horizon_min: 15
   retention_days: 30
 
+setups:
+  # docs/setup-rules.md. The Setups board on Scan, rebuilt once an hour. Nothing on it toasts.
+  # X1: open interest moved this many percent in 24h, price at most a third of that.
+  oi_pct: 5
+  oi_over_price: 3
+  # X2: the last 72 settled prints, 90% one sign, mean 3x the 30-day median.
+  funding_hours: 72
+  funding_agree: 0.9
+  funding_x: 3
+  # X3: BTC moved this much in 24h, and the market is this many points the other side of it.
+  board_pct: 1
+  gap_pct: 5
+  # X4: the last 3 days ranged at most half the 30 before them, within 2% of a Week high or low.
+  coil_days: 3
+  coil_ratio: 0.5
+  coil_near_pct: 2
+  # X6: one side's liquidations in 4h at least this many bps of OI, and OI down this much.
+  flush_bps: 50
+  flush_oi_pct: 3
+
 push:
   # Which alert rows push: held (Held markets and Near liquidation), urgent, or all. off to mute.
   alerts: held

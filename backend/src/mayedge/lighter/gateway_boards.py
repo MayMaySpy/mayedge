@@ -15,7 +15,7 @@ from typing import Any
 import lighter
 
 from mayedge.alert_rows import order_away_pct
-from mayedge.alerts import AlertDetector, Held
+from mayedge.alerts import AlertDetector, AlertSettings, Held
 from mayedge.funding_backfill import backfill_funding, backfill_funding_days
 from mayedge.lighter.budget import budget
 from mayedge.lighter.liquidations import LiquidationFeed
@@ -96,6 +96,12 @@ class GatewayBoards:
 
     def funding_extremes(self) -> list[dict[str, Any]]:
         return self._alerts.funding_extremes()
+
+    def alert_thresholds(self) -> AlertSettings:
+        return self._alerts.settings
+
+    def daily_bars(self, market_index: int) -> list[Candle]:
+        return self._alerts.daily_bars(market_index)
 
     def tone_board(self) -> list[dict[str, Any]]:
         """Liquid perps whose last closed bar on a Tone timeframe is blue or orange."""

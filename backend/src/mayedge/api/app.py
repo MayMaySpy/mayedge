@@ -43,6 +43,8 @@ from mayedge.portfolio_sync import stop as stop_portfolio_sync
 from mayedge.position_watch import PositionWatch, PositionWatchLoop, WatchSettings
 from mayedge.position_watch_feed import gather as gather_positions
 from mayedge.push import TelegramPusher, boot_text, freeze_text, load_push_settings
+from mayedge.setups_board import start as start_setups
+from mayedge.setups_board import stop as stop_setups
 from mayedge.tone_compute import close as close_tone_pool
 
 logger = logging.getLogger(__name__)
@@ -172,6 +174,7 @@ async def lifespan(app: FastAPI):
         ),
     )
     position_watch.start()
+    start_setups()
     n_algos = len(desk.algo_book().get("working") or [])
     pusher.push(
         "boot",
@@ -183,6 +186,7 @@ async def lifespan(app: FastAPI):
     finally:
         set_fill_listener(None)
         await position_watch.stop()
+        await stop_setups()
         await stop_journal()
         set_open_emitter(None)
         await stop_portfolio_sync()
