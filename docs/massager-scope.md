@@ -1,6 +1,6 @@
 # Massager: scope (draft 1)
 
-Scope for an algo that works a Position the operator already holds: it sells some of it as price rises and buys it back as price falls, inside a Band, so the Position earns from the range without leaving the size the operator chose. Not built. When it is, the rules move to `massager-rules.md` and this file is kept for the reasoning.
+Scope for an algo that works a Position the operator already holds: it sells some of it as price rises and buys it back as price falls, inside a Band, so the Position earns from the range without leaving the size the operator chose. Phase 1 built on 2026-11-07: the rules live in [massager-rules.md](massager-rules.md). This file is kept for the reasoning; where it and the rules differ, the rules win.
 
 Words in bold mean what [CONTEXT.md](../CONTEXT.md) says they mean.
 
@@ -76,7 +76,7 @@ Step is derived: Band width ÷ (2 × Swing ÷ Clip). Starting is refused if a St
 
 ### 2.4 At start
 
-It reads the Position. Long or short, the Core takes that side; a short Core sells below the Center and buys above it, the mirror image. With no Position it refuses. If price is away from the Center, it owes the Lean for the levels price has already passed. In the LIT example, starting at 3.42 owes a sell of 100 (the 3.40 level). That catch-up goes on post-only at the touch, never at market, and the lattice starts once it fills. The form shows the catch-up before Start.
+It reads the Position. Long or short, the Core takes that side. Either way it sells above the Center and buys below it: a short holder also sells high and covers low, so a short Position grows as price rises and shrinks as it falls (rules MS7). With no Position it refuses. If price is away from the Center, it owes the Lean for the levels price has already passed. In the LIT example, starting at 3.42 owes a sell of 100 (the 3.40 level). That catch-up goes on post-only at the touch, never at market, and the lattice starts once it fills. The form shows the catch-up before Start.
 
 ### 2.5 The Core moves with outside fills
 

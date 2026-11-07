@@ -208,6 +208,30 @@ _Avoid_: iceberg (unqualified), MM, chasing (unqualified)
 An algo that chases inside a price band and takes profit on each lot it bought. It counts only its own fills, not the Position, so it runs beside Chase, Ladder and TWAP on one Market. The rules are in [docs/grid-rules.md](docs/grid-rules.md).
 _Avoid_: grid bot, DCA
 
+**Massager**:
+A desk algo that works an open Position up and down inside a Band, selling above its Center and buying back below, so the Position earns from the range and comes back to its **Core**. It needs a Position to start. Its orders are Clips. The rules are in [docs/massager-rules.md](docs/massager-rules.md).
+_Avoid_: grid (that's **Grid**), DCA, rebalance, scalper
+
+**Core**:
+The size a Massager works around: the Position minus its **Lean**. Set from the Position at start, it moves only by outside fills.
+_Avoid_: base, main position, target size
+
+**Lean**:
+What a Massager holds off its Core: its own Clips' net fills, signed. The Position is Core + Lean.
+_Avoid_: inventory (that's Grid's), deviation, offset, drift
+
+**Swing**:
+The most a Massager's Lean may be, either way. The Position stays between Core − Swing and Core + Swing.
+_Avoid_: range (that's the Band), max inventory (that's Grid's)
+
+**Captured**:
+A Massager's realized profit on its Lean, by average cost, less its fees.
+_Avoid_: PnL (unqualified), profit (unqualified)
+
+**Basis**:
+What a Massager's Core cost after Captured: the Core's entry less Captured per unit of Core. Lighter's entry only moves when you add, so it does not show the work; Basis does.
+_Avoid_: entry (that's the venue's), cost (unqualified), Breakeven (that's Planner's)
+
 **Ladder**:
 An algo that keeps N live rungs on static prices.
 _Avoid_: scale, iceberg, using “ladder” for the live book
