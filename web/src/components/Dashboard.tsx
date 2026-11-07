@@ -330,6 +330,16 @@ function ChartPanel({
           label: `${id} CEIL`,
         });
       }
+      // Massager MS5: the Center, where the Position is its Core. Its levels rest as orders.
+      if (algo.algo_type === "massager" && floor > 0 && ceil > floor) {
+        lines.push({
+          id: `${id}-center`,
+          kind: "band",
+          price: (floor + ceil) / 2,
+          color: `${theme.muted}cc`,
+          label: `${id} CENTER`,
+        });
+      }
     }
     if (planArmed) {
       const plan = preview?.plan;

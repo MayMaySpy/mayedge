@@ -1,6 +1,6 @@
 # Massager: scope (draft 1)
 
-Scope for an algo that works a Position the operator already holds: it sells some of it as price rises and buys it back as price falls, inside a Band, so the Position earns from the range without leaving the size the operator chose. Phase 1 built on 2026-11-07: the rules live in [massager-rules.md](massager-rules.md). This file is kept for the reasoning; where it and the rules differ, the rules win.
+Scope for an algo that works a Position the operator already holds: it sells some of it as price rises and buys it back as price falls, inside a Band, so the Position earns from the range without leaving the size the operator chose. Built on 2026-11-07, all four phases: the rules live in [massager-rules.md](massager-rules.md). This file is kept for the reasoning; where it and the rules differ, the rules win.
 
 Words in bold mean what [CONTEXT.md](../CONTEXT.md) says they mean.
 

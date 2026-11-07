@@ -15,7 +15,7 @@ export function startNotice(
     label,
     side,
     size,
-  }: { kind: "chase" | "grid" | "ladder"; label: string; side?: "buy" | "sell"; size: string }
+  }: { kind: "chase" | "grid" | "ladder" | "massager"; label: string; side?: "buy" | "sell"; size: string }
 ): { book: AlgoBook; setLiveBook: true; notice: OrderNoticeInput } {
   const just = book.working?.[0];
   const symbol = ctx.market.symbol;

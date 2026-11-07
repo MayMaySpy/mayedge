@@ -85,6 +85,7 @@ Every algo works in **Clips**, not Tickets, and persists in SQLite; start, pause
 |---|---|---|
 | **Chase** | One post-only Clip behind the touch, requoted as the book walks, up to a cap. | Order panel → Algo |
 | **Grid** | Chases inside a price band, takes profit on each lot it bought. | Order panel → Algo |
+| **Massager** | Works an open Position up and down inside a Band, back to its Core. | Order panel → Algo |
 | **Ladder** | Keeps N live rungs on static prices; refills on fill. | Order panel → Algo |
 | **TWAP** | Slices a parent size across time. | Order panel → Algo |
 | **Planner** | Runs one trade from its stop: entry, stop, targets, **Stop steps**. On an open Position it attaches instead: it takes over the exit and enters nothing. | Order panel → Algo, or a Positions row's Plan |
@@ -204,6 +205,10 @@ Chase jobs persist in SQLite. On shutdown, venue Clips are **pulled**; on restar
 ### Grid
 
 Chases inside a price band and takes profit on each lot it bought. Its inventory is only its own fills, never the Position, so a Ladder buy, a Grid and a Ladder sell can run on one Market. Stop it when you close its Market by hand. Rules: [docs/grid-rules.md](docs/grid-rules.md).
+
+### Massager
+
+Works a Position you already hold. The ticket's size is the **Swing**: the Band is cut into levels, it sells a Clip at each level above the Center and buys it back a level lower, so the Position moves between Core − Swing and Core + Swing and comes back to its **Core**. **Basis** is the Core's entry less what that captured. Outside the Band it holds what it has. A Ladder or a hand add moves the Core; a hand close stops it. It never touches your Stops, and it does not run beside a Planner, Trail or Grid. Rules: [docs/massager-rules.md](docs/massager-rules.md).
 
 ### Ladder
 

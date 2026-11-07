@@ -324,6 +324,7 @@ export function OrderTicket({
     priceDecimals: market.price_decimals,
     minBase: market.min_base_amount ?? 0,
     minQuote: market.min_quote_amount ?? 0,
+    signedPos,
   };
   const algoBlocked =
     kind === "algo" && plugin
@@ -557,7 +558,7 @@ export function OrderTicket({
                 workingPrice={workingPrice}
                 otherUnitHint={otherUnitHint}
                 canUseUsd={canUseUsd}
-                label={singleAction ? "Cap" : "Size"}
+                label={(kind === "algo" ? plugin?.sizeLabel : undefined) ?? (singleAction ? "Cap" : "Size")}
                 minHint={sizeMin?.text}
                 minHintWarn={sizeMin?.warn}
                 onSizeChange={setSize}

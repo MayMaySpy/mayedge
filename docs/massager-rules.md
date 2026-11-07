@@ -4,7 +4,7 @@ What a **Massager** does. Change a rule here first, then the code and the test t
 
 Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means the number is not a knob. Sizes are signed: long above zero, short below.
 
-Last checked against the code: 2026-11-07. Phases 1 to 3: the planner (`algos/massager/plan.py`), the job (`algos/massager/job.py`) and the desk wiring are coded. The desk can start one through `POST /api/algos/massager/start` (body: `market_index`, `band_low`, `band_high`, `swing`, `clip`; a refusal is a 400 with its rule's message), but nothing on the page does yet: the ticket, the working row and the chart are phase 4.
+Last checked against the code: 2026-11-07. Built in four phases: the planner (`algos/massager/plan.py`), the job (`algos/massager/job.py`), the desk wiring, and the ticket, working row and chart (`web/src/lib/massager.ts`, `MassagerParamsSheet`, `MassagerRow`). The API is `POST /api/algos/massager/start` (body: `market_index`, `band_low`, `band_high`, `swing`, `clip`; a refusal is a 400 with its rule's message).
 
 ## Example
 
@@ -53,3 +53,11 @@ LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3
 | MS16 | Lean, level, level fills, Captured, Core, Core entry and the catch-up are kept with the run. On restart the Clips are pulled as for every Clip algo, the Core is judged again from the Position (MS12), and the lattice goes back on. | | `test_a_run_comes_back_with_its_lean_level_and_core` |
 | MS17 | Every Clip is a post-only Limit, never reduce-only, and it never sends a Market order. It never places, Amends or cancels a Stop or Take Profit Ticket. | | `test_start_takes_the_core_and_rests_two_levels_each_side` |
 | MS18 | One Massager per Market. It runs beside Chase, Ladder and TWAP. It refuses beside a Planner, a Trail or a Grid, and they refuse beside it. Its Clips take client_order_index from `[13e9, 14e9)` ([ADR 0004](adr/0004-partitioned-client-order-index.md)); its runs are `MS-`, named Massager in the journal and in a push. | `[13e9, 14e9)` is code | `test_massager_refuses_beside_planner_trail_or_grid`, `test_its_band_is_an_algo_band`, `test_its_runs_are_named_massager`, `test_a_massager_run_reads_back_with_its_core_lean_and_captured` |
+
+## On the page
+
+| # | Rule | Value | Test |
+|---|---|---|---|
+| MS19 | **Order ticket → Algo → Massager.** The ticket's size is the Swing, and the size field says so; the sheet takes the Clip and the Band. It shows the Core, the Position range, the Center, the Step, the levels each side, what one round trip captures and the catch-up, worked out the way MS1–MS8 do. Start is blocked with MS1–MS5's own words, and on reduce-only. MS6 needs the account's fee and is the backend's to refuse. It is one action, not Buy or Sell. | | `web: massager.test.ts`, `web: algoPlugins.test.ts` |
+| MS20 | **The working row** shows the Position and its range (Core ∓ Swing), Captured, Core, Lean, Basis against the Core's entry, the Band, Swing, Clip and level. Opened, it lists the live Clips by level and the fills. **The chart** draws the Band's ends and its Center; the resting levels are drawn as orders. | | `web: massager.test.ts` |
+

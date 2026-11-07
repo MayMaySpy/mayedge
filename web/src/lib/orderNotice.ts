@@ -10,6 +10,7 @@ export type OrderNoticeInput = {
     | "ladder"
     | "planner"
     | "trail"
+    | "massager"
     | "leverage"
     | "fill"
     | "desk";
@@ -51,7 +52,9 @@ export function orderNotice(input: OrderNoticeInput): {
               ? "Planner refused"
               : input.kind === "trail"
                 ? "Trail refused"
-                : input.title || "Order failed";
+                : input.kind === "massager"
+                  ? "Massager refused"
+                  : input.title || "Order failed";
     return { title, description: input.note ?? "", tone: "err" };
   }
   const tone: NoticeTone = input.side === "sell" ? "ask" : input.side === "buy" ? "bid" : "ok";
@@ -95,6 +98,20 @@ export function orderNotice(input: OrderNoticeInput): {
     return {
       title: "Grid started",
       description: [input.size, input.symbol, input.price].filter(Boolean).join(" "),
+      tone: "ok",
+    };
+  }
+  if (input.kind === "massager") {
+    if (input.status === "paused") {
+      return {
+        title: "Massager waiting",
+        description: [input.symbol, input.note].filter(Boolean).join(" · "),
+        tone: "warn",
+      };
+    }
+    return {
+      title: "Massager started",
+      description: [input.symbol, input.size ? `Swing ${input.size}` : ""].filter(Boolean).join(" · "),
       tone: "ok",
     };
   }

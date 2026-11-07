@@ -343,6 +343,14 @@ export interface AlgoState {
   inventory?: string | null;
   inventory_vwap?: string | null;
   captured_pnl?: string | null;
+  /** Massager: its Core, Lean, Position, level, Core entry and Basis (massager-rules). */
+  core?: string | null;
+  lean?: string | null;
+  position?: string | null;
+  level?: number | null;
+  catching?: boolean | null;
+  core_entry?: string | null;
+  basis?: string | null;
   profit_bps?: string | null;
   grid_bps?: string | null;
   be_delay_ms?: number | null;

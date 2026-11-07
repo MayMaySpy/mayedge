@@ -12,6 +12,7 @@ import {
   LADDER_COI_BASE,
   MASSAGER_COI_BASE,
   MASSAGER_COI_END,
+  massagerPlugin,
   ladderPlugin,
   PLANNER_COI_BASE,
   PLANNER_COI_END,
@@ -69,12 +70,12 @@ describe("algo plugin COI bands", () => {
     expect(ALGOS.some((a) => (a.id as string) === "planner")).toBe(false);
   });
 
-  it("attributes Massager Clips by band; its ticket is not in the Algo menu yet", () => {
+  it("attributes Massager Clips by band and offers it in the Algo menu", () => {
     expect(isAlgoClientOrder(MASSAGER_COI_BASE)).toBe(true);
     expect(algoOrderKind(MASSAGER_COI_BASE + 1)).toBe("Massager");
     expect(isAlgoClientOrder(MASSAGER_COI_END)).toBe(false);
     expect(algoPluginByDeskType("massager")?.label).toBe("Massager");
-    expect(ALGOS.some((a) => (a.id as string) === "massager")).toBe(false);
+    expect(ALGOS.some((a) => a.id === "massager")).toBe(true);
   });
 });
 
@@ -319,5 +320,34 @@ describe("twap plugin blockReason", () => {
         ctx
       )
     ).toBe("Max 5% from mark");
+  });
+});
+
+describe("massager plugin", () => {
+  const ctx = {
+    sizeNum: 300,
+    decimals: 0,
+    minSz: 10,
+    symbol: "LIT",
+    spot: 3.42,
+    priceDecimals: 4,
+    minBase: 10,
+    signedPos: 1000,
+  };
+  const state = { clip: "100", chaseFloor: "3.20", chaseCeiling: "3.50" };
+
+  it("starts from a Position, never reduce-only, as one action", () => {
+    expect(massagerPlugin.blockReason(state, ctx)).toBeNull();
+    expect(massagerPlugin.blockReason(state, { ...ctx, signedPos: 0 })).toBe(
+      "A Massager needs an open Position"
+    );
+    expect(massagerPlugin.blockReason(state, { ...ctx, reduceOnly: true })).toBe(
+      "A Massager is never reduce-only"
+    );
+    expect(massagerPlugin.blockReason(state, { ...ctx, sizeNum: 250 })).toBe(
+      "The Swing must be a whole number of Clips"
+    );
+    expect(massagerPlugin.singleAction).toBe(true);
+    expect(massagerPlugin.cta("buy")).toBe("Start Massager");
   });
 });

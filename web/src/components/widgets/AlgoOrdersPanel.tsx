@@ -5,6 +5,7 @@ import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlgoRow } from "@/components/widgets/algo/AlgoRow";
+import { MassagerRow } from "@/components/widgets/massager/MassagerRow";
 import { PlannerRow } from "@/components/widgets/planner/PlannerRow";
 import { TrailRow } from "@/components/widgets/trail/TrailRow";
 import { ScopeToggle } from "@/components/widgets/ListControls";
@@ -75,6 +76,17 @@ function AlgoList({
             onProtect={
               showControls && onProtect && algo.algo_id ? () => onProtect(algo.algo_id!) : undefined
             }
+          />
+        ) : algo.algo_type === "massager" ? (
+          <MassagerRow
+            key={algo.algo_id ?? `${algo.symbol}-${algo.created_at}`}
+            algo={algo}
+            busy={busyId === algo.algo_id || busyId === "*"}
+            emphasize={!!symbol && algo.symbol === symbol}
+            tradingEnabled={tradingEnabled}
+            onStop={showControls && algo.algo_id ? () => onStop(algo.algo_id!) : undefined}
+            onPause={showControls && algo.algo_id ? () => onPause(algo.algo_id!) : undefined}
+            onResume={showControls && algo.algo_id ? () => onResume(algo.algo_id!) : undefined}
           />
         ) : (
           <AlgoRow

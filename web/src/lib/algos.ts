@@ -83,6 +83,9 @@ const PAUSE_COPY: Record<string, string> = {
   inventory_cap: "At inventory cap",
   tp_covers: "Profit orders covering",
   waiting: "Waiting",
+  catch_up: "Catching up at the touch",
+  core_within_swing: "Core no larger than the Swing",
+  position_closed: "Position closed",
 };
 
 export function algoReasonLabel(reason: string | null | undefined): string {

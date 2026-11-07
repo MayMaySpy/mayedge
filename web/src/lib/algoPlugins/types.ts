@@ -20,6 +20,8 @@ export interface AlgoBlockContext {
   /** The venue's base and quote minimums, for algos whose orders rest away from the touch. */
   minBase?: number;
   minQuote?: number;
+  /** The open Position on this Market, signed. For algos that start from one. */
+  signedPos?: number;
 }
 
 export interface AlgoSubmitContext {
@@ -54,6 +56,8 @@ export interface AlgoPlugin<TState = unknown> {
   cta: (side: "buy" | "sell") => string;
   /** Two-sided algos: one CTA instead of buy/sell. */
   singleAction?: boolean;
+  /** What the ticket's size field means for this algo. Defaults to Cap for one action, else Size. */
+  sizeLabel?: string;
   submit: (
     state: unknown,
     ctx: AlgoSubmitContext
