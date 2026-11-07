@@ -5,9 +5,12 @@ Sizes are signed: long above zero, short below. The Position is Core + Lean.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
-from typing import Literal
+from typing import Any, Literal
+
+from mayedge.numbers import fmt_decimal
+from mayedge.rows import obj
 
 ALGO_ID = "massager"
 ALGO_VERSION = "1"
@@ -39,6 +42,23 @@ class MassagerParams:
     band_high: Decimal
     swing: Decimal
     clip: Decimal
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "band_low": fmt_decimal(self.band_low) or "0",
+            "band_high": fmt_decimal(self.band_high) or "0",
+            "swing": fmt_decimal(self.swing) or "0",
+            "clip": fmt_decimal(self.clip) or "0",
+        }
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> MassagerParams:
+        return cls(
+            band_low=Decimal(str(raw.get("band_low") or "0")),
+            band_high=Decimal(str(raw.get("band_high") or "0")),
+            swing=Decimal(str(raw.get("swing") or "0")),
+            clip=Decimal(str(raw.get("clip") or "0")),
+        )
 
 
 @dataclass(frozen=True)
@@ -167,10 +187,45 @@ class Book:
     lean: Decimal = ZERO
     lean_price: Decimal | None = None
     captured: Decimal = ZERO
+    # MS9: what has filled at each level since the lattice last moved.
+    level_fills: dict[int, Decimal] = field(default_factory=dict)
 
-    def level_filled(self, level: int) -> None:
-        """MS9: only a level whose Clip filled in full moves the lattice."""
+    def level_fill(self, level: int, qty: Decimal, clip: Decimal) -> bool:
+        """MS9: fills at a level add up; a whole Clip there moves the lattice to it."""
+        total = self.level_fills.get(level, ZERO) + qty
+        if total < clip:
+            self.level_fills[level] = total
+            return False
         self.level = level
+        self.level_fills.clear()
+        return True
+
+    def qty_for(self, order: LevelOrder, swing: Decimal) -> Decimal:
+        """MS9: what is left of the level's Clip, never taking the Lean past the Swing."""
+        left = order.qty - self.level_fills.get(order.level, ZERO)
+        room = swing - self.lean if order.side == "buy" else swing + self.lean
+        return max(ZERO, min(left, room))
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "level": self.level,
+            "lean": str(self.lean),
+            "lean_price": str(self.lean_price) if self.lean_price is not None else None,
+            "captured": str(self.captured),
+            "level_fills": {str(k): str(v) for k, v in self.level_fills.items()},
+        }
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> Book:
+        price = raw.get("lean_price")
+        fills = obj(raw.get("level_fills"))
+        return cls(
+            level=int(raw.get("level") or 0),
+            lean=Decimal(str(raw.get("lean") or "0")),
+            lean_price=Decimal(str(price)) if price is not None else None,
+            captured=Decimal(str(raw.get("captured") or "0")),
+            level_fills={int(k): Decimal(str(v)) for k, v in fills.items()},
+        )
 
     def fill(self, side: Side, qty: Decimal, price: Decimal, fee: Decimal = ZERO) -> None:
         """MS10: average-cost Lean. A reduction realizes; a fill through zero opens the rest."""

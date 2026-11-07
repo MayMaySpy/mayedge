@@ -146,11 +146,32 @@ class LatticeTests(unittest.TestCase):
 
     def test_a_full_fill_moves_the_level(self) -> None:
         book = Book(level=1)
-        book.fill("buy", D("40"), D("3.35"))
+        self.assertFalse(book.level_fill(0, D("40"), PARAMS.clip))
         self.assertEqual(book.level, 1)
-        book.fill("buy", D("60"), D("3.35"))
-        book.level_filled(0)
+        self.assertTrue(book.level_fill(0, D("60"), PARAMS.clip))
+        self.assertEqual(book.level, 0)
+        self.assertEqual(book.level_fills, {})
         self.assertEqual([o.level for o in resting(self.grid, PARAMS, book.level)], [1, 2, -1, -2])
+
+    def test_a_partly_filled_level_rests_what_is_left(self) -> None:
+        book = Book(level=1)
+        book.fill("buy", D("40"), D("3.35"))
+        book.level_fill(0, D("40"), PARAMS.clip)
+        buy0 = next(o for o in resting(self.grid, PARAMS, 1) if o.level == 0)
+        self.assertEqual(book.qty_for(buy0, PARAMS.swing), D("60"))
+
+    def test_no_order_takes_the_lean_past_the_swing(self) -> None:
+        book = Book(level=-2, lean=D("250"))
+        buy = next(o for o in resting(self.grid, PARAMS, -2) if o.level == -3)
+        self.assertEqual(book.qty_for(buy, PARAMS.swing), D("50"))
+        sell = next(o for o in resting(self.grid, PARAMS, -2) if o.level == -1)
+        self.assertEqual(book.qty_for(sell, PARAMS.swing), D("100"))
+
+    def test_the_book_round_trips(self) -> None:
+        book = Book(level=-1, lean=D("100"), lean_price=D("3.3"), captured=D("5"))
+        book.level_fills[-2] = D("30")
+        self.assertEqual(Book.from_json(book.to_json()), book)
+        self.assertEqual(MassagerParams.from_json(PARAMS.to_json()), PARAMS)
 
     def test_a_short_core_also_sells_above_the_center(self) -> None:
         """MS7: a short holder sells high too, so its Position grows as price rises."""

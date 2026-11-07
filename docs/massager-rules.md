@@ -4,7 +4,7 @@ What a **Massager** does. Change a rule here first, then the code and the test t
 
 Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means the number is not a knob. Sizes are signed: long above zero, short below.
 
-Last checked against the code: 2026-11-07. Phase 1: the rules below are coded as a pure planner (`algos/massager/plan.py`). Nothing places an order yet; the job, the desk wiring and the ticket are phases 2 to 4.
+Last checked against the code: 2026-11-07. Phases 1 and 2: the planner (`algos/massager/plan.py`) and the job (`algos/massager/job.py`) are coded and run on the harness fakes. The desk does not offer it yet: the registry, exclusivity, the web band and the ticket are phases 3 and 4.
 
 ## Example
 
@@ -33,12 +33,22 @@ LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3
 |---|---|---|---|
 | MS7 | It sells above the Center and buys below it, whatever the Core's side. Level k stands for a **Lean** of −k × Clip, so the Position stays between Core − Swing and Core + Swing. For a long that is smaller as price rises; for a short it is larger. | | `test_a_short_core_also_sells_above_the_center` |
 | MS8 | At start it owes the Lean for the levels price has passed: k₀ is the furthest level at or behind the mid on its side of the Center, and the catch-up is −k₀ × Clip, a sell for k₀ above 0, a buy below, nothing at the Center. It goes on post-only at the touch (phase 2). | | `test_the_catch_up_owes_the_levels_passed`, `test_no_catch_up_at_the_center` |
-| MS9 | From level L it rests a sell at L + 1 and L + 2 and a buy at L − 1 and L − 2, one Clip each, none past ±levels. A level whose Clip fills in full becomes L. A partial fill does not move L. | 2 each side is code | `test_two_levels_rest_each_side`, `test_the_edge_rests_only_inward`, `test_a_full_fill_moves_the_level` |
+| MS9 | From level L it rests a sell at L + 1 and L + 2 and a buy at L − 1 and L − 2, one Clip each, none past ±levels. Fills at a level add up across its Clips; once they make a whole Clip, that level becomes L and the count starts again. Until then L stays, and the level's next Clip is for what is left. No Clip takes the Lean past the Swing. | 2 each side is code | `test_two_levels_rest_each_side`, `test_the_edge_rests_only_inward`, `test_a_full_fill_moves_the_level`, `test_a_partly_filled_level_rests_what_is_left`, `test_no_order_takes_the_lean_past_the_swing`, `test_start_takes_the_core_and_rests_two_levels_each_side`, `test_a_partial_fill_keeps_the_level` |
 
 ## What it counts
 
 | # | Rule | Value | Test |
 |---|---|---|---|
-| MS10 | **Captured** is the Lean's realized profit by average cost, less the Massager's fees. A Clip sold and bought back one Step lower captures Clip × Step less fees. A fill through zero closes what it can and opens the rest at its price. | | `test_a_round_trip_captures_one_step`, `test_a_fill_through_zero_opens_the_rest` |
-| MS11 | **Basis** = Core entry − (Core's sign) × Captured ÷ Core's size. Core entry is the venue entry at start, moved by an outside add at its price by average cost. An outside reduction leaves it. | | `test_basis_takes_captured_off_the_core_entry`, `test_an_outside_add_moves_the_core_entry` |
-| MS12 | Core = Position − Lean, after every fill from outside. A Position flat or on the other side of the Core's side stops the Massager. A Core no larger than the Swing pauses it. Otherwise it runs. | | `test_an_outside_close_stops_it`, `test_a_core_shrunk_to_the_swing_pauses_it`, `test_an_outside_add_keeps_it_running` |
+| MS10 | **Captured** is the Lean's realized profit by average cost, less the Massager's fees (the account's maker fee on each fill). A Clip sold and bought back one Step lower captures Clip × Step less fees. A fill through zero closes what it can and opens the rest at its price. | | `test_a_round_trip_captures_one_step`, `test_a_fill_through_zero_opens_the_rest`, `test_a_round_trip_moves_the_level_and_captures_one_step` |
+| MS11 | **Basis** = Core entry − (Core's sign) × Captured ÷ Core's size. Core entry is the venue entry at start, moved by an outside add by average cost at the mid when the Massager takes the change (MS15). An outside reduction leaves it. | | `test_basis_takes_captured_off_the_core_entry`, `test_an_outside_add_moves_the_core_entry`, `test_an_outside_add_moves_the_core_and_its_entry` |
+| MS12 | Core = Position − Lean, after every fill from outside. A Position flat or on the other side of the Core's side stops the Massager. A Core no larger than the Swing pauses it. Otherwise it runs. Stopping and pausing pull its Clips. | | `test_an_outside_close_stops_it`, `test_a_core_shrunk_to_the_swing_pauses_it`, `test_an_outside_add_keeps_it_running` |
+
+## The job
+
+| # | Rule | Value | Test |
+|---|---|---|---|
+| MS13 | The catch-up is one post-only Clip at the touch: a sell at the best ask, a buy at the best bid, for what is still owed. When the touch moves it comes off and goes back on at the new one, no faster than every 2 s and not before the venue has shown it (4 s). Once what is owed is under the venue minimum, the lattice starts at the catch-up's level. | 2 s, 4 s are code | `test_the_catch_up_rests_at_the_touch_then_the_lattice_starts`, `test_the_catch_up_follows_the_touch` |
+| MS14 | A level that would cross the touch is not sent until it would rest, like a Ladder rung, and a resting Clip the touch has crossed comes off. Price that runs past a level leaves the Lean behind until it comes back. | | `test_a_level_that_would_cross_waits` |
+| MS15 | A change of Core counts only once it has held 3 s, so the Massager's own fill seen on the Position before its order row is not taken for an outside one. | 3 s is code | `test_its_own_fill_seen_early_is_not_an_outside_fill`, `test_an_outside_add_moves_the_core_and_its_entry` |
+| MS16 | Lean, level, level fills, Captured, Core, Core entry and the catch-up are kept with the run. On restart the Clips are pulled as for every Clip algo, the Core is judged again from the Position (MS12), and the lattice goes back on. | | `test_a_run_comes_back_with_its_lean_level_and_core` |
+| MS17 | Every Clip is a post-only Limit, never reduce-only, and it never sends a Market order. It never places, Amends or cancels a Stop or Take Profit Ticket. | | `test_start_takes_the_core_and_rests_two_levels_each_side` |
