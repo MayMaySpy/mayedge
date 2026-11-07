@@ -389,69 +389,6 @@ def add_fill_to_lots(
     )
 
 
-def align_runtime_to_position(
-    runtime: GridRuntime,
-    *,
-    venue_size: Decimal,
-    entry: Decimal | None,
-    params: GridParams,
-    market: MarketView,
-    now: int,
-) -> None:
-    """Snap lots + inventory to the venue position. Clip fills can drift; the book cannot."""
-    want_qty = abs(venue_size)
-    want_side: LotSide | None = None if venue_size == 0 else ("long" if venue_size > 0 else "short")
-    matching = (
-        sum(
-            (lot.qty for lot in runtime.lots if want_side is not None and lot.side == want_side),
-            Decimal("0"),
-        )
-        if want_side is not None
-        else Decimal("0")
-    )
-    extras = any(
-        lot.qty > 0 and (want_side is None or lot.side != want_side) for lot in runtime.lots
-    )
-    if runtime.inventory == venue_size and matching == want_qty and not extras:
-        return
-
-    runtime.inventory = venue_size
-    runtime.inventory_vwap = entry if venue_size != 0 else None
-    if venue_size == 0 or want_side is None:
-        runtime.lots = []
-        runtime.merged_active = False
-        return
-
-    runtime.lots = [lot for lot in runtime.lots if lot.side == want_side and lot.qty > 0]
-    have = sum((lot.qty for lot in runtime.lots), Decimal("0"))
-    if have > want_qty:
-        reduce_lots(
-            runtime,
-            close_side=want_side,
-            qty=have - want_qty,
-            now=now,
-            reentry_cooldown_ms=0,
-            fill_vwap=None,
-        )
-        have = sum((lot.qty for lot in runtime.lots), Decimal("0"))
-    if have < want_qty:
-        px = entry or runtime.inventory_vwap
-        if px is None or px <= 0:
-            px = (market.bid if want_side == "long" else market.ask) or Decimal("0")
-        add_fill_to_lots(
-            runtime,
-            side="buy" if want_side == "long" else "sell",
-            fill_qty=want_qty - have,
-            fill_vwap=px,
-            params=params,
-            market=market,
-            now=now,
-        )
-    runtime.inventory = venue_size
-    if entry is not None and entry > 0:
-        runtime.inventory_vwap = entry
-
-
 def apply_inventory_delta(
     runtime: GridRuntime,
     *,

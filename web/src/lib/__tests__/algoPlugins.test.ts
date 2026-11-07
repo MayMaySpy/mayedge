@@ -6,6 +6,7 @@ import {
   chaseGridPlugin,
   chaseIcebergPlugin,
   GRID_COI_BASE,
+  gridTakeProfitCois,
   isAlgoClientOrder,
   ALGOS,
   LADDER_COI_BASE,
@@ -32,7 +33,22 @@ describe("algo plugin COI bands", () => {
     expect(algoOrderKind(TWAP_COI_BASE + 1)).toBe("TWAP");
     expect(algoOrderKind(LADDER_COI_BASE + 1)).toBe("Ladder");
     expect(algoOrderKind(GRID_COI_BASE + 1)).toBe("Grid");
-    expect(algoOrderKind(GRID_COI_BASE + 1, { reduceOnly: true })).toBe("Grid TP");
+    expect(algoOrderKind(GRID_COI_BASE + 1, { gridTakeProfits: new Set([String(GRID_COI_BASE + 1)]) })).toBe("Grid TP");
+  });
+
+  it("tells a Grid take-profit from the book's clip kind, not reduce-only", () => {
+    const tps = gridTakeProfitCois([
+      {
+        algo_type: "chase-grid",
+        clips: [
+          { client_order_index: GRID_COI_BASE + 1, status: "live", kind: "tp" },
+          { client_order_index: GRID_COI_BASE + 2, status: "live", kind: "chase_buy" },
+          { client_order_index: GRID_COI_BASE + 3, status: "filled", kind: "tp" },
+        ],
+      },
+    ]);
+    expect([...tps]).toEqual([String(GRID_COI_BASE + 1)]);
+    expect(algoOrderKind(GRID_COI_BASE + 2, { gridTakeProfits: tps })).toBe("Grid");
   });
 
   it("resolves desk types to plugins", () => {

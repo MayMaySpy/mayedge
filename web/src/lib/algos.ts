@@ -296,6 +296,7 @@ export {
   algoById,
   algoLabelForType,
   algoOrderKind,
+  gridTakeProfitCois,
   algoPluginByCoi,
   algoPluginByDeskType,
   algoPluginById,

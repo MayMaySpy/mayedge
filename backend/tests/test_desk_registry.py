@@ -28,14 +28,27 @@ class DeskRegistryTests(unittest.TestCase):
             self.assertFalse(conflict(1))
         with patch.object(desk.trail_book, "live_on_market", return_value=True):
             self.assertTrue(desk._market_has_other_desk_algo(desk.planner_book)(1))
-            self.assertTrue(desk._market_has_other_desk_algo(desk.grid_book)(1))
+            self.assertTrue(desk.grid_book._market_conflict(1))  # pyright: ignore[reportOptionalCall]
 
     def test_grid_and_planner_each_refuse_beside_another_algo(self) -> None:
+        """Grid G1 and Planner S5: Grid refuses beside a Planner or Trail; Planner beside anything."""
+        grid_conflict = desk.grid_book._market_conflict
+        assert grid_conflict is not None
         with patch.object(desk.planner_book, "live_on_market", return_value=True):
-            self.assertTrue(desk._market_has_other_desk_algo(desk.grid_book)(1))
+            self.assertTrue(grid_conflict(1))
             self.assertTrue(desk.planner_owns_exit(1))
+        with patch.object(desk.trail_book, "live_on_market", return_value=True):
+            self.assertTrue(grid_conflict(1))
         with patch.object(desk.grid_book, "live_on_market", return_value=True):
             self.assertTrue(desk._market_has_other_desk_algo(desk.planner_book)(1))
+
+    def test_grid_runs_beside_chase_ladder_and_twap(self) -> None:
+        """Grid G1: a Ladder buy, a Grid and a Ladder sell can share a Market."""
+        grid_conflict = desk.grid_book._market_conflict
+        assert grid_conflict is not None
+        for book in (desk.chase_book, desk.ladder_book, desk.twap_book):
+            with patch.object(book, "live_on_market", return_value=True):
+                self.assertFalse(grid_conflict(1), book.algo_type)
 
     def test_get_book_by_type(self) -> None:
         self.assertIs(desk.get_book("chase-iceberg"), desk.chase_book)

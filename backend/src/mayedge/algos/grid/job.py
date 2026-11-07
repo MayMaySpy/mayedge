@@ -25,7 +25,6 @@ from mayedge.algos.grid.decide import (
     GridRuntime,
     SideQuote,
     TpTarget,
-    align_runtime_to_position,
     credit_grid_fill,
     decide,
 )
@@ -225,59 +224,14 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
         if params.be_bps != be_bps:
             self._state.params = replace(params, be_bps=be_bps)
 
-    def _seed_inventory(self) -> None:
-        payload = self._exec().cached_account_payload() or {}
-        for pos in payload.get("positions") or ():
-            if int(pos.get("market_index") or 0) != self._state.market_index:
-                continue
-            size = to_decimal(pos.get("size") or "0")
-            if size == 0:
-                return
-            entry = to_decimal(pos.get("avg_entry_price") or pos.get("entry_price") or "0")
-            self._state.runtime.inventory = size
-            self._state.runtime.inventory_vwap = entry if entry > 0 else None
-            self._state.runtime.grid_anchor = entry if entry > 0 else None
-            return
-
-    def _venue_position(self) -> tuple[Decimal, Decimal | None]:
-        payload = self._exec().cached_account_payload() or {}
-        for pos in payload.get("positions") or ():
-            if is_obj(pos):
-                mi = int(pos.get("market_index") or 0)
-                size = to_decimal(pos.get("size") or "0")
-                entry_raw = pos.get("avg_entry_price") or pos.get("entry_price")
-            else:
-                mi = int(getattr(pos, "market_index", 0) or 0)
-                size = to_decimal(getattr(pos, "size", "0") or "0")
-                entry_raw = getattr(pos, "entry_price", None)
-            if mi != self._state.market_index:
-                continue
-            entry = to_decimal(entry_raw) if entry_raw not in (None, "") else Decimal("0")
-            return size, entry if entry > 0 else None
-        return Decimal("0"), None
-
-    def _align_runtime_to_venue(self, view: MarketView) -> None:
-        params = self._state.params
-        if params is None:
-            return
-        size, entry = self._venue_position()
-        align_runtime_to_position(
-            self._state.runtime,
-            venue_size=size,
-            entry=entry,
-            params=params,
-            market=view,
-            now=common.now_ms(),
-        )
-
     async def _place_side(
         self,
         side: str,
         quote: SideQuote,
         *,
         kind: str,
-        reduce_only: bool = False,
     ) -> Clip | None:
+        """G3: Grid's Clips are never reduce-only; a take-profit closes Grid's own lot."""
         if quote.action != GridAction.REST or quote.price is None or quote.qty is None:
             return None
         coi = self._next_coi()
@@ -288,7 +242,7 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
                 size=fmt_decimal(quote.qty) or "0",
                 price=fmt_decimal(quote.price) or "0",
                 time_in_force="post_only",
-                reduce_only=reduce_only,
+                reduce_only=False,
                 client_order_index=coi,
             )
         except ValueError as e:
@@ -427,7 +381,7 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
             )
         if live is None:
             quote = SideQuote(GridAction.REST, price=target.price, qty=target.qty)
-            clip = await self._place_side(target.side, quote, kind="tp", reduce_only=True)
+            clip = await self._place_side(target.side, quote, kind="tp")
             if clip:
                 lot.tp_clip_seq = clip.seq
             return
@@ -439,7 +393,6 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
                 target.side,
                 SideQuote(GridAction.REST, price=target.price, qty=target.qty),
                 kind="tp",
-                reduce_only=True,
             )
             if clip:
                 lot.tp_clip_seq = clip.seq
@@ -456,7 +409,7 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
             side,
             fmt_decimal(qty) or "0",
             0.01,
-            reduce_only=True,
+            reduce_only=False,
             client_order_index=coi,
         )
         self._last_tx_ms = common.now_ms()
@@ -533,7 +486,6 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
             params = self._state.params
             if params is None:
                 return
-            self._align_runtime_to_venue(view)
             plan = decide(params, view, self._state.runtime, now=now)
             self._state.quote_action = plan.quote_action
             self._state.reason = plan.reason
@@ -636,5 +588,4 @@ class GridRunner(ClipJob[ClipBookView, GridState]):
         self._cois.clear()
         self._handled_clip_seqs.clear()
         self._reset_job()
-        self._seed_inventory()
         await self._begin()

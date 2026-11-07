@@ -148,7 +148,10 @@ def _market_has_other_desk_algo(exclude: DeskBook) -> Callable[[int], bool]:
     return _fn
 
 
-grid_book.set_market_conflict(_market_has_other_desk_algo(grid_book))
+# Grid G1: it sits beside Chase, Ladder and TWAP, not beside a Planner or Trail.
+grid_book.set_market_conflict(
+    lambda mi: planner_book.live_on_market(mi) or trail_book.live_on_market(mi)
+)
 planner_book.set_market_conflict(_market_has_other_desk_algo(planner_book))
 # Trail S1: it sits beside Chase and Ladder, not beside a Planner or Grid.
 trail_book.set_market_conflict(

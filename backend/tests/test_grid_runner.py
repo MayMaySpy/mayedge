@@ -20,6 +20,7 @@ if str(_TESTS_DIR) not in sys.path:
 from chase_harness import (  # noqa: E402
     FakeGateway,
     boot_grid_job,
+    grid_params,
     isolated_db,
     patch_grid,
 )
@@ -75,8 +76,18 @@ class GridRunnerDustTests(IsolatedGridTestCase):
         self.assertIsNone(job._chase_clip("sell"))
 
 
-def _chase_sells(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [o for o in orders if o.get("side") == "sell" and not o.get("reduce_only")]
+def _chase_sells(job: GridRunner, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Grid's Clips are never reduce-only (G3), so its take-profits are told apart by kind."""
+    tp_cois = {
+        c.client_order_index
+        for c in job.state.ledger.clips
+        if job.state.runtime.clip_kinds.get(c.seq) == "tp"
+    }
+    return [
+        o
+        for o in orders
+        if o.get("side") == "sell" and int(o.get("client_order_index") or 0) not in tp_cois
+    ]
 
 
 class GridRunnerDeadChildTests(IsolatedGridTestCase):
@@ -116,7 +127,7 @@ class GridRunnerDeadChildTests(IsolatedGridTestCase):
 
         self.assertIsNone(boot.orders.find_by_coi(dropped_coi))
         self.assertIsNone(boot.orders.find_by_coi(orphan_coi))
-        self.assertEqual(_chase_sells(boot.orders.open_orders), [])
+        self.assertEqual(_chase_sells(job, boot.orders.open_orders), [])
         self.assertIsNone(job._chase_clip("sell"))
 
     async def test_requote_does_not_stack_a_chase_sell_left_on_venue(self) -> None:
@@ -135,7 +146,7 @@ class GridRunnerDeadChildTests(IsolatedGridTestCase):
         live = job._chase_clip("sell")
         assert live is not None
         self.assertNotEqual(live.client_order_index, dropped_coi)
-        self.assertEqual(len(_chase_sells(boot.orders.open_orders)), 1)
+        self.assertEqual(len(_chase_sells(job, boot.orders.open_orders)), 1)
 
 
 class GridRunnerRestoreTests(IsolatedGridTestCase):
@@ -161,24 +172,64 @@ class GridRunnerRestoreTests(IsolatedGridTestCase):
 
 
 class GridRunnerInventoryTests(IsolatedGridTestCase):
-    async def test_flat_venue_clears_phantom_inventory(self) -> None:
-        """Inv follows the account position, not leftover clip bookkeeping."""
+    async def test_grid_starts_flat_beside_an_open_position(self) -> None:
+        """G2: a Position already open (a Ladder's, say) is not Grid's inventory."""
+        boot = boot_grid_job()
+        job = cast(GridRunner, boot.job)
+        boot.orders.positions = [{"market_index": 1, "size": "5", "entry_price": "98"}]
+        with patch_grid(boot.clock, boot.gateway, boot.orders):
+            await job.start(algo_id="CG-0002", market_index=1, params=grid_params())
+            await job._evaluate()
+            await job.stop()
+
+        rt = job.state.runtime
+        self.assertEqual(rt.inventory, D("0"))
+        self.assertEqual(rt.lots, [])
+        self.assertEqual([c for c in boot.orders.creates if c["reduce_only"]], [])
+
+    async def test_grid_inventory_ignores_the_position(self) -> None:
+        """G2: a flat or larger Position moved by someone else leaves Grid's lots alone."""
+        boot = boot_grid_job()
+        job = cast(GridRunner, boot.job)
+        lot = Lot("own", D("100"), D("2"), D("100"), "long", D("100.40"), opened_at=1)
+        with patch_grid(boot.clock, boot.gateway, boot.orders):
+            await job._evaluate()
+            job.state.runtime.inventory = D("2")
+            job.state.runtime.inventory_vwap = D("100")
+            job.state.runtime.lots = [lot]
+            boot.orders.positions = []
+            await job._evaluate()
+            self.assertEqual(job.state.runtime.inventory, D("2"))
+            boot.orders.positions = [{"market_index": 1, "size": "12", "entry_price": "99"}]
+            await job._evaluate()
+
+        rt = job.state.runtime
+        self.assertEqual(rt.inventory, D("2"))
+        self.assertEqual([(x.lot_id, x.qty) for x in rt.lots], [("own", D("2"))])
+        self.assertEqual(job.snapshot()["inventory"], "2")
+
+    async def test_grid_take_profit_is_not_reduce_only(self) -> None:
+        """G3: the take-profit closes Grid's own lot at its size, as a plain post-only Clip."""
         boot = boot_grid_job()
         job = cast(GridRunner, boot.job)
         with patch_grid(boot.clock, boot.gateway, boot.orders):
             await job._evaluate()
-            job.state.runtime.inventory = D("-3.6")
+            job.state.runtime.inventory = D("-2")
             job.state.runtime.inventory_vwap = D("100")
             job.state.runtime.lots = [
-                Lot("ghost", D("100"), D("3.6"), D("100"), "short", D("99.60"), opened_at=1)
+                Lot("own", D("100"), D("2"), D("100"), "short", D("99.60"), opened_at=1)
             ]
+            # Net long from a Ladder: a reduce-only buy-back would be refused.
+            boot.orders.positions = [{"market_index": 1, "size": "8", "entry_price": "99"}]
+            await job._evaluate()
+            boot.clock.advance(5_000)
             await job._evaluate()
 
-        self.assertEqual(job.state.runtime.inventory, D("0"))
-        self.assertIsNone(job.state.runtime.inventory_vwap)
-        self.assertEqual(job.state.runtime.lots, [])
-        snap = job.snapshot()
-        self.assertEqual(snap["inventory"], "0")
+        tps = [c for c in boot.orders.creates if c["side"] == "buy" and c["price"] == "99.6"]
+        self.assertEqual(len(tps), 1)
+        self.assertFalse(tps[0]["reduce_only"])
+        self.assertEqual(tps[0]["size"], "2")
+        self.assertTrue(all(not c["reduce_only"] for c in boot.orders.creates))
 
 
 class GridModifyRejectTests(IsolatedGridTestCase):

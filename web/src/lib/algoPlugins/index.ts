@@ -62,12 +62,28 @@ export function isAlgoClientOrder(coi: string | number | null | undefined): bool
 
 export function algoOrderKind(
   coi: string | number | null | undefined,
-  opts?: { reduceOnly?: boolean }
+  opts?: { gridTakeProfits?: ReadonlySet<string> }
 ): string | null {
   const plugin = algoPluginByCoi(coi);
   if (!plugin) return null;
-  if (plugin.id === "chase-grid" && opts?.reduceOnly) return "Grid TP";
+  if (plugin.id === "chase-grid" && coi != null && opts?.gridTakeProfits?.has(String(coi))) {
+    return "Grid TP";
+  }
   return plugin.label;
+}
+
+/** Live Grid take-profit Clips by client_order_index. Grid's Clips are never reduce-only (grid-rules G3), so only the book's clip kind tells them apart. */
+export function gridTakeProfitCois(
+  working: readonly { algo_type?: string | null; clips?: readonly { client_order_index: string | number; status: string; kind?: string | null }[] }[]
+): Set<string> {
+  const out = new Set<string>();
+  for (const algo of working) {
+    if (algo.algo_type !== "chase-grid") continue;
+    for (const clip of algo.clips ?? []) {
+      if (clip.kind === "tp" && clip.status === "live") out.add(String(clip.client_order_index));
+    }
+  }
+  return out;
 }
 
 /** Catalog row for pickers — derived from plugins. */

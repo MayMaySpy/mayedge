@@ -205,7 +205,7 @@ An algo that parks one Clip behind the touch and requotes as the book walks, up 
 _Avoid_: iceberg (unqualified), MM, chasing (unqualified)
 
 **Grid**:
-An algo that chases inside a price band and takes profit with reduce-only Clips. Will not start on a Market that already has another desk algo live.
+An algo that chases inside a price band and takes profit on each lot it bought. It counts only its own fills, not the Position, so it runs beside Chase, Ladder and TWAP on one Market. The rules are in [docs/grid-rules.md](docs/grid-rules.md).
 _Avoid_: grid bot, DCA
 
 **Ladder**:

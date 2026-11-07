@@ -9,7 +9,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ScopeToggle } from "@/components/widgets/ListControls";
 import { SortHead } from "@/components/widgets/SortableHeads";
 import { api, type Market, type OpenOrder } from "@/lib/api";
-import { algoOrderKind, isAlgoClientOrder } from "@/lib/algos";
+import { algoOrderKind, gridTakeProfitCois, isAlgoClientOrder } from "@/lib/algos";
+import { useLiveAlgos } from "@/lib/liveData";
 import {
   fillDistancePct,
   nextOrderSort,
@@ -61,6 +62,8 @@ export function OrdersTab({
     () => new Map(markets.map((m) => [m.market_index, m])),
     [markets]
   );
+  const algoBook = useLiveAlgos();
+  const gridTakeProfits = useMemo(() => gridTakeProfitCois(algoBook.working), [algoBook.working]);
 
   const amendRemaining = async (order: OpenOrder, size: string) => {
     if (!tradingEnabled) {
@@ -238,9 +241,7 @@ export function OrdersTab({
                 </TableHeader>
                 <TableBody>
                   {shownOrders.map((o) => {
-                    const algoKind = algoOrderKind(o.client_order_index, {
-                      reduceOnly: o.reduce_only,
-                    });
+                    const algoKind = algoOrderKind(o.client_order_index, { gridTakeProfits });
                     const sltp = !algoKind ? stopTakeKind(o.order_type) : null;
                     const away = fillDistancePct(o, marketByIndex.get(o.market_index));
                     return (

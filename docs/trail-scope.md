@@ -101,7 +101,7 @@ A long entry tracks the **lowest** price, and buys when price rises the distance
 | T5 | If an Amend is refused as "wrong side of mark", the trigger stays where it is. Price is already through it, so it is about to fire. |
 | T6 | **Kill**, or Cancel all on its Market, stops every Trail there and cancels its orders. |
 | T7 | Its Clips use their own client_order_index band, `[12e9, 13e9)` ([ADR 0004](adr/0004-partitioned-client-order-index.md)). |
-| T8 | It refuses beside a Planner (Planner runs its own Trails, §5) and beside Grid ([ADR 0002](adr/0002-grid-is-exclusive-on-a-market.md)). |
+| T8 | It refuses beside a Planner (Planner runs its own Trails, §5) and beside Grid ([grid-rules.md](grid-rules.md) G1). |
 | T9 | Per Market at once: at most one Trail Entry, one Trail Stop, and three Trail Take Profits (Q5). |
 | T10 | The chart draws its lines but does not let you drag them ([ADR 0007](adr/0007-chart-amends-tickets-only.md)). |
 

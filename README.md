@@ -83,13 +83,13 @@ Every algo works in **Clips**, not Tickets, and persists in SQLite; start, pause
 | Algo | What it does | Start from |
 |---|---|---|
 | **Chase** | One post-only Clip behind the touch, requoted as the book walks, up to a cap. | Order panel → Algo |
-| **Grid** | Chases inside a price band, takes profit with reduce-only Clips. | Order panel → Algo |
+| **Grid** | Chases inside a price band, takes profit on each lot it bought. | Order panel → Algo |
 | **Ladder** | Keeps N live rungs on static prices; refills on fill. | Order panel → Algo |
 | **TWAP** | Slices a parent size across time. | Order panel → Algo |
 | **Planner** | Runs one trade from its stop: entry, stop, targets, **Stop steps**. On an open Position it attaches instead: it takes over the exit and enters nothing. | Order panel → Algo, or a Positions row's Plan |
 | **Trail** | Keeps a trigger a set distance behind the **best price**. Entry, Stop or Take Profit. | Order panel → Algo (Entry), or a Positions row (Stop, Take Profit) |
 
-Grid and Planner will not start on a Market that already has another desk algo live ([ADR 0002](docs/adr/0002-grid-is-exclusive-on-a-market.md)), and a Trail will not start beside either; Planner runs its own trailing parts. Each family has its own client_order_index band ([ADR 0004](docs/adr/0004-partitioned-client-order-index.md)).
+Planner will not start on a Market that already has another desk algo live, and a Trail will not start beside a Planner or Grid; Planner runs its own trailing parts. Grid counts only its own fills, so it runs beside Chase, Ladder and TWAP ([ADR 0025](docs/adr/0025-grid-keeps-its-own-book.md)). Each family has its own client_order_index band ([ADR 0004](docs/adr/0004-partitioned-client-order-index.md)).
 
 | Planner: limit entry, 2R limit target, 3R trailing target, Step up | Trail Entry from the Order panel |
 |---|---|
@@ -202,7 +202,7 @@ Chase jobs persist in SQLite. On shutdown, venue Clips are **pulled**; on restar
 
 ### Grid
 
-Chases inside a price band and takes profit with reduce-only Clips. Exclusive on a Market: will not start if another desk algo is already live there.
+Chases inside a price band and takes profit on each lot it bought. Its inventory is only its own fills, never the Position, so a Ladder buy, a Grid and a Ladder sell can run on one Market. Stop it when you close its Market by hand. Rules: [docs/grid-rules.md](docs/grid-rules.md).
 
 ### Ladder
 
