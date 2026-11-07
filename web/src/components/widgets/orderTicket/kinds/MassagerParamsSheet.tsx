@@ -5,17 +5,19 @@ import { decimalInput, parseDecimal } from "@/lib/numbers";
 import { useLiveAccount } from "@/lib/liveData";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import {
-  lastAtr,
+  atrMultLabel,
+  closedAtr,
   MASSAGER_ATR_MULTIPLES,
-  MASSAGER_ATR_RESOLUTION,
+  MASSAGER_ATR_TIMEFRAMES,
   massagerInput,
   massagerPreview,
   massagerRefusal,
+  type MassagerAtrTf,
   type MassagerParamsState,
 } from "@/lib/massager";
 import { marketPrice } from "@/lib/marketFormat";
 import { formatPrice, formatSize, formatUsd } from "@/lib/utils";
-import { TicketField } from "../ui";
+import { TicketChips, TicketField } from "../ui";
 import { BandFields } from "./ChaseFields";
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -51,37 +53,92 @@ export function MassagerParamsSheet({
   const preview = massagerPreview(input);
   const refusal = position === 0 ? massagerRefusal(input) : null;
   const sym = market.symbol;
-  const atr = useHourAtr(sym);
+  const atr = useClosedAtr(sym, state.atrTf);
   const priceDecimals = market.price_decimals ?? 4;
+  const atrMode = state.stepMode === "atr";
+  const k = parseDecimal(state.atrMult) ?? 0;
+  // MS19: an ATR Step is k × the ATR now; keep it in the state so Start can be checked.
+  const atrStep = atrMode && atr != null && k > 0 ? formatPrice(atr * k, priceDecimals) : "";
+  useEffect(() => {
+    if (atrMode && state.atrStep !== atrStep) onStateChange({ ...state, atrStep });
+  }, [atrMode, atrStep, state, onStateChange]);
 
   return (
     <FieldGroup className="gap-3">
-      <TicketField
-        id="massager-step"
+      <TicketChips
         label="Step"
-        value={state.step}
-        inputMode="decimal"
-        placeholder="0.00"
-        sanitize={decimalInput}
-        onChange={(v) => set({ step: v })}
-        chips={{
-          sticky: false,
-          ariaLabel: "Step from ATR",
-          onValueChange: (v) => {
-            const k = parseFloat(v);
-            if (atr == null || !Number.isFinite(k)) return;
-            set({ step: formatPrice(atr * k, priceDecimals) });
+        ariaLabel="Step kind"
+        value={state.stepMode}
+        onValueChange={(v) => set({ stepMode: v === "atr" ? "atr" : "fixed" })}
+        items={[
+          { value: "fixed", label: "Fixed", title: "The Step stays as set for the run" },
+          {
+            value: "atr",
+            label: "ATR",
+            title: "The Step follows k × ATR, moving the levels when it is 20% off",
           },
-          items: MASSAGER_ATR_MULTIPLES.map((k) => ({
-            value: String(k),
-            label: `${k === 0.5 ? "½" : k}× ATR`,
-            title:
-              atr == null
-                ? "ATR not loaded yet"
-                : `${formatPrice(atr * k, priceDecimals)}: ${k} × ATR(14) on 1h`,
-          })),
-        }}
+        ]}
       />
+      <TicketChips
+        label="ATR"
+        ariaLabel="ATR timeframe"
+        value={state.atrTf}
+        onValueChange={(v) => set({ atrTf: v as MassagerAtrTf })}
+        items={MASSAGER_ATR_TIMEFRAMES.map((tf) => ({
+          value: tf,
+          label: tf,
+          title: `ATR(14) on closed ${tf} candles`,
+        }))}
+      />
+      {atrMode ? (
+        <TicketField
+          id="massager-atr-mult"
+          label="× ATR"
+          value={state.atrMult}
+          inputMode="decimal"
+          placeholder="0.5"
+          sanitize={decimalInput}
+          onChange={(v) => set({ atrMult: v })}
+          hint={atrStep ? `Step now ${atrStep}` : null}
+          chips={{
+            value: state.atrMult,
+            ariaLabel: "ATR multiple",
+            onValueChange: (v) => set({ atrMult: v }),
+            items: MASSAGER_ATR_MULTIPLES.map((m) => ({
+              value: String(m),
+              label: `${atrMultLabel(m)}×`,
+              title: `${m} × ATR(14) on ${state.atrTf}`,
+            })),
+          }}
+        />
+      ) : (
+        <TicketField
+          id="massager-step"
+          label="Step"
+          value={state.step}
+          inputMode="decimal"
+          placeholder="0.00"
+          sanitize={decimalInput}
+          onChange={(v) => set({ step: v })}
+          chips={{
+            sticky: false,
+            ariaLabel: "Step from ATR",
+            onValueChange: (v) => {
+              const m = parseFloat(v);
+              if (atr == null || !Number.isFinite(m)) return;
+              set({ step: formatPrice(atr * m, priceDecimals) });
+            },
+            items: MASSAGER_ATR_MULTIPLES.map((m) => ({
+              value: String(m),
+              label: `${atrMultLabel(m)}× ATR`,
+              title:
+                atr == null
+                  ? "ATR not loaded yet"
+                  : `${formatPrice(atr * m, priceDecimals)}: ${m} × ATR(14) on ${state.atrTf}`,
+            })),
+          }}
+        />
+      )}
       <BandFields
         idPrefix="massager"
         market={market}
@@ -91,7 +148,7 @@ export function MassagerParamsSheet({
         onChange={set}
       />
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-sm text-muted-foreground">
-        <Fact label="ATR 1h">{atr == null ? "…" : marketPrice(atr, sym)}</Fact>
+        <Fact label={`ATR ${state.atrTf}`}>{atr == null ? "…" : marketPrice(atr, sym)}</Fact>
         <Fact label="Core">{position === 0 ? "no Position" : formatSize(position)}</Fact>
         {preview && (
           <>
@@ -118,7 +175,8 @@ export function MassagerParamsSheet({
           <>
             The Swing is how far the Position may move off its Core either way; the Step is
             how far apart its quotes are, and the Clip is the Swing split over the levels that
-            fit in the Band. The Step stays as set for the run. It sells
+            fit in the Band. Each quote is a Step from its last fill. A Fixed Step stays as set;
+            an ATR Step follows k × ATR after each candle closes, once it is 20% off. It sells
             above the Center and buys back below, two levels resting each side, post-only. Outside
             the Band it holds what it has. It does not touch your Stops: a Stop sized to the Core
             does not cover the Swing it buys on the way down.
@@ -129,22 +187,23 @@ export function MassagerParamsSheet({
   );
 }
 
-/** MS19: ATR(14) on 1h candles, for the Step presets. Null until loaded. */
-function useHourAtr(symbol: string): number | null {
-  const [atr, setAtr] = useState<{ symbol: string; value: number | null } | null>(null);
+/** MS19, MS21: ATR(14) on the closed candles of a timeframe. Null until loaded. */
+function useClosedAtr(symbol: string, timeframe: MassagerAtrTf): number | null {
+  const key = `${symbol}:${timeframe}`;
+  const [atr, setAtr] = useState<{ key: string; value: number | null } | null>(null);
   useEffect(() => {
     let live = true;
     api
-      .candles(symbol, MASSAGER_ATR_RESOLUTION, 100)
+      .candles(symbol, timeframe, 100)
       .then((candles) => {
-        if (live) setAtr({ symbol, value: lastAtr(candles) });
+        if (live) setAtr({ key, value: closedAtr(candles, timeframe, Date.now()) });
       })
       .catch(() => {
-        if (live) setAtr({ symbol, value: null });
+        if (live) setAtr({ key, value: null });
       });
     return () => {
       live = false;
     };
-  }, [symbol]);
-  return atr?.symbol === symbol ? atr.value : null;
+  }, [key, symbol, timeframe]);
+  return atr?.key === key ? atr.value : null;
 }

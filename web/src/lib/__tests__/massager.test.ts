@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  closedAtr,
   lastAtr,
   massagerPreview,
   massagerRefusal,
@@ -110,5 +111,18 @@ describe("massager Step presets (massager-rules MS19)", () => {
     const flat = Array.from({ length: 20 }, () => ({ high: 3.3, low: 3.2, close: 3.25 }));
     expect(lastAtr(flat)).toBeCloseTo(0.1, 10);
     expect(lastAtr(flat.slice(0, 5))).toBeNull();
+  });
+
+  it("leaves out the candle that is still open (MS21)", () => {
+    const hour = 3600;
+    const bars = Array.from({ length: 20 }, (_, i) => ({
+      time: i * hour,
+      high: 3.3,
+      low: 3.2,
+      close: 3.25,
+    }));
+    const now = 20 * hour * 1000 + 1;
+    const wild = [...bars, { time: 20 * hour, high: 4, low: 3, close: 3.5 }];
+    expect(closedAtr(wild, "1h", now)).toBeCloseTo(0.1, 10);
   });
 });

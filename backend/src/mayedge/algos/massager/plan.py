@@ -22,6 +22,11 @@ BPS = Decimal("10000")
 ZERO = Decimal("0")
 # MS9: levels resting on each side of the current one.
 RESTING_EACH_SIDE = 2
+# MS21: ATR length, and how far the live Step must move before the levels follow it.
+ATR_LENGTH = 14
+REDRAW_SHARE = Decimal("0.20")
+ATR_TIMEFRAMES = ("15m", "1h", "4h")
+StepMode = Literal["fixed", "atr"]
 
 
 class MassagerRefused(ValueError):
@@ -46,6 +51,14 @@ class MassagerParams:
     swing: Decimal
     step: Decimal
     clip: Decimal = ZERO
+    # MS3, MS21: a Fixed Step never moves; an ATR Step is atr_mult × ATR(14) on atr_tf.
+    step_mode: StepMode = "fixed"
+    atr_mult: Decimal = ZERO
+    atr_tf: str = "1h"
+
+    @property
+    def center(self) -> Decimal:
+        return (self.band_low + self.band_high) / 2
 
     @property
     def levels(self) -> int:
@@ -58,6 +71,9 @@ class MassagerParams:
             "swing": fmt_decimal(self.swing) or "0",
             "step": fmt_decimal(self.step) or "0",
             "clip": fmt_decimal(self.clip) or "0",
+            "step_mode": self.step_mode,
+            "atr_mult": fmt_decimal(self.atr_mult) or "0",
+            "atr_tf": self.atr_tf,
         }
 
     @classmethod
@@ -70,7 +86,17 @@ class MassagerParams:
         if step <= 0 and clip > 0 and swing >= clip:
             # A run kept before the Step was typed: its Step was the Band cut evenly.
             step = (high - low) / (2 * int(swing / clip))
-        return cls(band_low=low, band_high=high, swing=swing, step=step, clip=clip)
+        mode: StepMode = "atr" if raw.get("step_mode") == "atr" else "fixed"
+        return cls(
+            band_low=low,
+            band_high=high,
+            swing=swing,
+            step=step,
+            clip=clip,
+            step_mode=mode,
+            atr_mult=Decimal(str(raw.get("atr_mult") or "0")),
+            atr_tf=str(raw.get("atr_tf") or "1h"),
+        )
 
 
 @dataclass(frozen=True)
@@ -102,6 +128,8 @@ class LevelOrder:
     side: Side
     price: Decimal
     qty: Decimal
+    # The level's price before tick rounding: the anchor once the level fills (MS9).
+    mark: Decimal = ZERO
 
 
 @dataclass(frozen=True)
@@ -117,15 +145,34 @@ def _sign(x: Decimal) -> int:
     return (x > 0) - (x < 0)
 
 
+def _to_tick(price: Decimal, tick: Decimal) -> Decimal:
+    return (price / tick).to_integral_value(rounding=ROUND_HALF_UP) * tick
+
+
+def fee_floor(center: Decimal, maker_bps: Decimal, tick: Decimal) -> Decimal:
+    """MS6: the least Step that clears a round trip's maker fees, plus a tick."""
+    return center * 2 * maker_bps / BPS + tick
+
+
+def live_step(atr: Decimal, params: MassagerParams, *, floor: Decimal) -> Decimal:
+    """MS21: k × ATR, kept between the fee floor and half the Band."""
+    half = (params.band_high - params.band_low) / 2
+    return max(floor, min(half, params.atr_mult * atr))
+
+
+def should_redraw(resting_at: Decimal, live: Decimal) -> bool:
+    """MS21: the levels follow the live Step only once it is 20% or more off."""
+    if resting_at <= 0:
+        return live > 0
+    return abs(live - resting_at) >= resting_at * REDRAW_SHARE
+
+
 def lattice(params: MassagerParams, tick: Decimal) -> Lattice:
     """MS5. Assumes the params passed check_start, so the Clip is set."""
     levels = params.levels
-    center = (params.band_low + params.band_high) / 2
+    center = params.center
     step = params.step
-    prices = tuple(
-        ((center + k * step) / tick).to_integral_value(rounding=ROUND_HALF_UP) * tick
-        for k in range(-levels, levels + 1)
-    )
+    prices = tuple(_to_tick(center + k * step, tick) for k in range(-levels, levels + 1))
     return Lattice(levels=levels, center=center, step=step, prices=prices)
 
 
@@ -157,8 +204,7 @@ def check_start(
     if run.swing >= abs(position):
         raise MassagerRefused("MS4", "The Swing must be smaller than the Core")
     grid = lattice(run, venue.tick)
-    need = grid.center * 2 * venue.maker_bps / BPS + venue.tick
-    if grid.step < need:
+    if grid.step < fee_floor(grid.center, venue.maker_bps, venue.tick):
         raise MassagerRefused("MS6", "A Step does not clear the fees: widen the Step")
     return run, grid
 
@@ -176,17 +222,28 @@ def catch_up(grid: Lattice, params: MassagerParams, mid: Decimal) -> CatchUp:
     return CatchUp(level=k, side="sell" if k > 0 else "buy", qty=abs(k) * params.clip)
 
 
-def resting(grid: Lattice, params: MassagerParams, level: int) -> tuple[LevelOrder, ...]:
-    """MS9: sells on the next levels up, buys on the next levels down, none past the edge."""
+def start_anchor(params: MassagerParams, level: int) -> Decimal:
+    """MS9: the anchor a run starts from, the catch-up level's price before rounding."""
+    return params.center + level * params.step
+
+
+def resting(
+    params: MassagerParams, *, level: int, anchor: Decimal, step: Decimal, tick: Decimal
+) -> tuple[LevelOrder, ...]:
+    """MS9: sells a Step and two above the anchor, buys a Step and two below, none past
+    ±levels or outside the Band."""
     out: list[LevelOrder] = []
-    for j in range(1, RESTING_EACH_SIDE + 1):
-        up = level + j
-        if up <= grid.levels:
-            out.append(LevelOrder(up, "sell", grid.price(up), params.clip))
-    for j in range(1, RESTING_EACH_SIDE + 1):
-        down = level - j
-        if down >= -grid.levels:
-            out.append(LevelOrder(down, "buy", grid.price(down), params.clip))
+    sides: tuple[tuple[Side, int], ...] = (("sell", 1), ("buy", -1))
+    for side, sign in sides:
+        for j in range(1, RESTING_EACH_SIDE + 1):
+            k = level + sign * j
+            if abs(k) > params.levels:
+                continue
+            mark = anchor + sign * j * step
+            price = _to_tick(mark, tick)
+            if not params.band_low <= price <= params.band_high:
+                continue
+            out.append(LevelOrder(k, side, price, params.clip, mark))
     return tuple(out)
 
 

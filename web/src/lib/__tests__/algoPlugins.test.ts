@@ -334,7 +334,15 @@ describe("massager plugin", () => {
     minBase: 10,
     signedPos: 1000,
   };
-  const state = { step: "0.05", chaseFloor: "3.20", chaseCeiling: "3.50" };
+  const state = {
+    stepMode: "fixed" as const,
+    step: "0.05",
+    atrMult: "0.5",
+    atrTf: "1h" as const,
+    atrStep: "",
+    chaseFloor: "3.20",
+    chaseCeiling: "3.50",
+  };
 
   it("starts from a Position, never reduce-only, as one action", () => {
     expect(massagerPlugin.blockReason(state, ctx)).toBeNull();
@@ -346,6 +354,12 @@ describe("massager plugin", () => {
     );
     expect(massagerPlugin.blockReason({ ...state, step: "0.2" }, ctx)).toBe(
       "The Step is wider than half the Band"
+    );
+    // MS19: an ATR Step is checked as k × the ATR the sheet last read.
+    const atr = { ...state, stepMode: "atr" as const, step: "", atrStep: "0.05" };
+    expect(massagerPlugin.blockReason(atr, ctx)).toBeNull();
+    expect(massagerPlugin.blockReason({ ...atr, atrStep: "" }, ctx)).toBe(
+      "Set the Swing and the Step"
     );
     expect(massagerPlugin.singleAction).toBe(true);
     expect(massagerPlugin.cta("buy")).toBe("Start Massager");

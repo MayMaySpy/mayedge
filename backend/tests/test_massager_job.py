@@ -34,8 +34,23 @@ D = Decimal
 PARAMS = MassagerParams(band_low=D("90"), band_high=D("110"), swing=D("3"), step=D("10") / 3)
 
 
+# An ATR run: ½ × ATR on 1h. ATR 8 makes a Step of 4, 2 levels each side, Clip 1.5.
+ATR_PARAMS = MassagerParams(
+    band_low=D("90"),
+    band_high=D("110"),
+    swing=D("3"),
+    step=D("0"),
+    step_mode="atr",
+    atr_mult=D("0.5"),
+    atr_tf="1h",
+)
+HOUR_MS = 3_600_000
+
+
 class Rig:
     def __init__(self, *, bid: str = "100", ask: str = "100.10", position: str = "10") -> None:
+        self.atr: Decimal | None = D("8")
+        self.atr_reads: list[str] = []
         self.clock = FakeClock()
         self.gateway = FakeGateway()
         self.gateway.set_book(bid, ask)
@@ -46,7 +61,11 @@ class Rig:
             execution=lambda: make_execution(self.gateway, self.orders),
             broadcast=lambda _p: None,
         )
-        self.job = MassagerRunner(self.book)
+        self.job = MassagerRunner(self.book, self.read_atr)
+
+    async def read_atr(self, market_index: int, timeframe: str) -> Decimal | None:
+        self.atr_reads.append(timeframe)
+        return self.atr
 
     def patch(self) -> Any:
         return patch_grid(self.clock, self.gateway, self.orders)
@@ -305,3 +324,83 @@ class RestartTests(MassagerJobCase):
         self.assertEqual(again.state.params.clip, D("1"))  # type: ignore[union-attr]
         self.assertEqual(again.state.status, ChaseStatus.RUNNING)
         self.assertEqual(again.snapshot()["captured_pnl"], rig.job.snapshot()["captured_pnl"])
+
+
+class LiveStepTests(MassagerJobCase):
+    async def test_an_atr_run_starts_at_k_times_atr(self) -> None:
+        """MS3, MS21: ½ × ATR 8 is a Step of 4: two levels each side of 100, Clip 1.5."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start(ATR_PARAMS)
+            await rig.tick()
+        params = rig.job.state.params
+        assert params is not None
+        self.assertEqual((params.step, params.clip, params.swing), (D("4"), D("1.5"), D("3")))
+        self.assertEqual(
+            rig.resting(),
+            [
+                ("buy", D("92.00"), D("1.5")),
+                ("buy", D("96.00"), D("1.5")),
+                ("sell", D("104.00"), D("1.5")),
+                ("sell", D("108.00"), D("1.5")),
+            ],
+        )
+        snap = rig.job.snapshot()
+        self.assertEqual((snap["step"], snap["atr"], snap["atr_tf"]), ("4", "8", "1h"))
+
+    async def test_no_atr_no_start(self) -> None:
+        rig = Rig()
+        rig.atr = None
+        with rig.patch(), self.assertRaises(MassagerRefused) as ctx:
+            await rig.start(ATR_PARAMS)
+        self.assertEqual(ctx.exception.rule, "MS3")
+        self.assertEqual(rig.orders.creates, [])
+
+    async def test_a_small_atr_move_keeps_the_levels(self) -> None:
+        """MS21: ATR 8 → 8.5 is a Step 6% off, under 20%: nothing moves."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start(ATR_PARAMS)
+            await rig.tick()
+            before = rig.resting()
+            reads = len(rig.atr_reads)
+            rig.atr = D("8.5")
+            rig.clock.advance(HOUR_MS)
+            await rig.tick()
+        self.assertGreater(len(rig.atr_reads), reads)
+        self.assertEqual(rig.resting(), before)
+        self.assertEqual(rig.job.state.runtime.step, D("4"))
+        self.assertEqual(rig.job.state.runtime.atr, D("8.5"))
+
+    async def test_an_atr_run_redraws_around_the_anchor(self) -> None:
+        """MS9, MS21: sold at 104, then ATR 10 makes the Step 5: the buy-back rests at 99."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start(ATR_PARAMS)
+            await rig.tick()
+            rig.fill("sell", "104.00")
+            rig.set_position("8.5")
+            rig.gateway.set_book("103.90", "104")
+            await rig.tick()
+            self.assertEqual(rig.job.state.runtime.anchor, D("104"))
+            rig.atr = D("10")
+            rig.clock.advance(HOUR_MS)
+            await rig.tick()
+        rt = rig.job.state.runtime
+        self.assertEqual((rt.step, rt.book.level), (D("5"), 1))
+        self.assertEqual(
+            rig.resting(),
+            [
+                ("buy", D("94.00"), D("1.5")),
+                ("buy", D("99.00"), D("1.5")),
+                ("sell", D("109.00"), D("1.5")),
+            ],
+        )
+
+    async def test_a_fixed_run_never_reads_atr(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            rig.clock.advance(HOUR_MS * 2)
+            await rig.tick()
+        self.assertEqual(rig.atr_reads, [])

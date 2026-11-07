@@ -352,6 +352,11 @@ export interface AlgoState {
   core_entry?: string | null;
   basis?: string | null;
   step?: string | null;
+  step_mode?: "fixed" | "atr" | null;
+  atr_mult?: string | null;
+  atr_tf?: string | null;
+  atr?: string | null;
+  step_moved_at?: number | null;
   profit_bps?: string | null;
   grid_bps?: string | null;
   be_delay_ms?: number | null;

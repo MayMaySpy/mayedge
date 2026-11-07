@@ -8,10 +8,24 @@ import { atr } from "@/lib/mayRekt";
 import { parseDecimal } from "@/lib/numbers";
 
 /** The ticket's own fields. Size is the Swing. */
+export type MassagerStepMode = "fixed" | "atr";
+export type MassagerAtrTf = "15m" | "1h" | "4h";
+
 export interface MassagerParamsState {
+  /** MS3: a Fixed Step is typed; an ATR Step is atrMult × ATR(14) on atrTf. */
+  stepMode: MassagerStepMode;
   step: string;
+  atrMult: string;
+  atrTf: MassagerAtrTf;
+  /** atrMult × the ATR now, kept by the sheet so Start can be checked. Empty until loaded. */
+  atrStep: string;
   chaseFloor: string;
   chaseCeiling: string;
+}
+
+/** The Step the ticket would start with. */
+export function massagerStepRaw(state: MassagerParamsState): string {
+  return state.stepMode === "atr" ? state.atrStep : state.step;
 }
 
 export interface MassagerInput {
@@ -180,7 +194,7 @@ export function massagerInput(
     bandLow: parseDecimal(state.chaseFloor) ?? 0,
     bandHigh: parseDecimal(state.chaseCeiling) ?? 0,
     swing,
-    step: parseDecimal(state.step) ?? 0,
+    step: parseDecimal(massagerStepRaw(state)) ?? 0,
     position,
     mid,
     tick: 10 ** -(market.price_decimals ?? 4),
@@ -190,10 +204,25 @@ export function massagerInput(
   };
 }
 
-/** MS19: the Step presets, as multiples of ATR(14) on 1h candles. */
+/** MS19, MS21: ATR(14) on 15m, 1h or 4h candles; presets of ½, 1 and 2 × it. */
 export const MASSAGER_ATR_LENGTH = 14;
-export const MASSAGER_ATR_RESOLUTION = "1h";
+export const MASSAGER_ATR_TIMEFRAMES: readonly MassagerAtrTf[] = ["15m", "1h", "4h"];
 export const MASSAGER_ATR_MULTIPLES = [0.5, 1, 2] as const;
+const TIMEFRAME_SEC: Record<MassagerAtrTf, number> = { "15m": 900, "1h": 3600, "4h": 14400 };
+
+export function atrMultLabel(k: number): string {
+  return k === 0.5 ? "½" : String(k);
+}
+
+/** MS21: ATR on the candles closed by now, as the desk reads it. Candle times are seconds. */
+export function closedAtr(
+  candles: readonly { time: number; high: number; low: number; close: number }[],
+  timeframe: MassagerAtrTf,
+  nowMs: number
+): number | null {
+  const period = TIMEFRAME_SEC[timeframe];
+  return lastAtr(candles.filter((c) => (c.time + period) * 1000 <= nowMs));
+}
 
 /** The last ATR over the candles, Wilder's smoothing; null without enough of them. */
 export function lastAtr(

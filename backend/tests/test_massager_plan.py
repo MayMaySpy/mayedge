@@ -16,9 +16,13 @@ from mayedge.algos.massager.plan import (
     check_start,
     core,
     core_entry_after,
+    fee_floor,
     judge,
     lattice,
+    live_step,
     resting,
+    should_redraw,
+    start_anchor,
 )
 
 D = Decimal
@@ -132,6 +136,17 @@ class StartTests(unittest.TestCase):
         self.assertEqual(MassagerParams.from_json(raw), PARAMS)
 
 
+def rest(level: int, p: MassagerParams = PARAMS, anchor: Decimal | None = None, step=None):
+    """MS9: what rests from a level, the anchor at its start price unless given."""
+    return resting(
+        p,
+        level=level,
+        anchor=start_anchor(p, level) if anchor is None else anchor,
+        step=p.step if step is None else step,
+        tick=LIT.tick,
+    )
+
+
 class LatticeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.grid = lattice(PARAMS, LIT.tick)
@@ -152,7 +167,7 @@ class LatticeTests(unittest.TestCase):
             self.assertEqual((c.level, c.side, c.qty), (0, None, D("0")), mid)
 
     def test_two_levels_rest_each_side(self) -> None:
-        orders = resting(self.grid, PARAMS, 1)
+        orders = rest(1)
         self.assertEqual(
             [(o.level, o.side, o.price, o.qty) for o in orders],
             [
@@ -164,9 +179,9 @@ class LatticeTests(unittest.TestCase):
         )
 
     def test_the_edge_rests_only_inward(self) -> None:
-        top = resting(self.grid, PARAMS, 3)
+        top = rest(3)
         self.assertEqual([(o.level, o.side) for o in top], [(2, "buy"), (1, "buy")])
-        near = resting(self.grid, PARAMS, -2)
+        near = rest(-2)
         self.assertEqual(
             [(o.level, o.side) for o in near], [(-1, "sell"), (0, "sell"), (-3, "buy")]
         )
@@ -178,20 +193,20 @@ class LatticeTests(unittest.TestCase):
         self.assertTrue(book.level_fill(0, D("60"), PARAMS.clip))
         self.assertEqual(book.level, 0)
         self.assertEqual(book.level_fills, {})
-        self.assertEqual([o.level for o in resting(self.grid, PARAMS, book.level)], [1, 2, -1, -2])
+        self.assertEqual([o.level for o in rest(book.level)], [1, 2, -1, -2])
 
     def test_a_partly_filled_level_rests_what_is_left(self) -> None:
         book = Book(level=1)
         book.fill("buy", D("40"), D("3.35"))
         book.level_fill(0, D("40"), PARAMS.clip)
-        buy0 = next(o for o in resting(self.grid, PARAMS, 1) if o.level == 0)
+        buy0 = next(o for o in rest(1) if o.level == 0)
         self.assertEqual(book.qty_for(buy0, PARAMS.swing), D("60"))
 
     def test_no_order_takes_the_lean_past_the_swing(self) -> None:
         book = Book(level=-2, lean=D("250"))
-        buy = next(o for o in resting(self.grid, PARAMS, -2) if o.level == -3)
+        buy = next(o for o in rest(-2) if o.level == -3)
         self.assertEqual(book.qty_for(buy, PARAMS.swing), D("50"))
-        sell = next(o for o in resting(self.grid, PARAMS, -2) if o.level == -1)
+        sell = next(o for o in rest(-2) if o.level == -1)
         self.assertEqual(book.qty_for(sell, PARAMS.swing), D("100"))
 
     def test_the_book_round_trips(self) -> None:
@@ -209,6 +224,44 @@ class LatticeTests(unittest.TestCase):
         book.fill("sell", c.qty, D("3.42"))
         self.assertEqual(D("-1000") + book.lean, D("-1100"))
         self.assertEqual(core(D("-1100"), book.lean), D("-1000"))
+
+    def test_levels_step_from_the_anchor(self) -> None:
+        """MS9: a buy filled at 3.33 with a 0.05 Step: next sells 3.38 and 3.43, buys below."""
+        orders = rest(-1, anchor=D("3.33"))
+        self.assertEqual(
+            [(o.level, o.side, o.price) for o in orders],
+            [
+                (0, "sell", D("3.3800")),
+                (1, "sell", D("3.4300")),
+                (-2, "buy", D("3.2800")),
+                (-3, "buy", D("3.2300")),
+            ],
+        )
+        wide = rest(-1, anchor=D("3.33"), step=D("0.10"))
+        self.assertEqual(
+            [o.price for o in wide if o.side == "sell"], [D("3.4300")]
+        )  # 3.53 is past the Band
+
+    def test_nothing_rests_outside_the_band(self) -> None:
+        orders = rest(1, anchor=D("3.45"), step=D("0.04"))
+        self.assertEqual(
+            [(o.side, o.price) for o in orders],
+            [("sell", D("3.4900")), ("buy", D("3.4100")), ("buy", D("3.3700"))],
+        )
+
+    def test_the_live_step_is_kept_between_the_fee_floor_and_half_the_band(self) -> None:
+        p = replace(PARAMS, step_mode="atr", atr_mult=D("0.5"))
+        floor = fee_floor(p.center, D("2"), LIT.tick)
+        self.assertEqual(floor, D("3.35") * 2 * 2 / 10000 + D("0.0001"))
+        self.assertEqual(live_step(D("0.08"), p, floor=floor), D("0.04"))
+        self.assertEqual(live_step(D("1"), p, floor=floor), D("0.15"))
+        self.assertEqual(live_step(D("0.0001"), p, floor=floor), floor)
+
+    def test_a_small_atr_move_does_not_redraw(self) -> None:
+        self.assertFalse(should_redraw(D("0.05"), D("0.0599")))
+        self.assertFalse(should_redraw(D("0.05"), D("0.0401")))
+        self.assertTrue(should_redraw(D("0.05"), D("0.06")))
+        self.assertTrue(should_redraw(D("0.05"), D("0.04")))
 
 
 class CountTests(unittest.TestCase):
@@ -266,3 +319,23 @@ class OutsideFillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AtrTests(unittest.TestCase):
+    def test_atr_reads_closed_candles_only(self) -> None:
+        """MS21: the open candle's range does not count until it closes."""
+        from mayedge.algos.massager.atr import closed_atr
+        from mayedge.lighter.models import Candle
+
+        hour = 3600
+        bars = [
+            Candle(time=i * hour, open=3.2, high=3.3, low=3.2, close=3.25, volume=1)
+            for i in range(20)
+        ]
+        now_ms = 20 * hour * 1000 + 1  # bar 19 closed a moment ago
+        atr = closed_atr(bars, "1h", now_ms)
+        assert atr is not None
+        self.assertAlmostEqual(float(atr), 0.1, places=9)
+        wild = [*bars, Candle(time=20 * hour, open=3.25, high=4.0, low=3.0, close=3.5, volume=1)]
+        self.assertEqual(closed_atr(wild, "1h", now_ms), atr)
+        self.assertIsNone(closed_atr(bars[:10], "1h", now_ms))

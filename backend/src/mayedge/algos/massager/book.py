@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase.execution import ChaseExecution
 from mayedge.algos.clip_book import AlgoPayload, ClipBook
 from mayedge.algos.massager.config import MASSAGER_COI_BASE, MASSAGER_COI_END
-from mayedge.algos.massager.job import MassagerRunner
+from mayedge.algos.massager.job import AtrFn, MassagerRunner
 from mayedge.algos.massager.plan import ALGO_ID, MassagerParams
 from mayedge.algos.massager.state import MassagerState
 from mayedge.numbers import parse_decimal
+
+ZERO = Decimal("0")
 
 MarketConflictFn = Callable[[int], bool]
 
@@ -34,6 +37,7 @@ class MassagerBook(ClipBook[MassagerRunner]):
         coi_end: int | None = None,
         missing_fill_grace_ms: int = 800,
         market_conflict: MarketConflictFn | None = None,
+        atr: AtrFn | None = None,
     ) -> None:
         super().__init__(
             execution=execution,
@@ -43,22 +47,31 @@ class MassagerBook(ClipBook[MassagerRunner]):
             missing_fill_grace_ms=missing_fill_grace_ms,
         )
         self._market_conflict = market_conflict
+        self._atr = atr
 
     def set_market_conflict(self, fn: MarketConflictFn) -> None:
         self._market_conflict = fn
 
     def _new_runner(self) -> MassagerRunner:
-        return MassagerRunner(self)
+        return MassagerRunner(self, self._atr)
 
     def _view(self, job: MassagerRunner) -> MassagerState:
         return job.state
 
+    def set_atr(self, fn: AtrFn) -> None:
+        self._atr = fn
+
     async def start_from_body(self, body: dict[str, Any]) -> None:
+        """MS3: a Fixed Step comes as ``step``; an ATR one as ``atr_mult`` and ``atr_tf``."""
+        atr = body.get("step_mode") == "atr"
         params = MassagerParams(
             band_low=parse_decimal(str(body["band_low"])),
             band_high=parse_decimal(str(body["band_high"])),
             swing=parse_decimal(str(body["swing"])),
-            step=parse_decimal(str(body["step"])),
+            step=ZERO if atr else parse_decimal(str(body["step"])),
+            step_mode="atr" if atr else "fixed",
+            atr_mult=parse_decimal(str(body["atr_mult"])) if atr else ZERO,
+            atr_tf=str(body.get("atr_tf") or "1h"),
         )
         await self.start(market_index=int(body["market_index"]), params=params)
 

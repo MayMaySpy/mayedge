@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -14,18 +17,24 @@ from mayedge.algos.common import venue_order_keys
 from mayedge.algos.ledger import Clip
 from mayedge.algos.massager.config import (
     ACK_WAIT_MS,
+    ATR_READ_TIMEOUT_S,
+    ATR_RETRY_MS,
+    ATR_SETTLE_MS,
     MIN_PLACE_GAP_MS,
     MIN_REQUOTE_MS,
     OUTSIDE_GRACE_MS,
     is_massager_client_order,
+    next_close_ms,
 )
 from mayedge.algos.massager.plan import (
     ALGO_ID,
     ALGO_VERSION,
+    ATR_TIMEFRAMES,
     BPS,
     Lattice,
     LevelOrder,
     MassagerParams,
+    MassagerRefused,
     Side,
     Venue,
     basis,
@@ -33,9 +42,13 @@ from mayedge.algos.massager.plan import (
     check_start,
     core,
     core_entry_after,
+    fee_floor,
     judge,
     lattice,
+    live_step,
     resting,
+    should_redraw,
+    start_anchor,
 )
 from mayedge.algos.massager.state import MassagerRuntime, MassagerState
 from mayedge.config import settings
@@ -47,14 +60,18 @@ logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0")
 
+# MS21: ATR(14) of a Market on a timeframe, from closed candles. None when there is none.
+AtrFn = Callable[[int, str], Awaitable[Decimal | None]]
+
 
 class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
     """One Massager: a catch-up Clip, then two levels resting each side."""
 
     LABEL = "massager"
 
-    def __init__(self, book: ClipBookView) -> None:
+    def __init__(self, book: ClipBookView, atr: AtrFn | None = None) -> None:
         super().__init__(book, MassagerState())
+        self._atr = atr
         self._last_catch_tx_ms = 0
         self._place_refused: str | None = None
 
@@ -139,8 +156,9 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             rt.book.fill(clip.side, qty, px, fee=qty * px * maker / BPS)
             rt.handled[clip.seq] = done + qty
             level = rt.clip_levels.get(clip.seq)
-            if level is not None:
-                rt.book.level_fill(level, qty, params.clip)
+            if level is not None and rt.book.level_fill(level, qty, params.clip):
+                # MS9: a whole Clip at a level makes its price the anchor.
+                rt.anchor = rt.clip_marks.get(clip.seq, clip.price)
         if rt.catching:
             self._end_catch_up_when_owed_is_paid()
         self._reconcile_master()
@@ -155,10 +173,13 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
 
     def _end_catch_up_when_owed_is_paid(self) -> None:
         rt = self._state.runtime
+        params = self._state.params
         if abs(self._owed()) < self._clip_min_qty():
             rt.catching = False
             rt.book.level = rt.catch_level
             rt.book.level_fills.clear()
+            if params is not None:
+                rt.anchor = start_anchor(params, rt.catch_level)
 
     def _on_clips_closed(self) -> None:
         self._process_fills()
@@ -293,17 +314,26 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
     def _would_cross(self, order: LevelOrder, view: MarketView) -> bool:
         return self._working_crosses(order.price, view, order.side)
 
-    async def _work_lattice(self, view: MarketView, grid: Lattice) -> None:
+    async def _work_lattice(self, view: MarketView) -> None:
         """MS9, MS14: the wanted levels rest; others come off; a crossing level waits."""
         params = self._state.params
         assert params is not None
         rt = self._state.runtime
-        wanted = {(o.level, o.side): o for o in resting(grid, params, rt.book.level)}
+        if rt.anchor is None:
+            rt.anchor = start_anchor(params, rt.book.level)
+        step = rt.step if rt.step > 0 else params.step
+        orders = resting(params, level=rt.book.level, anchor=rt.anchor, step=step, tick=view.tick)
+        wanted = {(o.level, o.side): o for o in orders}
         live_by_key: dict[tuple[int, str], Clip] = {}
         for clip in list(self._state.ledger.live_clips()):
             level = rt.clip_levels.get(clip.seq)
             key = (level, clip.side) if level is not None and clip.side else None
-            if key is None or key not in wanted or key in live_by_key:
+            if (
+                key is None
+                or key not in wanted
+                or key in live_by_key
+                or clip.price != wanted[key].price  # MS21: the Step moved
+            ):
                 await self._cancel_clip(clip)
                 continue
             if self._working_crosses(clip.price, view, clip.side or "buy"):
@@ -324,6 +354,40 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             placed = await self._place(order.side, order.price, qty)
             if placed is not None:
                 rt.clip_levels[placed.seq] = order.level
+                rt.clip_marks[placed.seq] = order.mark
+
+    # ── the live Step ────────────────────────────────────────────────────
+
+    async def _read_atr(self, market_index: int, timeframe: str) -> Decimal | None:
+        if self._atr is None:
+            return None
+        try:
+            atr = await asyncio.wait_for(self._atr(market_index, timeframe), ATR_READ_TIMEOUT_S)
+        except Exception as e:
+            logger.warning("massager ATR read failed on market %s: %s", market_index, e)
+            return None
+        return atr if atr is not None and atr > 0 else None
+
+    async def _update_step(self, view: MarketView) -> None:
+        """MS21: after each candle closes, read ATR; the levels follow a 20% move."""
+        params = self._state.params
+        rt = self._state.runtime
+        if params is None or params.step_mode != "atr":
+            return
+        now = common.now_ms()
+        if now < rt.atr_next_at:
+            return
+        atr = await self._read_atr(self._state.market_index, params.atr_tf)
+        if atr is None:
+            rt.atr_next_at = now + ATR_RETRY_MS
+            return
+        rt.atr = atr
+        rt.atr_next_at = next_close_ms(now, params.atr_tf) + ATR_SETTLE_MS
+        floor = fee_floor(params.center, self._maker_bps(), view.tick)
+        live = live_step(atr, params, floor=floor)
+        if should_redraw(rt.step, live):
+            rt.step = live
+            rt.step_moved_at = now
 
     # ── the loop ─────────────────────────────────────────────────────────
 
@@ -349,10 +413,11 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
                 return
             if not await self._judge_outside(view):
                 return
+            await self._update_step(view)
             if self._state.runtime.catching:
                 await self._work_catch_up(view)
             else:
-                await self._work_lattice(view, grid)
+                await self._work_lattice(view)
             self._process_fills()
             live = self._state.ledger.live_clips()
             self._state.quote_action = Action.REST.value if live else Action.PAUSE.value
@@ -381,6 +446,16 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         mid = (to_decimal(bid_s) + to_decimal(ask_s)) / 2
         self._state = MassagerState(market_index=market_index, symbol=meta.symbol, params=params)
         position, entry = self._venue_position()
+        atr: Decimal | None = None
+        if params.step_mode == "atr":
+            if params.atr_tf not in ATR_TIMEFRAMES:
+                raise MassagerRefused("MS3", "Pick the ATR's timeframe: 15m, 1h or 4h")
+            if params.atr_mult <= 0:
+                raise MassagerRefused("MS3", "Set k for the ATR Step")
+            atr = await self._read_atr(market_index, params.atr_tf)
+            if atr is None:
+                raise MassagerRefused("MS3", "No ATR for this Market yet")
+            params = replace(params, step=params.atr_mult * atr)
         venue = Venue(
             tick=Decimal(10) ** -meta.price_decimals,
             size_step=Decimal(10) ** -meta.size_decimals,
@@ -390,12 +465,18 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         params, grid = check_start(params, position=position, mid=mid, venue=venue)
         check_notional(params.swing, mid, settings.max_order_notional)
         owed = catch_up(grid, params, mid)
+        now = common.now_ms()
         runtime = MassagerRuntime(
             core_side=1 if position > 0 else -1,
             core=position,
             core_entry=entry or mid,
             catching=owed.qty > 0,
             catch_level=owed.level,
+            anchor=start_anchor(params, owed.level),
+            step=params.step,
+            atr=atr,
+            step_moved_at=now,
+            atr_next_at=next_close_ms(now, params.atr_tf) + ATR_SETTLE_MS if atr else 0,
         )
         self._state = MassagerState(
             status=ChaseStatus.RUNNING,
@@ -443,7 +524,12 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             "offset_bps": None,
             "price_floor": fmt_decimal(p.band_low) if p else None,
             "price_ceiling": fmt_decimal(p.band_high) if p else None,
-            "step": fmt_decimal(p.step) if p else None,
+            "step": fmt_decimal(rt.step if rt.step > 0 else p.step) if p else None,
+            "step_mode": p.step_mode if p else None,
+            "atr_mult": fmt_decimal(p.atr_mult) if p and p.step_mode == "atr" else None,
+            "atr_tf": p.atr_tf if p and p.step_mode == "atr" else None,
+            "atr": fmt_decimal(rt.atr) if rt.atr is not None else None,
+            "step_moved_at": rt.step_moved_at or None,
             "core": fmt_decimal(rt.core),
             "lean": fmt_decimal(rt.book.lean) or "0",
             "position": fmt_decimal(position),
@@ -470,6 +556,11 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         raw = obj(row.get("params_json"))
         params = MassagerParams.from_json(raw)
         runtime = MassagerRuntime.from_json(obj(raw.get("runtime")))
+        # MS16: a run kept before the anchor steps out from Center + level × Step.
+        if runtime.step <= 0:
+            runtime.step = params.step
+        if runtime.anchor is None and not runtime.catching:
+            runtime.anchor = start_anchor(params, runtime.book.level)
         fields = ClipState.fields_from_row(row)
         self._restore_state(MassagerState(params=params, runtime=runtime, **fields))
         self._reconcile_master()

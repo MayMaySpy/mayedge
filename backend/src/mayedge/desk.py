@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from mayedge import feed_health
@@ -15,6 +17,7 @@ from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
+from mayedge.algos.massager.atr import closed_atr
 from mayedge.algos.massager.book import MassagerBook
 from mayedge.algos.massager.config import MASSAGER_COI_BASE, MASSAGER_COI_END
 from mayedge.algos.planner.book import PlannerBook
@@ -128,11 +131,20 @@ trail_book = TrailBook(
     coi_end=TRAIL_COI_END,
     watch_prints=gateway.watch_prints,
 )
+
+
+async def _massager_atr(market_index: int, timeframe: str) -> Decimal | None:
+    """MS21: ATR(14) on the venue's closed candles of the timeframe."""
+    candles = await gateway.get_candles(market_index, timeframe, 60, lane="read")
+    return closed_atr(candles, timeframe, int(time.time() * 1000))
+
+
 massager_book = MassagerBook(
     execution=execution,
     broadcast=_publish_algo_book,
     coi_base=MASSAGER_COI_BASE,
     coi_end=MASSAGER_COI_END,
+    atr=_massager_atr,
 )
 books: tuple[DeskBook, ...] = (
     chase_book,

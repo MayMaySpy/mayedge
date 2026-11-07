@@ -215,6 +215,13 @@ def _atr(
     return _rma(_true_range(high, low, close), length)
 
 
+def atr(
+    high: Sequence[float], low: Sequence[float], close: Sequence[float], length: int
+) -> list[float]:
+    """Wilder's ATR, the one mayRekt uses. NaN until ``length`` bars."""
+    return _atr(high, low, close, length)
+
+
 def _rsi(src: Sequence[float], length: int) -> list[float]:
     gain = [_NAN] * len(src)
     loss = [_NAN] * len(src)

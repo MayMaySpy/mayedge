@@ -109,8 +109,15 @@ export function MassagerRow({
             {marketPrice(algo.price_floor, sym)} to {marketPrice(algo.price_ceiling, sym)}
           </span>
         </span>
-        <span>
+        <span title={algo.step_mode === "atr" ? "Moves when k × ATR is 20% off" : "Fixed for the run"}>
           Step <span className="text-text">{marketPrice(algo.step, sym)}</span>
+          {algo.step_mode === "atr" && (
+            <span>
+              {" "}
+              ({algo.atr_mult}× ATR {algo.atr_tf} {marketPrice(algo.atr, sym)}, moved{" "}
+              {utcClock(algo.step_moved_at, false)})
+            </span>
+          )}
         </span>
         <span>
           Swing <span className="text-text">{formatSize(algo.qty)}</span>
