@@ -13,6 +13,7 @@ Words in bold mean what [CONTEXT.md](../CONTEXT.md) says they mean.
 5. Name: the algo is **Massager**, the size it works around is the **Core**.
 6. The **Center** is the Band's middle, so the Band maps evenly onto ±Swing. It is not an input.
 7. A Massager and a Grid refuse each other on one Market in v1: one range engine per Market.
+8. Two levels rest each side, so a level always waits behind the one that just filled.
 
 ## 1. Language (proposed CONTEXT.md entries)
 
@@ -59,7 +60,7 @@ Price goes 3.35 → 3.40 → 3.35: it sells 100 at 3.40 and buys 100 back at 3.3
 
 A static lattice, not a chase. Each level is a post-only Limit Clip at its price: sells on the levels above the last fill, buys on the levels below. When a buy fills at a level, a sell goes on one Step above it, and the other way round. The touch is not chased, so a tick of noise does not churn the Position.
 
-Only the nearest levels each side rest at once (2 each side in v1), so the lattice does not spend the Market's open-order room or the rate budget. The rest go on as price comes to them.
+Only the nearest 2 levels each side rest at once, so the lattice does not spend the Market's open-order room or the rate budget. The rest go on as price comes to them.
 
 ### 2.3 Inputs
 
@@ -124,7 +125,7 @@ That is the risk the operator takes on: a break down leaves the Position at Core
 
 ## 7. Open questions
 
-1. **Levels resting each side.** 2 is a guess. Fewer is cheaper on the rate budget, more catches a fast move.
+None. Every question went the way the Decided list says.
 
 ## 8. Phases
 
