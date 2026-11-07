@@ -16,7 +16,6 @@ from mayedge.alert_log import AlertLog
 from mayedge.alert_rows import (
     _MULTIPLE_CAP,
     NOTABLE,
-    SPIKE_KINDS,
     STATE_KINDS,
     URGENT,
     AlertEvent,
@@ -33,7 +32,7 @@ from mayedge.alert_settings import (
     resolve_alerts_config_path,
     thresholds_from_dict,
 )
-from mayedge.alert_stats import HourBase, LevelBook, MinuteBook, completed_extremes
+from mayedge.alert_stats import LevelBook, MinuteBook, SpanBase, completed_extremes
 from mayedge.lighter.models import Candle, MarketMeta, to_float
 
 logger = logging.getLogger(__name__)
@@ -42,9 +41,13 @@ _RING = 500
 _SNAPSHOT_MAX = 400
 _MINUTES_PER_DAY = 1440
 _STALE_S = 90.0
-# One row for a move shared by the board. The symbol opens BTC.
+# The Board line opens BTC. Board rows from before ADR 0027 carry this index.
 BROAD_INDEX = -1
 BROAD_SYMBOL = "BTC"
+# M1: the spans a Move is judged over, in minutes.
+SPANS = (1, 5, 15)
+# M6: a span's volume is said once it is this many times its mean.
+_VOLUME_SAID_X = 2.0
 # R7: this close to the day's high or low counts as at it.
 _AT_EXTREME_BPS = 2.0
 _PREMIUM_FLOOR_PCT = 0.05
@@ -70,11 +73,11 @@ def _direction(delta: float) -> str:
     return "flat"
 
 
-def _multiple(value: float, biggest: float) -> float:
-    """How many times the hour's biggest minute this one is. An empty hour reads as the cap."""
-    if biggest <= 0:
+def _multiple(value: float, usual: float) -> float:
+    """How many times its usual this is. A usual of nothing reads as the cap."""
+    if usual <= 0:
         return _MULTIPLE_CAP
-    return min(value / biggest, _MULTIPLE_CAP)
+    return min(value / usual, _MULTIPLE_CAP)
 
 
 def _liq_event_ts_s(row: dict[str, Any], *, now: float) -> float:
@@ -95,22 +98,15 @@ def _liq_event_ts_s(row: dict[str, Any], *, now: float) -> float:
 
 
 _KNOB_ATTR = {
-    "spike.price_x": "spike_price_x",
-    "spike.min_move_pct": "spike_min_move_pct",
-    "spike.volume_x": "spike_volume_x",
-    "spike.min_volume_usd": "spike_min_volume_usd",
-    "spike.oi_x": "spike_oi_x",
-    "spike.min_oi_usd": "spike_min_oi_usd",
-    "spike.min_oi_pct": "spike_min_oi_pct",
+    "move.x": "move_x",
     "liquidations.min_usd": "liq_min_usd",
     "liquidations.oi_bps": "liq_oi_bps",
     "held.liq_distance_pct": "held_liq_distance_pct",
-    "board.median_pct": "board_median_pct",
 }
 
 
 class AlertDetector:
-    """Spikes and states that raise rows, the funding strip, and the Activity board."""
+    """Moves and states that raise rows, the Board line, the funding strip and the Activity board."""
 
     def __init__(
         self,
@@ -142,6 +138,8 @@ class AlertDetector:
         self._daily: dict[int, list[Candle]] = {}
         self._daily_day: dict[int, int] = {}
         self._broad_cache: tuple[float, Broad | None] | None = None
+        # W3: the UTC day each level last broke, per market.
+        self._broken: dict[tuple[int, str], int] = {}
 
     @property
     def settings(self) -> AlertSettings:
@@ -257,18 +255,24 @@ class AlertDetector:
         self.flush()
 
     def flush(self) -> None:
-        now = time.time()
-        fact = self._board_fact(now)
-        ev = self._rows.ingest(
-            BROAD_INDEX, BROAD_SYMBOL, [fact] if fact else [], [], now, price=0.0
-        )
-        if ev:
-            self._record(ev, now)
         if not self._pending:
             return
         pending = self._pending
         self._pending = []
         self._emit(pending)
+
+    def board_line(self) -> dict[str, Any] | None:
+        """B3: the Board line above the list, while the Broad move is big enough. Not a row."""
+        broad = self._broad(time.time())
+        if broad is None or abs(broad.move_5m) < self._thr.board_median_pct:
+            return None
+        return {
+            "direction": broad.direction,
+            "move_5m": round(broad.move_5m, 4),
+            "same": broad.same,
+            "movers": broad.movers,
+            "liquid": broad.liquid,
+        }
 
     def funding_extremes(self) -> list[dict[str, Any]]:
         """F2: every liquid or Held market whose funding is extreme now, furthest first."""
@@ -428,25 +432,26 @@ class AlertDetector:
         symbol = self._symbols.get(market_index, f"M{market_index}")
         held = self._held_book(now).get(market_index)
         facts: list[Fact] = []
-        # G2, G3.
-        if held is not None or self._liquidity_ok(snap):
-            hour = self._minute.hour(market_index, now=now, window_min=self._thr.spike_window_min)
-            move = self._move_fact(series, snap, hour, now)
+        # G2, G3, G4.
+        if held is not None or (self._liquidity_ok(snap) and self._live(market_index, now)):
+            facts.extend(self._move_facts(market_index, snap, now))
             for fact in (
-                move,
-                self._volume_fact(hour),
-                self._oi_fact(market_index, series, snap, now),
                 self._liq_fact(market_index, snap, now),
                 self._near_liq_fact(snap, held),
-                *self._range_facts(market_index, snap, move, now),
+                *self._range_facts(market_index, now),
             ):
                 if fact is not None:
                     facts.append(fact)
         fired = [f for f in facts if f.size is not None]
         if not fired:
             return
-        # R5, R7, R8.
         context = [f for f in facts if f.size is None]
+        # R5: a row that is not a Move still says the minute.
+        if not any(f.kind == "move" for f in facts):
+            minute = self._span_move(market_index, snap, 1, now)
+            if minute is not None:
+                context.append(minute)
+        # R7, R8.
         context.extend(self._tags(market_index, snap))
         label = "" if held is None else (held.side or "order")
         ev = self._rows.ingest(
@@ -455,47 +460,105 @@ class AlertDetector:
         if ev:
             self._record(ev, now)
 
-    def _move_fact(
-        self,
-        series: deque[MarketSnapshot],
-        snap: MarketSnapshot,
-        hour: HourBase | None,
-        now: float,
+    def _live(self, market_index: int, now: float) -> bool:
+        """G4."""
+        share = self._minute.live_share(market_index, now=now, bars=self._thr.move_usual_bars)
+        return share is not None and share >= self._thr.move_live_share
+
+    def _floor(self, span: int) -> float:
+        return {
+            1: self._thr.move_floor_1m_pct,
+            5: self._thr.move_floor_5m_pct,
+        }.get(span, self._thr.move_floor_15m_pct)
+
+    def _span_move(
+        self, market_index: int, snap: MarketSnapshot, span: int, now: float
     ) -> Fact | None:
-        """K2, K5. The 1m move, as a spike when it is one and as plain tape when it is not."""
-        base = self._find_baseline(series, 60.0)
-        pct = _pct_change(snap.last, base.last) if base else None
+        """The plain move over a span, from the close ``span`` bars back."""
+        base = self._minute.span(market_index, span, now=now, bars=self._thr.move_usual_bars)
+        if base is None:
+            return None
+        pct = _pct_change(snap.last, base.ref_close)
         if pct is None:
             return None
-        fact = Fact("move", _direction(pct), pct, "pct", window="1m")
-        fact.detail["share"] = abs(pct) / self._day_range(snap)
-        judged = pct
-        # K5: with the board, only the part beyond it counts.
-        broad = self._broad(now)
-        if (
-            broad is not None
-            and _direction(pct) == broad.direction
-            and _direction(broad.move_1m) == broad.direction
-        ):
-            judged = pct - broad.move_1m
-            if _direction(judged) != broad.direction:
-                return fact
-            fact.detail["excess"] = judged
-        if hour is None:
-            return fact
-        fact.detail["multiple"] = _multiple(abs(judged), hour.max_move_pct)
-        threshold = max(self._thr.spike_price_x * hour.max_move_pct, self._thr.spike_min_move_pct)
-        if abs(judged) >= threshold:
-            fact.size = abs(judged) / threshold
-        return fact
+        return Fact("move", _direction(pct), pct, "pct", window=f"{span}m")
 
-    def _range_facts(
-        self, market_index: int, snap: MarketSnapshot, move: Fact | None, now: float
-    ) -> list[Fact]:
-        """W1, W2. Quarter before week, so a shared price leads with the longer level."""
-        bars = self._daily.get(market_index)
-        if not bars or move is None:
+    def _move_facts(self, market_index: int, snap: MarketSnapshot, now: float) -> list[Fact]:
+        """M1 to M4, M6. The span furthest past its threshold, and what the tape said with it."""
+        best: tuple[Fact, SpanBase] | None = None
+        broad = self._broad(now)
+        for span in SPANS:
+            base = self._minute.span(market_index, span, now=now, bars=self._thr.move_usual_bars)
+            if base is None:
+                continue
+            pct = _pct_change(snap.last, base.ref_close)
+            if pct is None:
+                continue
+            judged = pct
+            excess: float | None = None
+            # M4: with the board, only the part beyond it counts.
+            if broad is not None and _direction(pct) == broad.direction:
+                board = broad.spans.get(span, 0.0)
+                if _direction(board) == broad.direction:
+                    judged = pct - board
+                    if _direction(judged) != broad.direction:
+                        continue
+                    excess = judged
+            threshold = max(self._thr.move_x * base.usual_pct, self._floor(span))
+            if abs(judged) < threshold:
+                continue
+            fact = Fact("move", _direction(pct), pct, "pct", window=f"{span}m")
+            fact.size = abs(judged) / threshold
+            fact.detail["multiple"] = _multiple(abs(judged), base.usual_pct)
+            fact.detail["usual"] = base.usual_pct
+            fact.detail["share"] = abs(pct) / self._day_range(snap)
+            if excess is not None:
+                fact.detail["excess"] = excess
+            if best is None or (fact.size or 0.0) > (best[0].size or 0.0):
+                best = (fact, base)
+        if best is None:
             return []
+        fact, base = best
+        out = [fact]
+        # M6.
+        if base.mean_volume_usd > 0:
+            vol_x = base.volume_usd / base.mean_volume_usd
+            if vol_x >= _VOLUME_SAID_X:
+                out.append(
+                    Fact(
+                        "volume",
+                        "flat",
+                        base.volume_usd,
+                        "usd",
+                        window=fact.window,
+                        detail={"multiple": min(vol_x, _MULTIPLE_CAP)},
+                    )
+                )
+        then = self._level.back(market_index, "oi", now=now, minutes=base.span)
+        if then and snap.oi > 0:
+            delta = snap.oi - then
+            out.append(
+                Fact(
+                    "oi",
+                    _direction(delta),
+                    delta / then * 100.0,
+                    "pct",
+                    window=fact.window,
+                    detail={"usd": delta},
+                )
+            )
+        return out
+
+    def _range_facts(self, market_index: int, now: float) -> list[Fact]:
+        """W1 to W3. A closed minute through a level, once a UTC day. Quarter before week."""
+        bars = self._daily.get(market_index)
+        closed = self._minute.bars(market_index)
+        minute = int(now // 60) * 60
+        closed = [bar for bar in closed if bar.time < minute][-2:]
+        if not bars or len(closed) < 2:
+            return []
+        before, last = closed
+        day = int(now) // 86_400
         out: list[Fact] = []
         windows = (
             (self._thr.range_quarter_days, "quarter_high", "quarter_low"),
@@ -506,80 +569,18 @@ class AlertDetector:
             if extremes is None:
                 continue
             high, low = extremes
-            for level, kind, direction in (
-                (high, high_kind, "up"),
-                (low, low_kind, "down"),
-            ):
-                fact = self._against_level(snap.last, move.value, level, kind, direction)
-                if fact is not None:
-                    out.append(fact)
+            for level, kind, direction in ((high, high_kind, "up"), (low, low_kind, "down")):
+                if level <= 0:
+                    continue
+                if direction == "up":
+                    through = last.close > level >= before.close
+                else:
+                    through = last.close < level <= before.close
+                if not through or self._broken.get((market_index, kind)) == day:
+                    continue
+                self._broken[(market_index, kind)] = day
+                out.append(Fact(kind, direction, level, "px", size=1.0))
         return out
-
-    def _against_level(
-        self, last: float, move_pct: float, level: float, kind: str, direction: str
-    ) -> Fact | None:
-        """W2. Within the band, and the minute points at the level by at least the price floor."""
-        if level <= 0 or last <= 0:
-            return None
-        floor = self._thr.spike_min_move_pct
-        if direction == "up" and move_pct < floor:
-            return None
-        if direction == "down" and move_pct > -floor:
-            return None
-        distance = abs(last - level) / level * 100.0
-        near = self._thr.range_near_pct
-        if distance > near:
-            return None
-        fact = Fact(kind, direction, level, "px", size=near / max(distance, 0.01))
-        fact.detail["distance"] = distance
-        return fact
-
-    def _volume_fact(self, hour: HourBase | None) -> Fact | None:
-        """K3. Shown once it is the hour's biggest minute, a spike at three times that."""
-        if hour is None:
-            return None
-        usd = hour.forming_volume_usd
-        if usd < self._thr.spike_min_volume_usd or usd < hour.max_volume_usd:
-            return None
-        fact = Fact("volume", "flat", usd, "usd", window="1m")
-        fact.detail["multiple"] = _multiple(usd, hour.max_volume_usd)
-        threshold = max(
-            self._thr.spike_volume_x * hour.max_volume_usd, self._thr.spike_min_volume_usd
-        )
-        if usd >= threshold:
-            fact.size = usd / threshold
-        return fact
-
-    def _oi_fact(
-        self,
-        market_index: int,
-        series: deque[MarketSnapshot],
-        snap: MarketSnapshot,
-        now: float,
-    ) -> Fact | None:
-        """K4. Shown once it is the hour's biggest change, a spike at twice that."""
-        base = self._find_baseline(series, 60.0)
-        if base is None or base.oi <= 0 or snap.oi <= 0:
-            return None
-        delta = snap.oi - base.oi
-        pct = delta / base.oi * 100.0
-        if abs(delta) < self._thr.spike_min_oi_usd or abs(pct) < self._thr.spike_min_oi_pct:
-            return None
-        changes = self._level.changes(
-            market_index, "oi", now=now, window_min=self._thr.spike_window_min
-        )
-        if changes is None:
-            return None
-        biggest = max(changes, default=0.0)
-        if abs(delta) < biggest:
-            return None
-        fact = Fact("oi", _direction(delta), pct, "pct", window="1m")
-        fact.detail["multiple"] = _multiple(abs(delta), biggest)
-        fact.detail["usd"] = delta
-        threshold = max(self._thr.spike_oi_x * biggest, self._thr.spike_min_oi_usd)
-        if abs(delta) >= threshold:
-            fact.size = abs(delta) / threshold
-        return fact
 
     def _liq_fact(self, market_index: int, snap: MarketSnapshot, now: float) -> Fact | None:
         """L1, L2."""
@@ -656,38 +657,25 @@ class AlertDetector:
         movers = len(up) + len(down)
         broad: Broad | None = None
         if len(side) >= self._thr.board_min_movers and len(side) / movers >= self._thr.board_agree:
-            minute: list[float] = []
-            for mi in side:
-                series = self._snapshots[mi]
-                base = self._find_baseline(series, 60.0)
-                pct = _pct_change(series[-1].last, base.last) if base else None
-                if pct is not None:
-                    minute.append(pct)
+            spans: dict[int, float] = {}
+            for span in SPANS:
+                along: list[float] = []
+                for mi in side:
+                    ref = self._minute.ref_close(mi, span, now=now)
+                    pct = _pct_change(self._snapshots[mi][-1].last, ref) if ref else None
+                    if pct is not None:
+                        along.append(pct)
+                spans[span] = statistics.median(along) if along else 0.0
             broad = Broad(
                 direction="up" if side is up else "down",
                 move_5m=statistics.median(moves[mi] for mi in side),
-                move_1m=statistics.median(minute) if minute else 0.0,
+                spans=spans,
                 same=len(side),
                 movers=movers,
                 liquid=len(moves),
             )
         self._broad_cache = (now, broad)
         return broad
-
-    def _board_fact(self, now: float) -> Fact | None:
-        """B3."""
-        broad = self._broad(now)
-        if broad is None or abs(broad.move_5m) < self._thr.board_median_pct:
-            return None
-        return Fact(
-            "board",
-            broad.direction,
-            broad.move_5m,
-            "pct",
-            window=f"{broad.same}/{broad.movers}",
-            size=abs(broad.move_5m) / self._thr.board_median_pct,
-            detail={"liquid": float(broad.liquid)},
-        )
 
     def _record(self, ev: AlertEvent, now: float) -> None:
         """S1, then queue the row for the panel."""
@@ -728,7 +716,7 @@ __all__ = [
     "BROAD_INDEX",
     "BROAD_SYMBOL",
     "NOTABLE",
-    "SPIKE_KINDS",
+    "SPANS",
     "STATE_KINDS",
     "URGENT",
     "AlertDetector",

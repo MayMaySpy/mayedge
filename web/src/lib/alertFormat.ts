@@ -4,7 +4,8 @@ import { utcClock } from "@/lib/utcTime";
 import { pairLabel } from "@/lib/venuePair";
 
 const RULE_NAME: Record<string, string> = {
-  move: "Price spike",
+  move: "Move",
+  // Rows from before ADR 0027 stay in the record under their old rules.
   volume: "Volume spike",
   oi: "OI spike",
   liqs: "Liquidations",
@@ -26,8 +27,7 @@ function priceText(v: number): string {
 }
 
 function rangeText(name: string, f: AlertFact): string {
-  const away = f.distance == null ? "" : ` · ${f.distance.toFixed(2)}% away`;
-  return `${name} ${priceText(f.value)}${away}`;
+  return `through the ${name} ${priceText(f.value)}`;
 }
 
 function signed(v: number, digits: number): string {
@@ -41,15 +41,19 @@ function liquidatedSide(f: AlertFact): string {
   return f.direction === "down" ? "longs" : "shorts";
 }
 
-/** What a fact says happened. */
+function span(f: AlertFact): string {
+  return f.window ? `in ${f.window}` : "";
+}
+
+/** What a fact says happened, in plain words. */
 export function headlineText(f: AlertFact): string {
   switch (f.kind) {
     case "move":
-      return `${signed(f.value, 2)}% ${f.window ?? ""}`.trim();
+      return `${signed(f.value, 2)}% ${span(f)}`.trim();
     case "volume":
-      return `Vol ${formatUsdCompact(f.value) || "$0"} ${f.window ?? ""}`.trim();
+      return `volume ${formatUsdCompact(f.value) || "$0"} ${span(f)}`.trim();
     case "oi":
-      return `OI ${signed(f.value, 2)}% ${f.window ?? ""}`.trim();
+      return `OI ${signed(f.value, 2)}% ${span(f)}`.trim();
     case "week_high":
       return rangeText("week high", f);
     case "week_low":
@@ -59,15 +63,15 @@ export function headlineText(f: AlertFact): string {
     case "quarter_low":
       return rangeText("quarter low", f);
     case "day_high":
-      return "day high";
+      return "at the day's high";
     case "day_low":
-      return "day low";
+      return "at the day's low";
     case "funding":
       return `funding ${signed(f.value, 4)}%/h`;
     case "liqs":
-      return `Liqs ${formatUsdCompact(f.value) || "$0"} ${liquidatedSide(f)}`;
+      return `${formatUsdCompact(f.value) || "$0"} ${liquidatedSide(f)} liquidated`;
     case "board":
-      return `${signed(f.value, 2)}% 5m`;
+      return `board ${signed(f.value, 2)}% in 5m`;
     case "near_liq":
       return `${f.value.toFixed(1)}% from liquidation`;
     default:
@@ -75,46 +79,54 @@ export function headlineText(f: AlertFact): string {
   }
 }
 
-function hourMax(f: AlertFact): string {
-  return f.multiple == null ? "" : `${f.multiple.toFixed(1)}× hour max`;
+function times(multiple: number): string {
+  return multiple >= 10 ? multiple.toFixed(0) : multiple.toFixed(1);
 }
 
-/** How big the headline is: against the hour for a spike, against the book for the rest. */
+/** How big the headline is: against its own usual for a Move, against the book for the rest. */
 export function supportText(f: AlertFact): string[] {
   switch (f.kind) {
-    case "move":
-      return [hourMax(f), f.excess == null ? "" : `${signed(f.excess, 2)}% past the board`].filter(
-        Boolean
-      );
+    case "move": {
+      const out: string[] = [];
+      if (f.multiple != null) out.push(`${times(f.multiple)}× its usual ${f.window ?? ""}`.trim());
+      if (f.excess != null) out.push(`${signed(f.excess, 2)}% past the board`);
+      return out;
+    }
     case "volume":
     case "oi":
-      return [hourMax(f)].filter(Boolean);
+      // A spike from before ADR 0027.
+      return f.multiple == null ? [] : [`${times(f.multiple)}× the hour's biggest minute`];
     case "liqs":
-      return f.bps == null ? [] : [`${Math.round(f.bps)} bps of OI`];
+      return f.bps == null ? [] : [`${Math.round(f.bps)} bps of open interest`];
     case "board": {
       const [same, movers] = (f.window ?? "").split("/");
-      const out = same && movers ? [`${same} of ${movers} movers ${f.direction ?? ""}`.trim()] : [];
-      if (f.liquid != null) out.push(`${f.liquid} liquid`);
-      return out;
+      return same && movers ? [`${same} of ${movers} movers ${f.direction ?? ""}`.trim()] : [];
     }
     default:
       return [];
   }
 }
 
-/** A fact that is not the headline: another rule on the row, or what the tape showed. */
+/** A fact that is not the headline: what the tape said with it. */
 export function sideText(f: AlertFact): string {
-  const text = headlineText(f);
-  const spike = f.kind === "move" || f.kind === "volume" || f.kind === "oi";
-  // A plain 1m move is just the tape. Anything else that reached the hour's biggest says so.
-  if (!spike || f.multiple == null || (f.kind === "move" && f.size == null)) return text;
-  return `${text} (${f.multiple.toFixed(1)}×)`;
+  switch (f.kind) {
+    case "volume":
+      return f.multiple == null
+        ? headlineText(f)
+        : `volume ${times(f.multiple)}× (${formatUsdCompact(f.value) || "$0"})`;
+    case "oi":
+      return f.usd == null
+        ? `OI ${signed(f.value, 2)}%`
+        : `OI ${signed(f.value, 2)}% (${f.usd < 0 ? "−" : "+"}${formatUsdCompact(Math.abs(f.usd))})`;
+    default:
+      return headlineText(f);
+  }
 }
 
 /** Which side the operator holds, and whether the row runs with it. */
 export function heldText(ev: AlertEvent): string {
   if (!ev.held) return "";
-  if (ev.held === "order") return "working order";
+  if (ev.held === "order") return "near your order";
   if (ev.direction !== "up" && ev.direction !== "down") return `your ${ev.held}`;
   if (ev.rule === "near_liq" || ev.rule === "board") return `your ${ev.held}`;
   const against = (ev.held === "long") === (ev.direction === "down");
@@ -171,7 +183,14 @@ export type AlertLine = {
   tooltip: string;
 };
 
-/** A row reads as its facts. No label says what they mean. */
+/** The headline, and the price it fired at when the headline is a price. */
+function labelText(head: AlertFact, ev: AlertEvent): string {
+  const text = headlineText(head);
+  const priced = head.kind === "move" || head.kind === "liqs" || head.kind === "near_liq";
+  return priced && ev.price > 0 ? `${text} · ${priceText(ev.price)}` : text;
+}
+
+/** A row reads as its facts, price first. No label says what they mean. */
 export function eventLine(ev: AlertEvent): AlertLine {
   const facts = ev.facts ?? [];
   const head = facts.find((f) => f.kind === ev.rule) ?? facts[0];
@@ -189,7 +208,7 @@ export function eventLine(ev: AlertEvent): AlertLine {
     held: Boolean(ev.held),
     direction: ev.direction,
     severity: ev.severity,
-    label: head ? headlineText(head) : ruleName(ev.rule),
+    label: head ? labelText(head, ev) : ruleName(ev.rule),
     detail: detail.join(" · "),
     atMs,
     tooltip: [

@@ -10,7 +10,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { api, type AlertStats, type FundingExtremeRow } from "@/lib/api";
+import { api, type AlertStats, type BoardLineRow, type FundingExtremeRow } from "@/lib/api";
 import {
   directionArrow,
   directionClass,
@@ -24,7 +24,7 @@ import {
   type AlertLine,
 } from "@/lib/alertFormat";
 import { useFavorites } from "@/lib/favorites";
-import { useFundingExtremes, useLiveAlerts } from "@/lib/liveData";
+import { useBoardLine, useFundingExtremes, useLiveAlerts } from "@/lib/liveData";
 import { formatFundingPct } from "@/lib/marketPicker";
 import { pairLabel } from "@/lib/venuePair";
 import { cn } from "@/lib/utils";
@@ -143,6 +143,39 @@ function AlertLineRow({
   );
 }
 
+/** B3: the Broad move, as a line. It raises nothing. Clicking it opens BTC. */
+function BoardLine({
+  line,
+  onOpen,
+}: {
+  line: BoardLineRow | null;
+  onOpen?: (symbol: string) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-baseline gap-x-2 border-b border-rule px-2 py-1 font-mono text-xs">
+      <span className="shrink-0 tracking-wide text-muted-foreground uppercase">Board</span>
+      {line == null ? (
+        <span className="text-muted-foreground">no broad move</span>
+      ) : (
+        <button
+          type="button"
+          title={`${line.same} of ${line.movers} movers went ${line.direction}, of ${line.liquid} liquid perps`}
+          className="tabular-nums hover:underline"
+          onClick={() => onOpen?.("BTC")}
+        >
+          <span className={directionClass(line.direction)}>
+            {directionArrow(line.direction)} {line.move_5m > 0 ? "+" : ""}
+            {line.move_5m.toFixed(2)}% in 5m
+          </span>{" "}
+          <span className="text-muted-foreground">
+            · {line.same} of {line.movers} movers
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Funding that is far from a market's own day. A standing note: it raises nothing. */
 function FundingStrip({
   rows,
@@ -155,7 +188,7 @@ function FundingStrip({
     <div className="flex shrink-0 items-baseline gap-x-2 overflow-hidden border-b border-rule px-2 py-1 font-mono text-xs">
       <span className="shrink-0 tracking-wide text-muted-foreground uppercase">Funding</span>
       {rows.length === 0 ? (
-        <span className="text-muted-foreground">none extreme</span>
+        <span className="text-muted-foreground">nothing unusual</span>
       ) : (
         <span className="flex min-w-0 flex-wrap gap-x-2">
           {rows.slice(0, STRIP_MAX).map((row) => (
@@ -198,6 +231,7 @@ interface AlertsPanelProps {
 export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: AlertsPanelProps) {
   const all = useLiveAlerts();
   const funding = useFundingExtremes();
+  const board = useBoardLine();
   const [favorites] = useFavorites();
   const [minSev, setMinSev] = useState(loadMinSev);
   const [favOnly, setFavOnly] = useState(loadFavOnly);
@@ -433,6 +467,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
         }
       />
       <AlertRecordDialog open={recordOpen} onOpenChange={setRecordOpen} />
+      <BoardLine line={board} onOpen={onOpenPair} />
       <FundingStrip rows={funding} onOpen={onOpenPair} />
       <ScrollArea className="min-h-0 flex-1">
         {rows.length === 0 ? (
@@ -440,7 +475,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
             <EmptyHeader>
               <EmptyTitle>Quiet</EmptyTitle>
               <EmptyDescription>
-                No spike in the last hour's terms. The rest is under Scan.
+                Nothing has moved past its usual. The rest is under Scan.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>

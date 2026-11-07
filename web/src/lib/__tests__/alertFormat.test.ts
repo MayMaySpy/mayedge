@@ -7,11 +7,12 @@ const NOW = 1_800_000_000_000;
 const MOVE: AlertFact = {
   kind: "move",
   direction: "up",
-  value: 0.5,
+  value: 1.8,
   unit: "pct",
-  window: "1m",
-  size: 1.25,
-  multiple: 2.5,
+  window: "5m",
+  size: 1.2,
+  multiple: 14.4,
+  usual: 0.125,
   share: 0.04,
 };
 
@@ -39,88 +40,74 @@ describe("eventLine", () => {
     expect(eventLine(alert("a")).tooltip).toContain("Fired 08:00:00 UTC");
   });
 
-  it("reads as what spiked, by how much, then what the tape showed", () => {
+  it("reads price first: the move, its span and price, then its usual and the tape", () => {
     const line = eventLine(
       alert("a", {
         facts: [
           MOVE,
-          { kind: "volume", direction: "flat", value: 80_000, unit: "usd", window: "1m", multiple: 2.7 },
+          { kind: "volume", direction: "flat", value: 480_000, unit: "usd", window: "5m", multiple: 6.2 },
+          { kind: "oi", direction: "down", value: -0.9, unit: "pct", window: "5m", usd: -1_200_000 },
           { kind: "day_high", direction: "up", value: 100.5, unit: "px" },
           { kind: "funding", direction: "up", value: 0.012, unit: "pct_hr", z: 5.5 },
         ],
       })
     );
     expect(line.name).toBe("ETH");
-    expect(line.label).toBe("+0.50% 1m");
-    expect(line.detail).toBe("2.5× hour max · Vol $80k 1m (2.7×) · day high · funding +0.0120%/h");
+    expect(line.label).toBe("+1.80% in 5m · 100.5");
+    expect(line.detail).toBe(
+      "14× its usual 5m · volume 6.2× ($480k) · OI -0.90% (−$1.2M) · at the day's high · funding +0.0120%/h"
+    );
   });
 
-  it("leads with volume when volume is the larger spike, and still says what price did", () => {
+  it("shows a minute too small to print as flat", () => {
+    const line = eventLine(
+      alert("z", {
+        rule: "liqs",
+        direction: "down",
+        facts: [
+          { kind: "liqs", direction: "down", value: 1_200_000, unit: "usd", size: 2.2, bps: 44.4 },
+          { kind: "move", direction: "down", value: -0.001, unit: "pct", window: "1m" },
+        ],
+      })
+    );
+    expect(line.label).toBe("$1.2M longs liquidated · 100.5");
+    expect(line.detail).toBe("44 bps of open interest · 0.00% in 1m");
+  });
+
+  it("reads a broken level as the level", () => {
+    const line = eventLine(
+      alert("w", {
+        rule: "week_high",
+        facts: [
+          { kind: "week_high", direction: "up", value: 110, unit: "px", size: 1 },
+          { kind: "move", direction: "up", value: 0.3, unit: "pct", window: "1m" },
+        ],
+      })
+    );
+    expect(line.label).toBe("through the week high 110");
+    expect(line.detail).toBe("+0.30% in 1m");
+  });
+
+  it("says how far past the board a market went", () => {
+    const line = eventLine(alert("a", { facts: [{ ...MOVE, value: 2.5, excess: 1.5 }] }));
+    expect(line.label).toBe("+2.50% in 5m · 100.5");
+    expect(line.detail).toBe("14× its usual 5m · +1.50% past the board");
+  });
+
+  it("still reads a spike from before ADR 0027", () => {
     const line = eventLine(
       alert("v", {
         rule: "volume",
         direction: "flat",
         facts: [
           { kind: "volume", direction: "flat", value: 100_000, unit: "usd", window: "1m", size: 1.1, multiple: 3.3 },
-          { kind: "move", direction: "up", value: 0.04, unit: "pct", window: "1m", multiple: 0.2 },
         ],
       })
     );
-    expect(line.label).toBe("Vol $100k 1m");
-    expect(line.detail).toBe("3.3× hour max · +0.04% 1m");
-  });
+    expect(line.label).toBe("volume $100k in 1m");
+    expect(line.detail).toBe("3.3× the hour's biggest minute");
 
-  it("shows a move too small to print as flat", () => {
-    const line = eventLine(
-      alert("z", {
-        rule: "volume",
-        direction: "flat",
-        facts: [
-          { kind: "volume", direction: "flat", value: 103_000, unit: "usd", window: "1m", size: 1.2, multiple: 3.6 },
-          { kind: "move", direction: "down", value: -0.001, unit: "pct", window: "1m" },
-        ],
-      })
-    );
-    expect(line.detail).toBe("3.6× hour max · 0.00% 1m");
-  });
-
-  it("shows a second spike on the row with its own multiple", () => {
-    const line = eventLine(
-      alert("o", {
-        rule: "oi",
-        direction: "down",
-        facts: [
-          { kind: "oi", direction: "down", value: -1.0, unit: "pct", window: "1m", size: 1.25, multiple: 2.5, usd: -500_000 },
-          { ...MOVE, direction: "down", value: -0.6, size: 1.1, multiple: 2.2 },
-        ],
-      })
-    );
-    expect(line.label).toBe("OI -1.00% 1m");
-    expect(line.detail).toBe("2.5× hour max · -0.60% 1m (2.2×)");
-  });
-
-  it("reads a week high as the level and how close the price is", () => {
-    const line = eventLine(
-      alert("w", {
-        rule: "week_high",
-        facts: [
-          { kind: "week_high", direction: "up", value: 110, unit: "px", size: 3.3, distance: 0.09 },
-          { kind: "move", direction: "up", value: 0.55, unit: "pct", window: "1m" },
-        ],
-      })
-    );
-    expect(line.label).toBe("week high 110 · 0.09% away");
-    expect(line.detail).toBe("+0.55% 1m");
-  });
-
-  it("says how far past the board a market went", () => {
-    const line = eventLine(alert("a", { facts: [{ ...MOVE, value: 2.5, excess: 1.5 }] }));
-    expect(line.label).toBe("+2.50% 1m");
-    expect(line.detail).toBe("2.5× hour max · +1.50% past the board");
-  });
-
-  it("names the Market row and counts its movers", () => {
-    const line = eventLine(
+    const board = eventLine(
       alert("b", {
         symbol: "BTC",
         market_index: -1,
@@ -131,25 +118,9 @@ describe("eventLine", () => {
         ],
       })
     );
-    expect(line.name).toBe("Market");
-    expect(line.mutable).toBe(false);
-    expect(line.label).toBe("-0.86% 5m");
-    expect(line.detail).toBe("22 of 22 movers down · 43 liquid");
-  });
-
-  it("puts liquidations first when they are the larger rule", () => {
-    const line = eventLine(
-      alert("c", {
-        rule: "liqs",
-        direction: "down",
-        facts: [
-          { kind: "liqs", direction: "down", value: 1_200_000, unit: "usd", size: 2.2, bps: 44.4 },
-          { ...MOVE, direction: "down", value: -1.1, size: 1.2, multiple: 2.4 },
-        ],
-      })
-    );
-    expect(line.label).toBe("Liqs $1.2M longs");
-    expect(line.detail).toBe("44 bps of OI · -1.10% 1m (2.4×)");
+    expect(board.name).toBe("Market");
+    expect(board.label).toBe("board -0.86% in 5m");
+    expect(board.detail).toBe("22 of 22 movers down");
   });
 });
 
@@ -158,7 +129,7 @@ describe("heldText", () => {
     expect(heldText(alert("a", { held: "long", direction: "down" }))).toBe("against your long");
     expect(heldText(alert("a", { held: "long", direction: "up" }))).toBe("with your long");
     expect(heldText(alert("a", { held: "short", direction: "up" }))).toBe("against your short");
-    expect(heldText(alert("a", { held: "order" }))).toBe("working order");
+    expect(heldText(alert("a", { held: "order" }))).toBe("near your order");
     expect(heldText(alert("a"))).toBe("");
   });
 
@@ -174,7 +145,7 @@ describe("heldText", () => {
       facts: [{ kind: "near_liq", direction: "down", value: 4.2, unit: "pct", size: 2.4 }],
     });
     expect(heldText(near)).toBe("your long");
-    expect(eventLine(near).label).toBe("4.2% from liquidation");
+    expect(eventLine(near).label).toBe("4.2% from liquidation · 100.5");
     expect(eventLine(near).detail).toBe("your long");
   });
 });
@@ -182,8 +153,8 @@ describe("heldText", () => {
 describe("toastCopy", () => {
   it("leads with the market and the fact", () => {
     expect(toastCopy(alert("a"), "ETH-USD")).toEqual({
-      title: "▲ ETH-USD · +0.50% 1m",
-      description: "2.5× hour max",
+      title: "▲ ETH-USD · +1.80% in 5m · 100.5",
+      description: "14× its usual 5m",
     });
   });
 });

@@ -60,41 +60,44 @@ class MinuteBookTest(unittest.TestCase):
         self.assertEqual(book.bar_count(1), 41)
 
 
-class HourTest(unittest.TestCase):
-    def test_the_minute_being_judged_is_not_in_its_own_hour(self) -> None:
-        # Bars at 100 trading 10, then the forming minute trades 500 and jumps 3%.
+class SpanTest(unittest.TestCase):
+    def test_the_usual_move_is_the_median_of_its_span(self) -> None:
+        # Closes step 0.2% up and back. The forming minute jumps 3% and is in no usual.
         start = 1_700_000_040  # on a minute boundary, as venue bars are
 
         def bar(i: int, close: float, vol: float) -> Candle:
             return Candle(start + i * 60, close, close, close, close, vol)
 
-        now = start + 70 * 60 + 20
-        book = MinuteBook()
-        book.seed(1, [bar(i, 100 + (i % 2) * 0.2, 10) for i in range(70)])
-        book.observe(1, [bar(70, 103, 500)])
-        hour = book.hour(1, now=now, window_min=60)
-        assert hour is not None
-        self.assertAlmostEqual(hour.max_volume_usd, 10 * 100.2)
-        self.assertAlmostEqual(hour.max_move_pct, 0.2, places=2)
-        self.assertAlmostEqual(hour.forming_volume_usd, 500 * 103)
+        now = start + 240 * 60 + 20
+        book = MinuteBook(max_bars=260)
+        book.seed(1, [bar(i, 100 + (i % 2) * 0.2, 10) for i in range(240)])
+        book.observe(1, [bar(240, 103, 500)])
+        one = book.span(1, 1, now=now, bars=240)
+        assert one is not None
+        self.assertAlmostEqual(one.usual_pct, 0.2, places=1)
+        self.assertEqual(one.ref_close, 100.2)
+        self.assertAlmostEqual(one.volume_usd, 500 * 103)
+        two = book.span(1, 2, now=now, bars=240)
+        assert two is not None
+        # An even span lands back where it started.
+        self.assertEqual(two.usual_pct, 0.0)
+        self.assertEqual(book.ref_close(1, 2, now=now), 100.0)
+        self.assertEqual(book.live_share(1, now=now, bars=240), 1.0)
 
-        levels = LevelBook()
-        minute = now // 60
-        levels.seed(1, "oi", [(minute - 70 + i, 1_000.0 + (i % 2) * 5.0) for i in range(70)])
-        levels.observe(1, "oi", ts=now, value=2_000.0)
-        changes = levels.changes(1, "oi", now=now, window_min=60)
-        assert changes is not None
-        self.assertEqual(max(changes), 5.0)
-        self.assertEqual(len(changes), 60)
-
-    def test_an_hour_needs_an_hour(self) -> None:
+    def test_a_span_needs_its_bars(self) -> None:
         now = 1_700_000_000 + 40 * 60
         book = MinuteBook()
         book.seed(1, [_bar(i, 100, 10) for i in range(40)])
-        self.assertIsNone(book.hour(1, now=now, window_min=60))
+        self.assertIsNone(book.span(1, 1, now=now, bars=240))
+        self.assertIsNone(book.live_share(1, now=now, bars=240))
+
+    def test_open_interest_a_span_back(self) -> None:
+        now = 1_700_000_000 + 40 * 60
         levels = LevelBook()
-        levels.seed(1, "oi", [(now // 60 - 30 + i, 1_000.0) for i in range(30)])
-        self.assertIsNone(levels.changes(1, "oi", now=now, window_min=60))
+        minute = now // 60
+        levels.seed(1, "oi", [(minute - 5, 1_000.0), (minute - 1, 1_100.0)])
+        self.assertEqual(levels.back(1, "oi", now=now, minutes=5), 1_000.0)
+        self.assertIsNone(levels.back(1, "oi", now=now, minutes=3))
 
 
 class LevelBookTest(unittest.TestCase):

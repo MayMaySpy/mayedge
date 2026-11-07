@@ -11,23 +11,21 @@ from mayedge.alert_settings import AlertSettings
 
 NOTABLE = 2
 URGENT = 3
-SPIKE_KINDS = frozenset({"move", "volume", "oi"})
-# R4: states that go on firing once they start.
-STATE_KINDS = frozenset({"liqs", "board", "near_liq"})
-# W3: a level the price is against. One row while it stays, not a toast by itself.
+# R4, M5: states that go on firing once they start. A Move keeps its own clock.
+STATE_KINDS = frozenset({"liqs", "near_liq", "move"})
+# W2: a level the price closed through. The detector raises it once a day.
 RANGE_KINDS = frozenset({"week_high", "week_low", "quarter_high", "quarter_low"})
-_QUIET_KINDS = STATE_KINDS | RANGE_KINDS
 _RANGE_NAME = {
     "week_high": "week high",
     "week_low": "week low",
     "quarter_high": "quarter high",
     "quarter_low": "quarter low",
 }
-# R3: rules that are Urgent on any market. Board is a state and is not one of them.
+# R3: rules that are Urgent on any market.
 _URGENT_KINDS = frozenset({"liqs", "near_liq"})
 # R4: a state that keeps firing raises another row at half again its largest size.
 _ESCALATE = 1.5
-# How many times the hour's biggest a minute can be said to be.
+# How many times its Usual move a span can be said to be.
 _MULTIPLE_CAP = 99.0
 
 
@@ -152,43 +150,36 @@ def _px(value: float) -> str:
     return text or "0"
 
 
-def _hour(fact: Fact) -> str:
-    multiple = fact.detail.get("multiple")
-    return "" if multiple is None else f" · {multiple:.1f}× hour max"
-
-
 def describe(fact: Fact) -> str:
-    """The fact in desk shorthand. No label says what it means."""
+    """The fact in plain words, for the note and a push. No label says what it means."""
     v = fact.value
     if fact.kind == "move":
-        text = f"{v:+.2f}% 1m"
-        if fact.size is not None:
-            text += _hour(fact)
+        text = f"{v:+.2f}% in {fact.window or '1m'}"
+        multiple = fact.detail.get("multiple")
+        if fact.size is not None and multiple is not None:
+            text += f" · {multiple:.0f}× its usual {fact.window or '1m'}"
         excess = fact.detail.get("excess")
         if excess is not None:
             text += f" · {excess:+.2f}% past the board"
         return text
     if fact.kind == "volume":
-        return f"Vol {_usd(v)} 1m{_hour(fact)}"
+        return f"volume {fact.detail.get('multiple', 0.0):.0f}× ({_usd(v)})"
     if fact.kind == "oi":
-        return f"OI {v:+.2f}% 1m{_hour(fact)}"
+        usd = fact.detail.get("usd")
+        return f"OI {v:+.2f}%" + (
+            "" if usd is None else f" ({'+' if usd >= 0 else '−'}{_usd(usd)})"
+        )
     if fact.kind == "liqs":
         side = "longs" if fact.direction == "down" else "shorts"
-        return f"Liqs {_usd(v)} {side} · {fact.detail.get('bps', 0.0):.0f} bps of OI"
-    if fact.kind == "board":
-        return f"Board {v:+.2f}% · {fact.window} {fact.direction}"
+        return f"{_usd(v)} {side} liquidated · {fact.detail.get('bps', 0.0):.0f} bps of OI"
     if fact.kind == "near_liq":
         return f"{v:.1f}% from liquidation"
     if fact.kind in _RANGE_NAME:
-        away = fact.detail.get("distance")
-        text = f"{_RANGE_NAME[fact.kind]} {_px(fact.value)}"
-        if away is not None:
-            text += f" · {away:.2f}% away"
-        return text
+        return f"through the {_RANGE_NAME[fact.kind]} {_px(fact.value)}"
     if fact.kind == "day_high":
-        return "day high"
+        return "at the day's high"
     if fact.kind == "day_low":
-        return "day low"
+        return "at the day's low"
     if fact.kind == "funding":
         return f"funding {v:+.4f}%/h"
     return fact.kind
@@ -212,10 +203,16 @@ class _Row:
         return self.headline().size or 0.0
 
     def severity(self) -> int:
-        """R3. Only what the operator has on is Urgent (ADR 0023)."""
-        if self.held or any(kind in _URGENT_KINDS for kind in self.rules):
+        """R3. Urgent for what goes against what the operator has on (ADR 0027)."""
+        if any(kind in _URGENT_KINDS for kind in self.rules):
             return URGENT
-        return NOTABLE
+        direction = self.direction()
+        if direction not in ("up", "down") or not self.held:
+            return NOTABLE
+        if self.held == "order":
+            return URGENT
+        against = (self.held == "long") == (direction == "down")
+        return URGENT if against else NOTABLE
 
     def direction(self) -> str:
         """The largest rule that points somewhere. Volume alone points nowhere."""
@@ -296,13 +293,14 @@ class RowBook:
         return self._event(row, now)
 
     def _is_news(self, market_index: int, fact: Fact, row: _Row | None, now: float) -> bool:
-        """K7 for a spike: always. R4 for a state: when it starts, and when it grows by half."""
-        if fact.kind not in _QUIET_KINDS:
+        """R4, M5: a state is news when it starts, and when it grows by half."""
+        if fact.kind not in STATE_KINDS:
             return True
         key = (market_index, fact.kind)
         size = fact.size or 0.0
+        quiet = self._cfg.move_quiet_s if fact.kind == "move" else self._cfg.quiet_s
         standing = self._standing.get(key)
-        if standing is None or now - standing[1] >= self._cfg.quiet_s:
+        if standing is None or now - standing[1] >= quiet:
             self._standing[key] = (size, now)
             return True
         largest, _last = standing
@@ -343,11 +341,11 @@ class RowBook:
 
 @dataclass(frozen=True)
 class Broad:
-    """B2: the side most movers share, when enough of them share it."""
+    """B2: the side most movers share, when enough of them share it. M4: its median per span."""
 
     direction: str
     move_5m: float
-    move_1m: float
+    spans: dict[int, float]
     same: int
     movers: int
     liquid: int

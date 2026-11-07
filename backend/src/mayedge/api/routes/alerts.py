@@ -49,6 +49,11 @@ async def get_funding_extremes() -> list[dict[str, Any]]:
     return await gateway.paced_funding_extremes()
 
 
+@router.get("/api/alerts/board")
+async def get_board_line() -> list[dict[str, Any]]:
+    return gateway.board_line()
+
+
 @router.post("/api/alerts/{alert_id}/opened")
 async def post_alert_opened(alert_id: str) -> dict[str, str]:
     if not gateway.alert_opened(alert_id):

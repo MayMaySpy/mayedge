@@ -633,9 +633,7 @@ class LighterGateway(GatewayBoards):
         minute = int(time.time()) // 60
         cfg = self._alerts.settings
         self._alerts.seed_levels("funding", store.recent_funding(minute - cfg.level_window_min))
-        self._alerts.seed_levels(
-            "oi", store.recent_open_interest(minute - cfg.spike_window_min - 2)
-        )
+        self._alerts.seed_levels("oi", store.recent_open_interest(minute - 20))
 
     async def _health_loop(self) -> None:
         while True:

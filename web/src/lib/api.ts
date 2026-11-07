@@ -560,8 +560,10 @@ export interface AlertFact {
   window?: string;
   /** Times its threshold. */
   size?: number;
-  /** A spike's minute, as a multiple of the hour's biggest minute. */
+  /** Move: times its Usual move. Volume: times its mean for the span. */
   multiple?: number;
+  /** Move: the Usual move for its span, in percent. */
+  usual?: number;
   /** Move: share of the Day range, 0 to 1. */
   share?: number;
   /** Move: the part beyond the Broad move. */
@@ -637,6 +639,15 @@ export interface ScanActivityRow {
   premium: number;
   premium_z: number | null;
   held: boolean;
+}
+
+/** B3 in docs/alert-rules.md: the Board line. The Broad move, while it is big enough. */
+export interface BoardLineRow {
+  direction: "up" | "down";
+  move_5m: number;
+  same: number;
+  movers: number;
+  liquid: number;
 }
 
 /** A market on the funding strip: its hourly rate is far from its own day. */
@@ -781,6 +792,7 @@ export const api = {
     return request<AlertWhatIf>(`/alerts/whatif?${q.toString()}`);
   },
   fundingExtremes: () => request<FundingExtremeRow[]>("/alerts/funding"),
+  boardLine: () => request<BoardLineRow[]>("/alerts/board"),
   alertOpened: (id: string) =>
     request<{ status: string }>(`/alerts/${encodeURIComponent(id)}/opened`, { method: "POST" }),
   pushStatus: () =>

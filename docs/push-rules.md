@@ -15,7 +15,7 @@ Restore holds the algo book until every family has loaded. That snapshot only se
 | Event | When | Text | Key | Urgent |
 |---|---|---|---|---|
 | Near liquidation | an alert row whose rule is `near_liq`, on every `alerts` mode except `off` | `🔴 ETH near liquidation — mark 2,412.5, liq 2,301 (4.6%)` | `alert:{id}` | yes |
-| Held-market alert | `alerts` is `held` or `all`, and the row names a Held market. A row whose rule is the price spike uses the move fact. Anything else, including a move that did not spike, uses the row note. | `ETH spike: price 3.1× the hour's biggest minute, +0.8% · held` | `alert:{id}` | no |
+| Held-market alert | `alerts` is `held` or `all`, and the row names a Held market. A row whose rule is a Move uses the move fact: its size, its span and how many times its usual. Anything else uses the row note. | `ETH +1.6% in 5m, 14× its usual · held` | `alert:{id}` | no |
 | Other alert | `alerts: all` sends the note. `alerts: urgent` sends a row at severity 3 or above. `alerts: held` sends neither. `off` sends nothing. | the row's note | `alert:{id}` | no |
 | Auto kill fired | `fired_at` changes after the boot seed | `⛔ Auto kill fired: uPnL −$812 crossed the −$800 floor. Stopping algos, cancelling, flattening.` A profit cross names the target instead of the floor. | `autokill:{fired_at}` | yes |
 | Auto kill flattened | the kill status becomes `killed` after the boot seed, and the latest account snapshot has no open Position. A status already `killed` at boot sends nothing. | `Auto kill: flattened, 0 Positions open` | `autokill:{fired_at}:result` | yes |

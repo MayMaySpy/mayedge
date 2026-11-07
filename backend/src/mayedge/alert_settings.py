@@ -18,14 +18,13 @@ logger = logging.getLogger(__name__)
 class AlertSettings:
     min_24h_usd: float = 1_000_000.0
     max_spread_bps: float = 40.0
-    spike_window_min: int = 60
-    spike_price_x: float = 4.0
-    spike_volume_x: float = 3.0
-    spike_oi_x: float = 3.0
-    spike_min_move_pct: float = 0.5
-    spike_min_volume_usd: float = 250_000.0
-    spike_min_oi_usd: float = 250_000.0
-    spike_min_oi_pct: float = 0.3
+    move_x: float = 12.0
+    move_floor_1m_pct: float = 1.0
+    move_floor_5m_pct: float = 1.5
+    move_floor_15m_pct: float = 2.0
+    move_usual_bars: int = 240
+    move_live_share: float = 0.8
+    move_quiet_s: float = 900.0
     liq_oi_bps: float = 20.0
     liq_min_usd: float = 100_000.0
     liq_window_s: float = 120.0
@@ -37,7 +36,6 @@ class AlertSettings:
     held_order_near_pct: float = 2.0
     range_week_days: int = 7
     range_quarter_days: int = 90
-    range_near_pct: float = 0.3
     funding_sigma: float = 3.0
     funding_sigma_floor: float = 0.002
     funding_retention_days: int = 30
@@ -46,7 +44,7 @@ class AlertSettings:
     max_new_per_min: int = 6
     log_retention_days: int = 90
     range_floor_pct: float = 3.0
-    bars_1m: int = 240
+    bars_1m: int = 260
     min_bars: int = 30
     level_window_min: int = 1440
     level_min_samples: int = 30
@@ -65,7 +63,7 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
     d = data or {}
     base = AlertSettings()
     liquidity = d.get("liquidity") or {}
-    spike = d.get("spike") or {}
+    move = d.get("move") or {}
     liqs = d.get("liquidations") or {}
     board = d.get("board") or {}
     held = d.get("held") or {}
@@ -78,14 +76,13 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
     return AlertSettings(
         min_24h_usd=_f(liquidity.get("min_24h_usd"), base.min_24h_usd),
         max_spread_bps=_f(liquidity.get("max_spread_bps"), base.max_spread_bps),
-        spike_window_min=int(_f(spike.get("window_min"), base.spike_window_min)),
-        spike_price_x=_f(spike.get("price_x"), base.spike_price_x),
-        spike_volume_x=_f(spike.get("volume_x"), base.spike_volume_x),
-        spike_oi_x=_f(spike.get("oi_x"), base.spike_oi_x),
-        spike_min_move_pct=_f(spike.get("min_move_pct"), base.spike_min_move_pct),
-        spike_min_volume_usd=_f(spike.get("min_volume_usd"), base.spike_min_volume_usd),
-        spike_min_oi_usd=_f(spike.get("min_oi_usd"), base.spike_min_oi_usd),
-        spike_min_oi_pct=_f(spike.get("min_oi_pct"), base.spike_min_oi_pct),
+        move_x=_f(move.get("x"), base.move_x),
+        move_floor_1m_pct=_f(move.get("floor_1m_pct"), base.move_floor_1m_pct),
+        move_floor_5m_pct=_f(move.get("floor_5m_pct"), base.move_floor_5m_pct),
+        move_floor_15m_pct=_f(move.get("floor_15m_pct"), base.move_floor_15m_pct),
+        move_usual_bars=int(_f(move.get("usual_bars"), base.move_usual_bars)),
+        move_live_share=_f(move.get("live_share"), base.move_live_share),
+        move_quiet_s=_f(move.get("quiet_s"), base.move_quiet_s),
         liq_oi_bps=_f(liqs.get("oi_bps"), base.liq_oi_bps),
         liq_min_usd=_f(liqs.get("min_usd"), base.liq_min_usd),
         liq_window_s=_f(liqs.get("window_s"), base.liq_window_s),
@@ -97,7 +94,6 @@ def thresholds_from_dict(data: dict[str, Any] | None) -> AlertSettings:
         held_order_near_pct=_f(held.get("order_near_pct"), base.held_order_near_pct),
         range_week_days=int(_f(ranges.get("week_days"), base.range_week_days)),
         range_quarter_days=int(_f(ranges.get("quarter_days"), base.range_quarter_days)),
-        range_near_pct=_f(ranges.get("near_pct"), base.range_near_pct),
         funding_sigma=_f(funding.get("sigma"), base.funding_sigma),
         funding_sigma_floor=_f(funding.get("sigma_floor"), base.funding_sigma_floor),
         funding_retention_days=int(_f(funding.get("retention_days"), base.funding_retention_days)),

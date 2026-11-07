@@ -5,18 +5,19 @@ liquidity:
   min_24h_usd: 1000000
   max_spread_bps: 40
 
-spike:
-  # A spike is a minute at least this many times the biggest minute of the last window_min.
-  window_min: 60
-  price_x: 4
-  volume_x: 3
-  oi_x: 3
-  # Floors, so a dead tape stays quiet. Price was raised after a week of the record.
-  min_move_pct: 0.5
-  # Volume and open interest were raised on the 30 days to 6 Nov 2026 (ADR 0023).
-  min_volume_usd: 250000
-  min_oi_usd: 250000
-  min_oi_pct: 0.3
+move:
+  # A Move is the price going x times its Usual move over 1, 5 or 15 minutes, and past the span's floor.
+  # Set on 7 Nov 2026 by replaying the bars the desk serves (ADR 0027).
+  x: 12
+  floor_1m_pct: 1.0
+  floor_5m_pct: 1.5
+  floor_15m_pct: 2.0
+  # The Usual move is the median of each span's move over this many closed 1m bars.
+  usual_bars: 240
+  # Share of those bars that must have traded. A Held market skips this.
+  live_share: 0.8
+  # A Move that has not fired for this long starts afresh.
+  quiet_s: 900
 
 liquidations:
   oi_bps: 20
@@ -29,7 +30,7 @@ board:
   min_movers: 10
   # Share of the movers that must go the same way.
   agree: 0.8
-  # Median 5m move of that side, in percent.
+  # The Board line shows while the median 5m move of that side is at least this, in percent. It raises no row.
   median_pct: 0.8
 
 held:
@@ -42,8 +43,6 @@ range:
   # Completed UTC days before today. Today is not in either window.
   week_days: 7
   quarter_days: 90
-  # Last trade within this many percent of that high or low.
-  near_pct: 0.3
 
 funding:
   # On the strip when the hourly rate is this many sigma from the market's own 24h median.
@@ -55,7 +54,7 @@ funding:
 rows:
   # Rules that fire on a market inside this many seconds are one row.
   merge_s: 120
-  # A state that has not fired for this long starts afresh.
+  # Liquidations or Near liquidation that have not fired for this long start afresh.
   quiet_s: 180
   max_new_per_min: 6
   # How long alert rows are kept. Outcomes stay on outcomes.retention_days.
@@ -66,7 +65,8 @@ activity:
   range_floor_pct: 3
 
 baseline:
-  bars_1m: 240
+  # 1m bars kept per perp: the Usual move's 240 and the spans behind them.
+  bars_1m: 260
   min_bars: 30
   level_window_min: 1440
   # A sigma needs this many minutes of samples.

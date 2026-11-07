@@ -35,12 +35,20 @@ _Avoid_: Watchlist, stars, bookmarks
 The rules are in [docs/alert-rules.md](docs/alert-rules.md).
 
 **Alert**:
-A row the desk raises for the operator to act on by feel: a Spike, Liquidations, a Board move, or Near liquidation. It states a fact. It does not say what comes next.
+A row the desk raises for the operator to act on by feel: a Move, Liquidations, a Week or Quarter level broken, or Near liquidation. It states a fact. It does not say what comes next.
 _Avoid_: signal, setup, Tone alert
 
-**Spike**:
-A minute at least N times the biggest minute of the last hour, in price, volume or open interest. The biggest minute of the hour is not a Spike.
-_Avoid_: outlier, sigma, surge, unusual
+**Move**:
+The price going at least 12 times its Usual move over 1, 5 or 15 minutes, and past that span's floor. Volume and open interest are said on a Move; alone they raise nothing.
+_Avoid_: spike, outlier, sigma, surge, unusual
+
+**Usual move**:
+The median size of a market's move over one span, taken step by step across its last 240 closed one-minute bars.
+_Avoid_: ATR, volatility, sigma, normal (unqualified)
+
+**Board line**:
+The line above the alerts that names the Broad move while it is at least 0.8%. It raises nothing.
+_Avoid_: Board alert, Market row, Board move (for the row)
 
 **Day range**:
 A Market's 24h high less its 24h low, in percent of the low, as the venue prints them.
@@ -63,7 +71,7 @@ The lowest trade in those same 90 days.
 _Avoid_: calendar quarter, all-time low
 
 **Broad move**:
-The median 5m move of the liquid perps going the same way, when at least ten are and they are most of the perps that moved. One row, named Market.
+The median 5m move of the liquid perps going the same way, when at least ten are and they are most of the perps that moved. Shown on the Board line, not as a row.
 _Avoid_: Relative Strength, BTC, the market (unqualified), the median of all perps
 
 **Excess move**:

@@ -25,6 +25,7 @@ import {
   setAccount,
   setAlgo,
   setBookSynced,
+  setBoardLine,
   setFundingExtremes,
   setScanActivity,
   setToneBoard,
@@ -176,6 +177,7 @@ export function useMarketWs(symbol: string) {
         api.scanActivity().then(setScanActivity).catch(() => {});
         api.toneBoard().then(setToneBoard).catch(() => {});
         api.fundingExtremes().then(setFundingExtremes).catch(() => {});
+        api.boardLine().then(setBoardLine).catch(() => {});
       };
 
       ws.onmessage = (ev) => {
@@ -243,6 +245,9 @@ export function useMarketWs(symbol: string) {
             break;
           case "funding_extremes":
             setFundingExtremes((msg.rows as import("@/lib/api").FundingExtremeRow[]) ?? []);
+            break;
+          case "board_line":
+            setBoardLine((msg.rows as import("@/lib/api").BoardLineRow[]) ?? []);
             break;
           case "tone_board":
             setToneBoard((msg.rows as import("@/lib/api").ToneBoardRow[]) ?? []);

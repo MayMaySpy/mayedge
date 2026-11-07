@@ -85,11 +85,12 @@ def _alert_text(event: dict[str, Any], mode: str) -> tuple[str | None, bool]:
         move = next(
             (f for f in facts if f.get("kind") == "move" and f.get("size") is not None), None
         )
-        # The price line is the spike. A 1m print that did not spike stays in the note.
+        # The Move leads. Its span and how far past its usual are the line.
         if rule == "move" and move is not None and move.get("multiple") is not None:
+            span = str(move.get("window") or "1m")
             return (
-                f"{symbol} spike: price {float(move['multiple']):.1f}× the hour's biggest minute, "
-                f"{float(move.get('value') or 0):+.1f}% · held",
+                f"{symbol} {float(move.get('value') or 0):+.1f}% in {span}, "
+                f"{float(move['multiple']):.0f}× its usual · held",
                 False,
             )
         if note:

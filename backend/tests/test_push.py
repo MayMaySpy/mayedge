@@ -439,7 +439,15 @@ class RouterTests(unittest.TestCase):
                         "severity": 2,
                         "held": "position",
                         "note": "ignored",
-                        "facts": [{"kind": "move", "multiple": 3.1, "value": 0.8, "size": 1.2}],
+                        "facts": [
+                            {
+                                "kind": "move",
+                                "multiple": 13.1,
+                                "value": 1.8,
+                                "size": 1.2,
+                                "window": "5m",
+                            }
+                        ],
                     },
                     {
                         "id": "h2",
@@ -475,7 +483,7 @@ class RouterTests(unittest.TestCase):
                 ),
                 (
                     "alert:h1",
-                    "ETH spike: price 3.1× the hour's biggest minute, +0.8% · held",
+                    "ETH +1.8% in 5m, 13× its usual · held",
                     False,
                 ),
                 (

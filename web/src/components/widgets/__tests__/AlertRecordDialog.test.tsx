@@ -36,8 +36,8 @@ describe("AlertRecordDialog", () => {
       rules: [move, { ...move, rule: "volume", key: "volume", n: 4, left: null, against: null, left_beats: null }],
     });
     vi.spyOn(api, "alertSettings").mockResolvedValue({
-      knobs: { "spike.price_x": 2 },
-      by_rule: { move: ["spike.price_x"] },
+      knobs: { "move.x": 2 },
+      by_rule: { move: ["move.x"] },
     });
     const whatIf = vi.spyOn(api, "alertWhatIf").mockImplementation(async (opts) => ({
       rule: opts.rule,
@@ -53,7 +53,7 @@ describe("AlertRecordDialog", () => {
 
     render(<AlertRecordDialog open onOpenChange={() => {}} />);
 
-    expect((await screen.findAllByText("Price spike")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Move")).length).toBeGreaterThan(0);
     expect(screen.getByText(/too few rows/)).toBeTruthy();
     expect(await screen.findByText(/price_x: 2/)).toBeTruthy();
 
@@ -72,9 +72,9 @@ describe("AlertRecordDialog", () => {
       rules: [move],
     });
     vi.spyOn(api, "alertSettings").mockResolvedValue({
-      knobs: { "spike.price_x": 2, "spike.volume_x": 4, "volume.notional": 9 },
+      knobs: { "move.x": 2, "spike.volume_x": 4, "volume.notional": 9 },
       by_rule: {
-        move: ["spike.price_x", "spike.volume_x"],
+        move: ["move.x", "spike.volume_x"],
         volume: ["volume.notional"],
       },
     });
@@ -95,12 +95,12 @@ describe("AlertRecordDialog", () => {
     await waitFor(() =>
       expect(
         whatIf.mock.calls.some(
-          (call) => call[0].rule === "move" && call[0].knob === "spike.price_x" && call[0].value === 2,
+          (call) => call[0].rule === "move" && call[0].knob === "move.x" && call[0].value === 2,
         ),
       ).toBe(true),
     );
     expect((screen.getByLabelText("Rule") as HTMLSelectElement).value).toBe("move");
-    expect((screen.getByLabelText("Knob") as HTMLSelectElement).value).toBe("spike.price_x");
+    expect((screen.getByLabelText("Knob") as HTMLSelectElement).value).toBe("move.x");
     expect((screen.getByLabelText("Knob value") as HTMLInputElement).value).toBe("2");
   });
 });

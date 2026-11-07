@@ -36,7 +36,7 @@ from mayedge.tone_timeframes import (
 logger = logging.getLogger(__name__)
 
 _TONE_BACKFILL = 500
-_ALERT_MINUTE_BARS = 240
+_ALERT_MINUTE_BARS = 260
 # Quarter window plus today and one spare, so a missing day still fills 90.
 _ALERT_DAY_SLACK = 2
 _SCAN_BROADCAST_S = 5.0
@@ -96,6 +96,11 @@ class GatewayBoards:
 
     def funding_extremes(self) -> list[dict[str, Any]]:
         return self._alerts.funding_extremes()
+
+    def board_line(self) -> list[dict[str, Any]]:
+        """B3: the Board line, as zero or one row."""
+        line = self._alerts.board_line()
+        return [] if line is None else [line]
 
     def alert_thresholds(self) -> AlertSettings:
         return self._alerts.settings
@@ -330,6 +335,7 @@ class GatewayBoards:
             ("scan_activity", await self.paced_scan_activity()),
             ("tone_board", await self.paced_tone_board()),
             ("funding_extremes", await self.paced_funding_extremes()),
+            ("board_line", self.board_line()),
         ):
             sig = json.dumps(rows, sort_keys=True, default=str)
             if sig == self._last_scan.get(kind):

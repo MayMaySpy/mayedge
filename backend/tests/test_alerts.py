@@ -11,7 +11,6 @@ from unittest.mock import patch
 from mayedge.alert_log import AlertLog, MemoryLogStore
 from mayedge.alert_rows import order_away_pct
 from mayedge.alerts import (
-    BROAD_INDEX,
     NOTABLE,
     URGENT,
     AlertDetector,
@@ -78,24 +77,25 @@ def _snap(ts: float, **kw: float) -> MarketSnapshot:
     return MarketSnapshot(ts=ts, **row)
 
 
-def _hour(step_pct: float = 0.2, vol: float = 300.0, minutes: int = 70) -> list[Candle]:
-    """Closed bars up to _T0. Each steps ``step_pct`` from the last and trades ``vol`` at 100."""
+def _tape(
+    step_pct: float = 0.1, vol: float = 300.0, minutes: int = 260, *, live: float = 1.0
+) -> list[Candle]:
+    """Closed bars up to _T0, the last at 100. Each steps ``step_pct`` from the one before.
+
+    An odd span always moves ``step_pct``, so the Usual move is that on every span.
+    ``live`` is the share of bars that traded.
+    """
     out: list[Candle] = []
     for i in range(minutes):
-        px = 100.0 * (1 + step_pct / 100.0) if i % 2 else 100.0
-        out.append(Candle(int(_T0) - (minutes - i) * 60, px, px, px, px, vol))
+        back = minutes - 1 - i
+        px = 100.0 if back % 2 == 0 else 100.0 * (1 + step_pct / 100.0)
+        traded = vol if (i * live) % 1 + live >= 1 else 0.0
+        out.append(Candle(int(_T0) - (minutes - i) * 60, px, px, px, px, traded))
     return out
 
 
 def _forming(vol: float, at: float = _T0) -> Candle:
     return Candle(int(at), 100.0, 100.0, 100.0, 100.0, vol)
-
-
-def _oi_hour(step_usd: float = 200_000.0, minutes: int = 70) -> list[tuple[int, float]]:
-    return [
-        (_MINUTE - (minutes - i), 50_000_000.0 + (step_usd if i % 2 else 0.0))
-        for i in range(minutes)
-    ]
 
 
 class Harness:
@@ -116,13 +116,14 @@ class Harness:
         self.det._snapshots[mi] = deque(snaps, maxlen=400)
         self.det._symbols[mi] = symbol or f"M{mi}"
 
-    def market(self, mi: int = 1, *, step_pct: float = 0.2, vol: float = 300.0) -> None:
-        """A market with an hour behind it and a print from a minute ago."""
-        self.det.seed_minute_bars(mi, _hour(step_pct, vol))
+    def market(self, mi: int = 1, *, step_pct: float = 0.1, vol: float = 300.0) -> None:
+        """A market with 260 minutes behind it, its last close at 100."""
+        self.det.seed_minute_bars(mi, _tape(step_pct, vol))
         self.seed(mi, [_snap(_T0 - 65)])
 
     def seed_board(self, markets: range, *, last: float) -> None:
         for mi in markets:
+            self.det.seed_minute_bars(mi, _tape())
             self.seed(mi, [_snap(_T0 - 400), _snap(_T0 - 1, last=last, mark=last, mid=last)])
 
     def tick(self, meta: MarketMeta, at: float = _T0) -> list[dict[str, Any]]:
@@ -251,9 +252,9 @@ class HeldMarketsTest(unittest.TestCase):
 
 class ThresholdYamlTest(unittest.TestCase):
     def test_a_knob_overrides_its_default_and_no_other(self) -> None:
-        thr = thresholds_from_dict({"spike": {"volume_x": 5, "window_min": 30}})
-        self.assertEqual((thr.spike_volume_x, thr.spike_window_min), (5.0, 30))
-        self.assertEqual(thr.spike_price_x, AlertSettings().spike_price_x)
+        thr = thresholds_from_dict({"move": {"x": 10, "floor_5m_pct": 2}})
+        self.assertEqual((thr.move_x, thr.move_floor_5m_pct), (10.0, 2.0))
+        self.assertEqual(thr.move_floor_1m_pct, AlertSettings().move_floor_1m_pct)
 
     def test_load_repo_yaml(self) -> None:
         thr = load_thresholds(Path(__file__).resolve().parents[1] / "config" / "alerts.yaml")
@@ -263,87 +264,146 @@ class ThresholdYamlTest(unittest.TestCase):
 class GateTest(unittest.TestCase):
     def test_a_thin_market_never_alerts(self) -> None:
         h = Harness()
-        h.det.seed_minute_bars(1, _hour())
+        h.det.seed_minute_bars(1, _tape())
         h.seed(1, [_snap(_T0 - 65, vol_quote=600_000.0)])
         self.assertEqual(h.tick(_at(102.0, volume_24h=600_000.0)), [])
 
     def test_a_thin_market_alerts_once_it_is_held(self) -> None:
         h = Harness()
         h.held[1] = Held(side="long")
-        h.det.seed_minute_bars(1, _hour())
+        h.det.seed_minute_bars(1, _tape())
         h.seed(1, [_snap(_T0 - 65, vol_quote=600_000.0)])
         events = h.tick(_at(102.0, volume_24h=600_000.0))
         self.assertEqual([e["rule"] for e in events], ["move"])
 
+    def test_a_dead_tape_never_alerts(self) -> None:
+        # Half its minutes did not trade. A print 3% away is not a Move.
+        h = Harness()
+        h.det.seed_minute_bars(1, _tape(live=0.5))
+        h.seed(1, [_snap(_T0 - 65)])
+        self.assertEqual(h.tick(_at(103.0)), [])
+        # Held, it is.
+        h.held[1] = Held(side="short")
+        self.assertEqual([e["rule"] for e in h.tick(_at(103.0), at=_T0 + 1)], ["move"])
 
-class PriceSpikeTest(unittest.TestCase):
-    def test_a_price_spike_is_four_times_the_hours_biggest_minute(self) -> None:
-        # The hour's biggest minute moved 0.2%. 0.7% is not four times it.
+
+class MoveTest(unittest.TestCase):
+    def test_a_move_is_twelve_times_its_usual(self) -> None:
+        # The usual minute moves 0.1%. 1.1% is eleven times it.
         h = Harness()
         h.market()
-        self.assertEqual(h.tick(_at(100.7)), [])
+        self.assertEqual(h.tick(_at(101.1)), [])
 
         h = Harness()
         h.market()
-        events = h.tick(_at(101.0))
+        events = h.tick(_at(101.3))
         self.assertEqual(
             [(e["rule"], e["severity"], e["direction"]) for e in events],
-            [
-                ("move", NOTABLE, "up"),
-            ],
+            [("move", NOTABLE, "up")],
         )
         move = _fact(events, "move")
-        self.assertAlmostEqual(move["value"], 1.0)
-        self.assertAlmostEqual(move["multiple"], 5.0, places=2)
-        self.assertAlmostEqual(events[0]["size"], 1.25, places=2)
+        self.assertEqual(move["window"], "1m")
+        self.assertAlmostEqual(move["value"], 1.3)
+        self.assertAlmostEqual(move["multiple"], 13.0, places=1)
+        self.assertAlmostEqual(events[0]["size"], 1.3 / 1.2, places=2)
 
-    def test_a_big_minute_in_a_wild_hour_is_no_spike(self) -> None:
+    def test_a_big_usual_needs_a_bigger_move(self) -> None:
         h = Harness()
         h.market(step_pct=0.5)
-        self.assertEqual(h.tick(_at(100.7)), [])
+        self.assertEqual(h.tick(_at(103.0)), [])
 
-    def test_a_small_move_on_a_dead_tape_is_no_spike(self) -> None:
-        # Nothing moved all hour, so anything is many times the hour's biggest. The floor decides.
+    def test_a_small_move_on_a_still_tape_is_no_move(self) -> None:
+        # Nothing moved, so anything is many times its usual. The floor decides.
         h = Harness()
         h.market(step_pct=0.0)
-        self.assertEqual(h.tick(_at(100.4)), [])
-        self.assertEqual(len(h.tick(_at(100.5), at=_T0 + 2)), 1)
+        self.assertEqual(h.tick(_at(100.9)), [])
+        events = h.tick(_at(101.0), at=_T0 + 2)
+        self.assertEqual(len(events), 1)
+        self.assertAlmostEqual(_fact(events, "move")["multiple"], 99.0)
 
-    def test_no_spike_without_an_hour_behind_it(self) -> None:
+    def test_a_move_is_judged_over_one_five_and_fifteen_minutes(self) -> None:
+        # A grind: the last 15 closes climb from 100 to 102.2. No minute and no 5m is a Move.
+        bars = _tape()
+        for k in range(15):
+            px = 100.0 + 2.2 * (k + 1) / 15
+            t = bars[-15 + k].time
+            bars[-15 + k] = Candle(t, px, px, px, px, 300.0)
         h = Harness()
-        h.det.seed_minute_bars(1, [*_hour(minutes=30), _forming(5_000.0)])
-        h.det.seed_levels("oi", {1: _oi_hour(minutes=30)})
+        h.det.seed_minute_bars(1, bars)
         h.seed(1, [_snap(_T0 - 65)])
-        self.assertEqual(h.tick(_at(102.0, open_interest=51_000_000.0)), [])
+        events = h.tick(_at(102.4))
+        self.assertEqual(_fact(events, "move")["window"], "15m")
+        self.assertTrue(events[0]["note"].startswith("+2.25% in 15m · 23× its usual 15m"))
 
-    def test_the_next_spike_has_to_beat_this_one(self) -> None:
+    def test_no_move_without_a_usual_behind_it(self) -> None:
         h = Harness()
-        h.market()
-        first = h.tick(_at(101.0))
-        self.assertEqual(len(first), 1)
-        # Its minute closes and becomes the hour's biggest.
-        h.det.on_minute_bars(1, [Candle(int(_T0), 100.0, 101.0, 100.0, 101.0, 300.0)])
-        self.assertEqual(h.tick(_at(101.0), at=_T0 + 70), [])
-        self.assertEqual(h.tick(_at(101.0 * 1.008), at=_T0 + 140), [])
-        bigger = h.tick(_at(101.0 * 1.008 * 1.033), at=_T0 + 210)
-        self.assertEqual(len(bigger), 1)
-        self.assertNotEqual(bigger[0]["id"], first[0]["id"])
+        h.det.seed_minute_bars(1, _tape(minutes=200))
+        h.seed(1, [_snap(_T0 - 65)])
+        self.assertEqual(h.tick(_at(103.0)), [])
 
     def test_a_market_must_beat_the_board(self) -> None:
         h = Harness()
         h.seed_board(range(1, 13), last=101.0)
-        h.det.seed_minute_bars(13, _hour())
+        h.det.seed_minute_bars(13, _tape())
         h.seed(13, [_snap(_T0 - 400)], "ZRO")
-        with_board = h.tick(_at(101.3, market_index=13, symbol="ZRO"))
-        self.assertEqual({e["market_index"] for e in with_board}, {BROAD_INDEX})
+        self.assertEqual(h.tick(_at(101.3, market_index=13, symbol="ZRO")), [])
 
-        h.det.seed_minute_bars(14, _hour())
+        h.det.seed_minute_bars(14, _tape())
         h.seed(14, [_snap(_T0 - 400)], "ENA")
         past_board = h.tick(_at(102.5, market_index=14, symbol="ENA"), at=_T0 + 2)
         self.assertEqual([e["market_index"] for e in past_board], [14])
         move = _fact(past_board, "move")
         self.assertAlmostEqual(move["value"], 2.5)
         self.assertAlmostEqual(move["excess"], 1.5)
+
+    def test_a_move_that_keeps_going_is_one_row(self) -> None:
+        h = Harness()
+        h.market()
+        first = h.tick(_at(101.3))
+        self.assertEqual(len(first), 1)
+        # Past the row's two minutes it is still the same Move, a little bigger.
+        for second in range(130, 900, 60):
+            self.assertEqual(h.tick(_at(101.5), at=_T0 + second), [])
+
+    def test_a_move_that_grows_by_half_is_a_new_row(self) -> None:
+        h = Harness()
+        h.market()
+        first = h.tick(_at(101.3))
+        self.assertEqual(h.tick(_at(101.5), at=_T0 + 130), [])
+        grown = h.tick(_at(102.0), at=_T0 + 140)
+        self.assertEqual(len(grown), 1)
+        self.assertNotEqual(grown[0]["id"], first[0]["id"])
+        # Fifteen quiet minutes, and it starts afresh.
+        h.tick(_at(100.0), at=_T0 + 150)
+        fresh = h.tick(_at(101.3), at=_T0 + 150 + 901)
+        self.assertEqual(len(fresh), 1)
+
+    def test_a_move_says_its_volume_and_open_interest(self) -> None:
+        # Each minute traded $30k. This one has traded $100k so far.
+        h = Harness()
+        h.market()
+        h.det.seed_levels("oi", {1: [(_MINUTE - 1, 50_000_000.0)]})
+        h.det.on_minute_bars(1, [_forming(1_000.0)])
+        events = h.tick(_at(101.3, open_interest=50_500_000.0))
+        self.assertEqual(_kinds(events), ["move", "volume", "oi"])
+        self.assertAlmostEqual(_fact(events, "volume")["multiple"], 100_000.0 / 30_030.0, places=2)
+        self.assertNotIn("size", _fact(events, "volume"))
+        self.assertEqual(
+            events[0]["note"],
+            "+1.30% in 1m · 13× its usual 1m · volume 3× ($100k) · OI +1.00% (+$500k)",
+        )
+
+    def test_volume_alone_raises_nothing(self) -> None:
+        h = Harness()
+        h.market()
+        h.det.on_minute_bars(1, [_forming(50_000.0)])
+        self.assertEqual(h.tick(_at(100.05)), [])
+
+    def test_open_interest_alone_raises_nothing(self) -> None:
+        h = Harness()
+        h.market()
+        h.det.seed_levels("oi", {1: [(_MINUTE - 1, 50_000_000.0)]})
+        self.assertEqual(h.tick(_at(100.05, open_interest=60_000_000.0)), [])
 
 
 def _daily(
@@ -365,140 +425,61 @@ def _daily(
 
 
 class WeekQuarterTest(unittest.TestCase):
-    def _into(self, bars: list[Candle], *, prev: float, price: float, at: float = _T0) -> Harness:
+    def _close(self, bars: list[Candle], close: float) -> tuple[Harness, list[dict[str, Any]]]:
+        """The minute at _T0 closes at ``close``; the one before closed at 100."""
         h = Harness()
         h.market()
-        h.det.seed_daily_bars(1, bars, at)
-        h.seed(1, [_snap(at - 65, last=prev, mark=prev, mid=prev)])
-        return h
+        h.det.seed_daily_bars(1, bars, _T0)
+        h.det.on_minute_bars(1, [Candle(int(_T0), 100.0, close, 100.0, close, 300.0)])
+        return h, h.tick(_at(close), at=_T0 + 61)
 
-    def test_a_move_into_the_week_high_raises_a_row(self) -> None:
-        # 0.55% into the week high. Under 4× the hour, so the level is the row.
-        h = self._into(_daily(7, high=110.0, low=90.0), prev=109.5, price=110.1)
-        events = h.tick(_at(110.1))
+    def test_a_close_through_the_week_high_breaks_it(self) -> None:
+        _h, events = self._close(_daily(7, high=100.1, low=90.0), 100.2)
         self.assertEqual(
             [(e["rule"], e["severity"], e["direction"]) for e in events],
             [("week_high", NOTABLE, "up")],
         )
-        self.assertAlmostEqual(_fact(events, "week_high")["value"], 110.0)
-        self.assertIn("week high 110", events[0]["note"])
-        self.assertNotIn("size", _fact(events, "move"))
+        self.assertAlmostEqual(_fact(events, "week_high")["value"], 100.1)
+        self.assertIn("through the week high 100.1", events[0]["note"])
 
-        low = self._into(_daily(7, high=110.0, low=90.0), prev=90.7, price=90.2)
-        down = low.tick(_at(90.2))
+        _h, down = self._close(_daily(7, high=110.0, low=99.9), 99.8)
         self.assertEqual(down[0]["rule"], "week_low")
 
-        # Pointing the other way, or short of the price floor, or outside the band.
-        away = self._into(_daily(7, high=110.0, low=90.0), prev=110.7, price=110.1)
-        self.assertEqual(away.tick(_at(110.1)), [])
-        small = self._into(_daily(7, high=110.0, low=90.0), prev=110.0, price=110.1)
-        self.assertEqual(small.tick(_at(110.1)), [])
-        far = self._into(_daily(7, high=110.0, low=90.0), prev=109.9, price=110.5)
-        self.assertEqual(far.tick(_at(110.5)), [])
+    def test_touching_a_level_is_no_break(self) -> None:
+        _h, events = self._close(_daily(7, high=100.2, low=90.0), 100.2)
+        self.assertEqual(events, [])
 
-    def test_a_move_into_the_quarter_high_raises_a_row(self) -> None:
-        # The quarter's high is older than the week. The week high is elsewhere.
-        bars = _daily(90, high=120.0, low=80.0, recent_high=110.0)
-        h = self._into(bars, prev=119.1, price=119.8)
-        events = h.tick(_at(119.8))
+    def test_a_close_through_the_quarter_high_breaks_it(self) -> None:
+        # The quarter's high is older than the week. The week high is under both closes.
+        bars = _daily(90, high=100.1, low=80.0, recent_high=99.0)
+        _h, events = self._close(bars, 100.2)
         self.assertEqual(events[0]["rule"], "quarter_high")
         self.assertNotIn("week_high", _kinds(events))
 
+    def test_a_level_breaks_once_a_day(self) -> None:
+        h, first = self._close(_daily(7, high=100.1, low=90.0), 100.2)
+        self.assertEqual(len(first), 1)
+        h.det.on_minute_bars(1, [Candle(int(_T0) + 60, 100.2, 100.2, 100.0, 100.0, 300.0)])
+        h.det.on_minute_bars(1, [Candle(int(_T0) + 120, 100.0, 100.2, 100.0, 100.2, 300.0)])
+        self.assertEqual(h.tick(_at(100.2), at=_T0 + 181), [])
+
     def test_a_short_history_has_no_week_high(self) -> None:
-        h = self._into(_daily(6, high=110.0, low=90.0), prev=109.5, price=110.1)
-        self.assertEqual(h.tick(_at(110.1)), [])
+        _h, events = self._close(_daily(6, high=100.1, low=90.0), 100.2)
+        self.assertEqual(events, [])
 
     def test_today_is_not_part_of_the_week(self) -> None:
         today = int(_T0) // 86_400 * 86_400
-        bars = [*_daily(7, high=100.0, low=90.0), Candle(today, 140.0, 150.0, 140.0, 149.0, 1.0)]
-        # Today's 150 is not the week high. A print there raises nothing.
-        forming = self._into(bars, prev=148.9, price=149.7)
-        self.assertEqual(forming.tick(_at(149.7)), [])
-        # The completed week's 100 still is.
-        level = self._into(bars, prev=99.6, price=100.2)
-        events = level.tick(_at(100.2))
+        bars = [*_daily(7, high=100.1, low=90.0), Candle(today, 140.0, 150.0, 140.0, 149.0, 1.0)]
+        # Today's 150 is not the week high. The completed week's 100.1 is.
+        _h, events = self._close(bars, 100.2)
         self.assertEqual(events[0]["rule"], "week_high")
-        self.assertAlmostEqual(_fact(events, "week_high")["value"], 100.0)
-
-    def test_sitting_on_a_week_high_is_one_row(self) -> None:
-        h = self._into(_daily(7, high=110.0, low=90.0), prev=109.5, price=110.1)
-        first = h.tick(_at(110.1))
-        self.assertEqual(len(first), 1)
-        self.assertEqual(h.tick(_at(110.1), at=_T0 + 30), [])
-        self.assertEqual(h.tick(_at(110.1), at=_T0 + 200), [])
-        h.tick(_at(109.5), at=_T0 + 210)
-        again = h.tick(_at(110.1), at=_T0 + 390)
-        self.assertEqual(len(again), 1)
-        self.assertNotEqual(again[0]["id"], first[0]["id"])
-
-
-class VolumeSpikeTest(unittest.TestCase):
-    def _trade(self, vol: float, price: float = 100.0) -> list[dict[str, Any]]:
-        # Each minute of the hour traded $30k.
-        h = Harness()
-        h.market()
-        h.det.on_minute_bars(1, [_forming(vol)])
-        return h.tick(_at(price))
-
-    def test_a_volume_spike_triples_the_hours_biggest_minute(self) -> None:
-        # $80k is the hour's biggest minute, and not three times it.
-        self.assertEqual(self._trade(800.0), [])
-        # $100k is over three times it, and under the $250k floor.
-        self.assertEqual(self._trade(1_000.0), [])
-        events = self._trade(2_600.0)
-        self.assertEqual(
-            [(e["rule"], e["severity"], e["direction"]) for e in events],
-            [
-                ("volume", NOTABLE, "flat"),
-            ],
-        )
-        volume = _fact(events, "volume")
-        self.assertAlmostEqual(volume["value"], 260_000.0)
-        self.assertAlmostEqual(volume["multiple"], 260_000.0 / 30_060.0, places=2)
-
-    def test_a_quiet_hour_still_needs_real_money(self) -> None:
-        h = Harness()
-        h.market(vol=10.0)
-        h.det.on_minute_bars(1, [_forming(400.0)])
-        self.assertEqual(h.tick(_meta()), [])
-
-
-class OiSpikeTest(unittest.TestCase):
-    def _change(self, oi_now: float) -> list[dict[str, Any]]:
-        # Each minute of the hour changed open interest by $200k.
-        h = Harness()
-        h.market()
-        h.det.seed_levels("oi", {1: _oi_hour()})
-        return h.tick(_meta(open_interest=oi_now))
-
-    def test_an_oi_spike_triples_the_hours_biggest_change(self) -> None:
-        self.assertEqual(self._change(50_350_000.0), [])
-        # 2.5 times the hour's biggest change is no longer enough.
-        self.assertEqual(self._change(49_500_000.0), [])
-        events = self._change(49_300_000.0)
-        self.assertEqual(
-            [(e["rule"], e["severity"], e["direction"]) for e in events],
-            [
-                ("oi", NOTABLE, "down"),
-            ],
-        )
-        oi = _fact(events, "oi")
-        self.assertAlmostEqual(oi["value"], -1.4)
-        self.assertAlmostEqual(oi["usd"], -700_000.0)
-        self.assertAlmostEqual(oi["multiple"], 3.5)
-
-    def test_a_small_change_on_a_big_book_is_no_spike(self) -> None:
-        # $300k is over the dollar floor and under 0.3% of a $200M book.
-        h = Harness()
-        h.market()
-        h.seed(1, [_snap(_T0 - 65, oi=200_000_000.0)])
-        h.det.seed_levels("oi", {1: [(m, 200_000_000.0) for m, _ in _oi_hour()]})
-        self.assertEqual(h.tick(_meta(open_interest=200_300_000.0)), [])
+        self.assertAlmostEqual(_fact(events, "week_high")["value"], 100.1)
 
 
 class LiquidationsTest(unittest.TestCase):
     def _liquidate(self, usd_each: float, n: int = 8, side: str = "sell") -> list[dict[str, Any]]:
         h = Harness()
+        h.det.seed_minute_bars(1, _tape())
         h.seed(1, [_snap(_T0)], "ETH")
         items = [
             {
@@ -529,60 +510,67 @@ class LiquidationsTest(unittest.TestCase):
 
 
 class BoardTest(unittest.TestCase):
+    def _line(self, h: Harness) -> dict[str, Any] | None:
+        with patch("mayedge.alerts.time.time", return_value=_T0):
+            return h.det.board_line()
+
     def test_a_board_move_is_counted_among_the_movers(self) -> None:
         # Twelve perps are up 0.9%. Eighteen sit flat, so the median of all thirty is zero.
         h = Harness()
         h.seed_board(range(1, 13), last=100.9)
         h.seed_board(range(13, 31), last=100.0)
-        events = h.tick(_meta(market_index=30, symbol="AAPL"))
-        self.assertEqual([e["market_index"] for e in events], [BROAD_INDEX])
-        board = _fact(events, "board")
-        self.assertAlmostEqual(board["value"], 0.9)
-        self.assertEqual(board["window"], "12/12")
-        self.assertEqual(board["liquid"], 30)
+        line = self._line(h)
+        assert line is not None
+        self.assertAlmostEqual(line["move_5m"], 0.9)
+        self.assertEqual((line["same"], line["movers"], line["liquid"]), (12, 12, 30))
 
     def test_a_split_board_is_no_broad_move(self) -> None:
         few = Harness()
         few.seed_board(range(1, 9), last=101.0)
         few.seed_board(range(9, 15), last=99.0)
-        self.assertEqual(few.tick(_meta(market_index=20)), [])
+        self.assertIsNone(self._line(few))
 
         split = Harness()
         split.seed_board(range(1, 13), last=101.0)
         split.seed_board(range(13, 19), last=99.0)
-        self.assertEqual(split.tick(_meta(market_index=20)), [])
+        self.assertIsNone(self._line(split))
 
-    def test_a_board_move_is_one_row(self) -> None:
+    def test_a_board_move_is_a_line_not_a_row(self) -> None:
         h = Harness()
         h.seed_board(range(1, 21), last=98.8)
-        events = h.tick(_at(98.8, market_index=1))
-        self.assertEqual([(e["market_index"], e["symbol"]) for e in events], [(BROAD_INDEX, "BTC")])
-        # A Board move is a row, not a toast (ADR 0023).
-        self.assertEqual((events[0]["severity"], events[0]["direction"]), (NOTABLE, "down"))
-        self.assertIn("20/20 down", events[0]["note"])
+        self.assertEqual(h.tick(_at(98.8, market_index=1)), [])
+        line = self._line(h)
+        assert line is not None
+        self.assertEqual((line["direction"], line["same"]), ("down", 20))
+        small = Harness()
+        small.seed_board(range(1, 21), last=99.5)
+        self.assertIsNone(self._line(small))
 
 
 class HeldTest(unittest.TestCase):
-    def test_a_row_on_a_held_market_is_urgent(self) -> None:
-        bystander = Harness()
-        bystander.market()
-        self.assertEqual(bystander.tick(_at(99.0))[0]["severity"], NOTABLE)
-
+    def _held(self, held: Held | None, price: float) -> list[dict[str, Any]]:
         h = Harness()
-        h.held[1] = Held(side="long")
+        if held is not None:
+            h.held[1] = held
         h.market()
-        events = h.tick(_at(99.0))
+        return h.tick(_at(price))
+
+    def test_a_move_against_a_held_side_is_urgent(self) -> None:
+        self.assertEqual(self._held(None, 98.7)[0]["severity"], NOTABLE)
+        events = self._held(Held(side="long"), 98.7)
         self.assertEqual(
             [(e["severity"], e["held"], e["direction"]) for e in events],
-            [
-                (URGENT, "long", "down"),
-            ],
+            [(URGENT, "long", "down")],
         )
+        self.assertEqual(self._held(Held(side="short"), 101.3)[0]["severity"], URGENT)
 
-        resting = Harness()
-        resting.held[1] = Held()
-        resting.market()
-        self.assertEqual(resting.tick(_at(99.0))[0]["held"], "order")
+    def test_a_move_with_a_held_side_is_notable(self) -> None:
+        events = self._held(Held(side="long"), 101.3)
+        self.assertEqual([(e["severity"], e["held"]) for e in events], [(NOTABLE, "long")])
+
+    def test_a_move_near_a_working_order_is_urgent(self) -> None:
+        events = self._held(Held(), 101.3)
+        self.assertEqual([(e["severity"], e["held"]) for e in events], [(URGENT, "order")])
 
     def test_mark_near_the_liquidation_price(self) -> None:
         h = Harness()
@@ -623,11 +611,11 @@ class RowBookTest(unittest.TestCase):
     def test_rules_within_two_minutes_are_one_row(self) -> None:
         book = self._book()
         first = book.ingest(1, "ETH", [_spike("move", 1.2)], [], _T0, price=100.0)
-        second = book.ingest(1, "ETH", [_spike("oi", 2.0, "down")], [], _T0 + 90, price=101.0)
+        second = book.ingest(1, "ETH", [_state("liqs", 2.0)], [], _T0 + 90, price=101.0)
         assert first is not None and second is not None
         self.assertEqual(second.id, first.id)
-        self.assertEqual([f["kind"] for f in second.facts], ["oi", "move"])
-        self.assertEqual((second.rule, second.direction, second.price), ("oi", "down", 100.0))
+        self.assertEqual([f["kind"] for f in second.facts], ["liqs", "move"])
+        self.assertEqual((second.rule, second.direction, second.price), ("liqs", "down", 100.0))
 
     def test_an_unchanged_row_is_not_sent_again(self) -> None:
         book = self._book()
@@ -641,39 +629,29 @@ class RowBookTest(unittest.TestCase):
     def test_a_final_row_is_not_rewritten(self) -> None:
         book = self._book()
         first = book.ingest(1, "ETH", [_spike("move", 1.2)], [], _T0, price=100.0)
-        later = book.ingest(1, "ETH", [_spike("volume", 1.1, "flat")], [], _T0 + 130, price=103.0)
+        later = book.ingest(1, "ETH", [_state("liqs", 1.1)], [], _T0 + 130, price=103.0)
         assert first is not None and later is not None
         self.assertNotEqual(later.id, first.id)
-        self.assertEqual([f["kind"] for f in later.facts], ["volume"])
+        self.assertEqual([f["kind"] for f in later.facts], ["liqs"])
         self.assertEqual((later.started_at, later.price), (later.ts, 103.0))
-
-    def test_two_spikes_at_once_are_notable(self) -> None:
-        book = self._book()
-        one = book.ingest(1, "ETH", [_spike("volume", 1.4, "flat")], [], _T0, price=100.0)
-        two = book.ingest(1, "ETH", [_spike("move", 1.1)], [], _T0 + 20, price=100.0)
-        assert one is not None and two is not None
-        self.assertEqual((one.severity, one.direction), (NOTABLE, "flat"))
-        # The volume spike is the larger rule. The row still points the way price went.
-        # Two spikes on a market the operator does not hold are still no toast (ADR 0023).
-        self.assertEqual((two.severity, two.rule, two.direction), (NOTABLE, "volume", "up"))
 
     def test_a_standing_state_is_one_row(self) -> None:
         book = self._book()
-        self.assertIsNotNone(book.ingest(-1, "BTC", [_state("board", 1.2)], [], _T0, price=0.0))
+        self.assertIsNotNone(book.ingest(1, "ETH", [_state("liqs", 1.2)], [], _T0, price=100.0))
         for second in range(10, 900, 10):
-            again = book.ingest(-1, "BTC", [_state("board", 1.3)], [], _T0 + second, price=0.0)
+            again = book.ingest(1, "ETH", [_state("liqs", 1.3)], [], _T0 + second, price=100.0)
             # It may grow on the row it opened. After that it has nothing new to say.
             self.assertTrue(again is None or second < 120)
 
     def test_a_state_that_grows_by_half_is_a_new_row(self) -> None:
         book = self._book()
-        first = book.ingest(-1, "BTC", [_state("board", 1.2)], [], _T0, price=0.0)
-        self.assertIsNone(book.ingest(-1, "BTC", [_state("board", 1.7)], [], _T0 + 150, price=0.0))
-        grown = book.ingest(-1, "BTC", [_state("board", 1.8)], [], _T0 + 160, price=0.0)
+        first = book.ingest(1, "ETH", [_state("liqs", 1.2)], [], _T0, price=100.0)
+        self.assertIsNone(book.ingest(1, "ETH", [_state("liqs", 1.7)], [], _T0 + 150, price=100.0))
+        grown = book.ingest(1, "ETH", [_state("liqs", 1.8)], [], _T0 + 160, price=100.0)
         assert first is not None and grown is not None
         self.assertNotEqual(grown.id, first.id)
         # Three minutes without firing, and it starts afresh at any size.
-        fresh = book.ingest(-1, "BTC", [_state("board", 1.0)], [], _T0 + 400, price=0.0)
+        fresh = book.ingest(1, "ETH", [_state("liqs", 1.0)], [], _T0 + 400, price=100.0)
         assert fresh is not None
         self.assertNotEqual(fresh.id, grown.id)
 
@@ -687,45 +665,30 @@ class RowBookTest(unittest.TestCase):
 
 
 class TapeTest(unittest.TestCase):
-    def test_a_row_carries_what_the_tape_showed(self) -> None:
-        # Price spiked. Volume was the hour's biggest minute and no more: shown, not a rule.
-        # R5 is about what the row carries, so the volume floor is the old $50k here.
-        low_floor = AlertSettings(spike_min_volume_usd=50_000.0)
-        h = Harness(low_floor)
+    def test_a_row_carries_the_minute(self) -> None:
+        h = Harness()
         h.market()
-        h.det.on_minute_bars(1, [_forming(800.0)])
-        events = h.tick(_at(101.0))
-        self.assertEqual(_kinds(events), ["move", "volume"])
-        self.assertEqual((events[0]["rule"], events[0]["severity"]), ("move", NOTABLE))
-        self.assertNotIn("size", _fact(events, "volume"))
-        self.assertEqual(
-            events[0]["note"], "+1.00% 1m · 5.0× hour max · Vol $80k 1m · 2.7× hour max"
-        )
-
-        # Volume spiked and price did not. The row still says what price did.
-        flat = Harness(low_floor)
-        flat.market()
-        flat.det.on_minute_bars(1, [_forming(1_000.0)])
-        events = flat.tick(_at(100.04))
-        self.assertEqual(_kinds(events), ["volume", "move"])
-        self.assertAlmostEqual(_fact(events, "move")["value"], 0.04)
+        h.held[1] = Held(side="long", liquidation_price=92.0)
+        events = h.tick(_at(100.2))
+        self.assertEqual(_kinds(events), ["near_liq", "move"])
+        self.assertAlmostEqual(_fact(events, "move")["value"], 0.2)
         self.assertNotIn("size", _fact(events, "move"))
 
     def test_a_row_says_when_price_is_at_the_days_high(self) -> None:
         h = Harness()
         h.market()
-        events = h.tick(_at(101.0, daily_price_high=101.0))
+        events = h.tick(_at(101.3, daily_price_high=101.3))
         self.assertEqual(_kinds(events), ["move", "day_high"])
 
         low = Harness()
         low.market()
-        self.assertEqual(_kinds(low.tick(_at(99.0, daily_price_low=99.0))), ["move", "day_low"])
+        self.assertEqual(_kinds(low.tick(_at(98.7, daily_price_low=98.7))), ["move", "day_low"])
 
     def test_a_row_says_when_funding_is_extreme(self) -> None:
         h = Harness()
         h.market()
         h.det.seed_levels("funding", {1: [(_MINUTE - 40 + i, 0.001) for i in range(40)]})
-        events = h.tick(_at(101.0, funding_rate=0.012))
+        events = h.tick(_at(101.3, funding_rate=0.012))
         self.assertEqual(_kinds(events), ["move", "funding"])
         self.assertAlmostEqual(_fact(events, "funding")["z"], 5.5)
 

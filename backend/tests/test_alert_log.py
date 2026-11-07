@@ -193,7 +193,7 @@ class WhatIfTest(unittest.TestCase):
     def test_a_looser_knob_returns_the_baseline(self) -> None:
         log = AlertLog(store=MemoryLogStore())
         log.write(_with_fact("a", "move", multiple=4.0), entry_bar=_ENTRY)
-        out = log.whatif(rule="move", knob="spike.price_x", value=1.0, since_ms=0, current=2.0)
+        out = log.whatif(rule="move", knob="move.x", value=1.0, since_ms=0, current=2.0)
         self.assertTrue(out["looser"])
         self.assertEqual(out["whatif"], out["baseline"])
         self.assertEqual(out["whatif"]["n"], 1)
@@ -229,9 +229,10 @@ class DetectorWritesTest(unittest.TestCase):
         saved = MemoryLogStore()
         det = AlertDetector(lambda message: None, AlertSettings(), log=AlertLog(store=saved))
         det._symbols[1] = "ETH"
-        # An hour of flat bars, so a 0.7% minute is a spike.
+        # Four hours of flat bars, so a 1% minute is a Move.
         det.seed_minute_bars(
-            1, [Candle(_ENTRY - (70 - i) * 60, 100.0, 100.0, 100.0, 100.0, 1.0) for i in range(70)]
+            1,
+            [Candle(_ENTRY - (260 - i) * 60, 100.0, 100.0, 100.0, 100.0, 1.0) for i in range(260)],
         )
         det._snapshots[1] = deque(
             [
@@ -259,20 +260,20 @@ class DetectorWritesTest(unittest.TestCase):
             0.0,
             market_type="perp",
             volume_24h=10_000_000.0,
-            mark_price=100.7,
-            last_trade_price=100.7,
-            mid_price=100.7,
-            best_bid_price=100.69,
-            best_ask_price=100.71,
+            mark_price=101.0,
+            last_trade_price=101.0,
+            mid_price=101.0,
+            best_bid_price=100.99,
+            best_ask_price=101.01,
             open_interest=5_000_000.0,
         )
         with patch("mayedge.alerts.time.time", return_value=float(_ENTRY)):
             det.on_market_stats(meta)
         (row,) = saved.rows.values()
-        self.assertEqual((row.rule, row.direction, row.price), ("move", "up", 100.7))
-        self.assertAlmostEqual(json.loads(row.facts)[0]["value"], 0.7)
-        # Measured from 100.7, over the bars after the one it fired in.
-        det.on_minute_bars(1, _after(_bar(_ENTRY + 60, 101.707, 100.7)))
+        self.assertEqual((row.rule, row.direction, row.price), ("move", "up", 101.0))
+        self.assertAlmostEqual(json.loads(row.facts)[0]["value"], 1.0)
+        # Measured from 101, over the bars after the one it fired in.
+        det.on_minute_bars(1, _after(_bar(_ENTRY + 60, 102.01, 101.0)))
         self.assertAlmostEqual(saved.rows[row.id].left_pct or 0.0, 1.0, places=3)
 
 

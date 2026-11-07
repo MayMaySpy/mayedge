@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   AlertEvent,
+  BoardLineRow,
   FundingExtremeRow,
   LiquidationEvent,
   ScanActivityRow,
@@ -219,6 +220,28 @@ export function setFundingExtremes(rows: FundingExtremeRow[]) {
 
 export function useFundingExtremes() {
   return useSyncExternalStore(subscribeFundingExtremes, getFundingExtremes, getFundingExtremes);
+}
+
+let boardLine: BoardLineRow[] = [];
+const boardLineNotify = makeThrottledNotify(100);
+
+export function subscribeBoardLine(onChange: () => void) {
+  return boardLineNotify.subscribe(onChange);
+}
+
+export function getBoardLine() {
+  return boardLine;
+}
+
+export function setBoardLine(rows: BoardLineRow[]) {
+  boardLine = rows;
+  boardLineNotify.notify();
+}
+
+/** B3: the Broad move, or nothing. */
+export function useBoardLine(): BoardLineRow | null {
+  const rows = useSyncExternalStore(subscribeBoardLine, getBoardLine, getBoardLine);
+  return rows[0] ?? null;
 }
 
 let toneBoard: ToneBoardRow[] = [];

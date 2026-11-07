@@ -1,0 +1,9 @@
+# An alert is a price move
+
+A row on a market's own tape is raised by its price only. The price has to go at least 12 times further than this market usually goes in the same span, over 1, 5 or 15 minutes, and past a floor of 1%, 1.5% or 2%. Volume and open interest are said on that row. They no longer raise one. The Board is a line above the list. A Week or Quarter level raises a row when a minute closes through it, once a day. This replaces the spikes of [ADR 0014](0014-a-spike-is-a-multiple-of-the-hours-biggest-minute.md), and the toast line of [ADR 0023](0023-a-toast-is-for-what-the-operator-has-on.md) for a Held market: a row toasts there only when it runs against the Position, or when a working order is all that is held.
+
+The record for the 30 days to 7 Nov 2026 held 6,642 rows, and 358 were Opened. Volume was a third of them, and 45% of those came with the price moving under 0.1%. Open interest rows were the same: the price moved 0.03% while open interest moved 0.36%, and the row said it ran "with your long". The Board raised 50 to 80 rows a weekday, flipping up and down as US equity perps opened. Every rule's next 15 minutes were a coin flip. The operator could not act on any of it.
+
+A multiple of the hour's biggest minute only sees one minute. A grind of 3% across ten minutes never fired, while a market that had not traded all hour fired at 99× on its first print. The Usual move is measured over four hours, step by step, for each span on its own, and a market that did not trade in most of those minutes raises nothing.
+
+Replayed on the bars the desk serves (7 Nov 2026, 47 liquid perps): 15m Moves came to about 9 a day and went on the alert's way 62% of the time. 5m Moves came to about 14 a day, a coin flip. 1m Moves came to about 30 a day on thin evidence, and they went back. All three stay: a 1m Move that goes back is still the fact the operator wants to see.

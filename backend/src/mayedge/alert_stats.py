@@ -1,11 +1,10 @@
-"""Rolling baselines: the hour a spike is judged against, and the days a level is judged against."""
+"""Rolling baselines: the Usual move a span is judged against, and the days a level is judged against."""
 
 from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
-from itertools import pairwise
 
 from mayedge.lighter.models import Candle
 
@@ -71,12 +70,14 @@ class MinuteMetrics:
 
 
 @dataclass
-class HourBase:
-    """K1: the biggest closed minute of the hour, and the minute being judged."""
+class SpanBase:
+    """M1, M2, M6: one span of a market's tape, judged against its own last 240 closed bars."""
 
-    max_volume_usd: float
-    max_move_pct: float
-    forming_volume_usd: float
+    span: int
+    ref_close: float
+    usual_pct: float
+    volume_usd: float
+    mean_volume_usd: float
 
 
 class MinuteBook:
@@ -150,31 +151,46 @@ class MinuteBook:
             vol_quote_5m=vol_5m,
         )
 
-    def hour(self, market_index: int, *, now: float, window_min: int = 60) -> HourBase | None:
-        """K1, K6. None until the book reaches a full window back."""
-        dq = self._bars.get(market_index)
-        if not dq:
-            return None
-        bars = list(dq)
+    def _closed(self, market_index: int, now: float) -> list[Candle]:
         minute = int(now // 60) * 60
-        start = minute - window_min * 60
-        if bars[0].time > start:
+        return [bar for bar in self._bars.get(market_index, ()) if bar.time < minute]
+
+    def live_share(self, market_index: int, *, now: float, bars: int) -> float | None:
+        """G4: the share of the last ``bars`` closed minutes that traded. None until there are that many."""
+        closed = self._closed(market_index, now)[-bars:]
+        if len(closed) < bars:
             return None
-        max_volume = 0.0
-        max_move = 0.0
-        forming = 0.0
-        for i, bar in enumerate(bars):
-            if bar.time < start:
-                continue
-            if bar.time >= minute:
-                if bar.time == minute:
-                    forming = self._quote_vol(bar)
-                continue
-            max_volume = max(max_volume, self._quote_vol(bar))
-            prev = bars[i - 1] if i else None
-            if prev is not None and prev.close > 0 and bar.close > 0:
-                max_move = max(max_move, abs(bar.close - prev.close) / prev.close * 100.0)
-        return HourBase(max_volume, max_move, forming)
+        return sum(1 for bar in closed if bar.volume > 0) / bars
+
+    def ref_close(self, market_index: int, span: int, *, now: float) -> float | None:
+        """M1, M4: the close ``span`` closed bars back."""
+        closed = self._closed(market_index, now)
+        if len(closed) < span or span < 1:
+            return None
+        close = closed[-span].close
+        return close if close > 0 else None
+
+    def span(self, market_index: int, span: int, *, now: float, bars: int) -> SpanBase | None:
+        """M1, M2, M6. None until ``bars`` closed minutes are behind it."""
+        closed = self._closed(market_index, now)
+        if len(closed) < bars or span < 1:
+            return None
+        window = closed[-bars:]
+        closes = [bar.close for bar in window]
+        moves = [
+            abs(closes[i] - closes[i - span]) / closes[i - span] * 100.0
+            for i in range(span, len(closes))
+            if closes[i - span] > 0 and closes[i] > 0
+        ]
+        ref = closes[-span]
+        if not moves or ref <= 0:
+            return None
+        minute = int(now // 60) * 60
+        forming = [bar for bar in self._bars.get(market_index, ()) if bar.time >= minute]
+        recent = window[-(span - 1) :] if span > 1 else []
+        volume = sum(self._quote_vol(bar) for bar in [*recent, *forming])
+        mean = sum(self._quote_vol(bar) for bar in window) / len(window) * span
+        return SpanBase(span, ref, _median(moves), volume, mean)
 
 
 class LevelBook:
@@ -212,19 +228,12 @@ class LevelBook:
         center = _median(values)
         return z_score(value, center, robust_sigma(values, center, floor))
 
-    def changes(
-        self, market_index: int, name: str, *, now: float, window_min: int
-    ) -> list[float] | None:
-        """K1: minute-to-minute changes over the last window, the current minute left out.
-
-        None until the series reaches a full window back.
-        """
-        series = self._series.get((market_index, name))
-        if not series:
-            return None
-        minute = int(now // 60)
-        start = minute - window_min
-        if series[0][0] > start:
-            return None
-        closed = [(m, v) for m, v in series if start - 1 <= m < minute]
-        return [abs(cur[1] - prev[1]) for prev, cur in pairwise(closed)]
+    def back(self, market_index: int, name: str, *, now: float, minutes: int) -> float | None:
+        """M6: the sample ``minutes`` before this minute. None when that minute is a gap."""
+        want = int(now // 60) - minutes
+        for minute, value in reversed(self._series.get((market_index, name), ())):
+            if minute == want:
+                return value
+            if minute < want:
+                return None
+        return None

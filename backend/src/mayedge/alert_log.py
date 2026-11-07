@@ -24,17 +24,10 @@ GROUP_BY = ("rule", "rule_severity", "rule_direction", "held", "hour", "symbol")
 # knob → fact kind, stored field, which way is tighter.
 # A looser knob would have raised rows that were never written, so it is not replayed.
 KNOBS: dict[str, tuple[str, str, str]] = {
-    "spike.price_x": ("move", "multiple", "higher"),
-    "spike.min_move_pct": ("move", "abs_value", "higher"),
-    "spike.volume_x": ("volume", "multiple", "higher"),
-    "spike.min_volume_usd": ("volume", "value", "higher"),
-    "spike.oi_x": ("oi", "multiple", "higher"),
-    "spike.min_oi_usd": ("oi", "abs_usd", "higher"),
-    "spike.min_oi_pct": ("oi", "abs_value", "higher"),
+    "move.x": ("move", "multiple", "higher"),
     "liquidations.min_usd": ("liqs", "value", "higher"),
     "liquidations.oi_bps": ("liqs", "bps", "higher"),
     "held.liq_distance_pct": ("near_liq", "value", "lower"),
-    "board.median_pct": ("board", "abs_value", "higher"),
 }
 
 
