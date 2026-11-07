@@ -124,6 +124,7 @@ A 429 or 405 is a 60 second firewall cooldown, and a limited REST window limits 
 | Chase-grid | `[10e9, 11e9)` |
 | Planner | `[11e9, 12e9)` |
 | Trail | `[12e9, 13e9)` |
+| Massager | `[13e9, 14e9)` |
 
 Manual and TWAP ranges overlap — known debt; ladder/chase/grid do not overlap each other.
 

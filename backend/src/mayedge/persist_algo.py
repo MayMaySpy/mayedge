@@ -11,6 +11,7 @@ from typing import Any
 
 from mayedge.db import _connect, _lock
 from mayedge.numbers import fmt_decimal
+from mayedge.rows import obj
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +377,13 @@ def _public_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         "working_ask": working_ask,
         "inventory": runtime.get("inventory"),
         "inventory_vwap": runtime.get("inventory_vwap"),
-        "captured_pnl": runtime.get("captured_pnl"),
+        "captured_pnl": (
+            obj(runtime.get("book")).get("captured")
+            if algo_type == "massager"
+            else runtime.get("captured_pnl")
+        ),
+        "core": runtime.get("core") if algo_type == "massager" else None,
+        "lean": obj(runtime.get("book")).get("lean") if algo_type == "massager" else None,
         "profit_bps": params.get("profit_bps") if isinstance(params, dict) else None,
         "planner": runtime.get("planner"),
     }

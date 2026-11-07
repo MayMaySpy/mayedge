@@ -101,7 +101,7 @@ Lighter has no trailing order type. Its Stop and Take Profit triggers fire on **
 
 | | Rule | Knob | Pinned by |
 |---|---|---|---|
-| S1 | A Trail refuses beside a Planner (Planner runs its own) or Grid ([grid-rules.md](grid-rules.md) G1), and they refuse beside it. | | test_trail_refuses_beside_planner_or_grid |
+| S1 | A Trail refuses beside a Planner (Planner runs its own), a Grid ([grid-rules.md](grid-rules.md) G1) or a Massager ([massager-rules.md](massager-rules.md) MS18), and they refuse beside it. | | test_trail_refuses_beside_planner_or_grid, test_massager_refuses_beside_planner_trail_or_grid |
 | S2 | Per Market at once: one Entry, one Stop, three Take Profits. | code | test_one_trail_stop_per_market |
 | S3 | A distance under 2 ticks, an Activation on the wrong side of mark, or a Start on the wrong side of mark or past the **Liquidation price** refuses. | | test_bad_inputs_refuse |
 | S4 | **Kill**, or Cancel all on its Market, stops every Trail there and cancels its orders. | | test_cancel_all_stops_the_trails |

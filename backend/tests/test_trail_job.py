@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from mayedge import db as store
 from mayedge.algos.chase.state import ChaseStatus
+from mayedge.algos.massager.config import MASSAGER_COI_BASE
 from mayedge.algos.planner import venue as planner_venue
 from mayedge.algos.trail.book import TrailBook
 from mayedge.algos.trail.config import (
@@ -503,4 +504,5 @@ class TrailJobTests(IsolatedAsyncioTestCase):
 
     async def test_trail_cois_are_in_their_band(self) -> None:
         self.assertTrue(is_algo_client_order(TRAIL_COI_BASE + 1))
-        self.assertFalse(is_algo_client_order(TRAIL_COI_END))
+        # The Massager's band starts where Trail's ends.
+        self.assertEqual(TRAIL_COI_END, MASSAGER_COI_BASE)

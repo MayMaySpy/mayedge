@@ -13,7 +13,15 @@ class DeskRegistryTests(unittest.TestCase):
         types = {book.algo_type for book in desk.books}
         self.assertEqual(
             types,
-            {"chase-iceberg", "advanced-twap", "ladder", "chase-grid", "planner", "trail"},
+            {
+                "chase-iceberg",
+                "advanced-twap",
+                "ladder",
+                "chase-grid",
+                "planner",
+                "trail",
+                "massager",
+            },
         )
 
     def test_trail_refuses_beside_planner_or_grid(self) -> None:
@@ -50,6 +58,23 @@ class DeskRegistryTests(unittest.TestCase):
             with patch.object(book, "live_on_market", return_value=True):
                 self.assertFalse(grid_conflict(1), book.algo_type)
 
+    def test_massager_refuses_beside_planner_trail_or_grid(self) -> None:
+        """Massager MS18, both ways; Chase, Ladder and TWAP beside it are fine."""
+        conflict = desk.massager_book._market_conflict
+        assert conflict is not None
+        for book in (desk.planner_book, desk.trail_book, desk.grid_book):
+            with patch.object(book, "live_on_market", return_value=True):
+                self.assertTrue(conflict(1), book.algo_type)
+        for book in (desk.chase_book, desk.ladder_book, desk.twap_book):
+            with patch.object(book, "live_on_market", return_value=True):
+                self.assertFalse(conflict(1), book.algo_type)
+        with patch.object(desk.massager_book, "live_on_market", return_value=True):
+            for book in (desk.grid_book, desk.trail_book):
+                book_conflict = book._market_conflict
+                assert book_conflict is not None
+                self.assertTrue(book_conflict(1), book.algo_type)
+            self.assertTrue(desk._market_has_other_desk_algo(desk.planner_book)(1))
+
     def test_get_book_by_type(self) -> None:
         self.assertIs(desk.get_book("chase-iceberg"), desk.chase_book)
         self.assertIs(desk.get_book("advanced-twap"), desk.twap_book)
@@ -57,6 +82,7 @@ class DeskRegistryTests(unittest.TestCase):
         self.assertIs(desk.get_book("chase-grid"), desk.grid_book)
         self.assertIs(desk.get_book("planner"), desk.planner_book)
         self.assertIs(desk.get_book("trail"), desk.trail_book)
+        self.assertIs(desk.get_book("massager"), desk.massager_book)
         self.assertIsNone(desk.get_book("unknown-algo"))
 
     def test_find_book_helpers(self) -> None:

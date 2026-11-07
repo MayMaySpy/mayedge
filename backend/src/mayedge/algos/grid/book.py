@@ -19,7 +19,7 @@ MarketConflictFn = Callable[[int], bool]
 
 
 class ChaseGridBook(ClipBook[GridRunner]):
-    """One chase-grid job per Market, beside Chase, Ladder and TWAP but not a Planner or Trail (G1)."""
+    """One chase-grid job per Market, beside Chase, Ladder and TWAP but not a Planner, Trail or Massager (G1)."""
 
     ALGO_ID = ALGO_ID
     ID_PREFIX = ID_PREFIX
@@ -77,7 +77,7 @@ class ChaseGridBook(ClipBook[GridRunner]):
         if self.live_on_market(market_index):
             raise ValueError(f"Chase-grid already running on market {market_index}")
         if self._market_conflict and self._market_conflict(market_index):
-            raise ValueError("A Planner or Trail runs this Market's orders")
+            raise ValueError("A Planner, Trail or Massager runs this Market's orders")
 
         async def begin(job: GridRunner, algo_id: str) -> None:
             await job.start(algo_id=algo_id, market_index=market_index, params=params)

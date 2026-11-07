@@ -65,7 +65,7 @@ class TrailBook(WatchBook[TrailRunner]):
     def _check_free(self, market_index: int, params: TrailParams) -> None:
         """S1 and S2."""
         if self._market_conflict and self._market_conflict(market_index):
-            raise TrailRefused("S1", "A Planner or Grid runs this Market's orders")
+            raise TrailRefused("S1", "A Planner, Grid or Massager runs this Market's orders")
         same = [job for job in self._live(market_index, None) if job.kind == params.kind]
         cap = MAX_PER_MARKET[params.kind]
         if len(same) >= cap:

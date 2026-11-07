@@ -135,6 +135,18 @@ class PersistNoVenueTests(unittest.TestCase):
         self.assertEqual(self._updated_at(), 2_000_000)
         self.assertEqual(store.load_active_runs()[0]["remaining"], "9")
 
+    def test_a_massager_run_reads_back_with_its_core_lean_and_captured(self) -> None:
+        runtime = {"core": "10", "book": {"lean": "-1", "captured": "3.33"}}
+        snap = self._run(
+            algo_id="MS-0001",
+            algo_type="massager",
+            status="stopped",
+            params_json={"swing": "3", "clip": "1", "runtime": runtime},
+        )
+        self._write(snap, archived=True)
+        row = store.load_history(10, algo_type="massager")[0]
+        self.assertEqual((row["core"], row["lean"], row["captured_pnl"]), ("10", "-1", "3.33"))
+
     def test_archiving_an_unchanged_run_is_written(self) -> None:
         self._write(self._run(status="stopped"))
         self._write(self._run(status="stopped"), archived=True)

@@ -15,6 +15,8 @@ from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
+from mayedge.algos.massager.book import MassagerBook
+from mayedge.algos.massager.config import MASSAGER_COI_BASE, MASSAGER_COI_END
 from mayedge.algos.planner.book import PlannerBook
 from mayedge.algos.planner.config import PLANNER_COI_BASE, PLANNER_COI_END
 from mayedge.algos.trail.book import TrailBook
@@ -126,6 +128,12 @@ trail_book = TrailBook(
     coi_end=TRAIL_COI_END,
     watch_prints=gateway.watch_prints,
 )
+massager_book = MassagerBook(
+    execution=execution,
+    broadcast=_publish_algo_book,
+    coi_base=MASSAGER_COI_BASE,
+    coi_end=MASSAGER_COI_END,
+)
 books: tuple[DeskBook, ...] = (
     chase_book,
     twap_book,
@@ -133,6 +141,7 @@ books: tuple[DeskBook, ...] = (
     grid_book,
     planner_book,
     trail_book,
+    massager_book,
 )
 
 
@@ -148,14 +157,30 @@ def _market_has_other_desk_algo(exclude: DeskBook) -> Callable[[int], bool]:
     return _fn
 
 
-# Grid G1: it sits beside Chase, Ladder and TWAP, not beside a Planner or Trail.
+# Grid G1: it sits beside Chase, Ladder and TWAP, not beside a Planner, Trail or Massager.
 grid_book.set_market_conflict(
-    lambda mi: planner_book.live_on_market(mi) or trail_book.live_on_market(mi)
+    lambda mi: (
+        planner_book.live_on_market(mi)
+        or trail_book.live_on_market(mi)
+        or massager_book.live_on_market(mi)
+    )
+)
+# Massager MS18: it sits beside Chase, Ladder and TWAP, not beside a Planner, Trail or Grid.
+massager_book.set_market_conflict(
+    lambda mi: (
+        planner_book.live_on_market(mi)
+        or trail_book.live_on_market(mi)
+        or grid_book.live_on_market(mi)
+    )
 )
 planner_book.set_market_conflict(_market_has_other_desk_algo(planner_book))
-# Trail S1: it sits beside Chase and Ladder, not beside a Planner or Grid.
+# Trail S1: it sits beside Chase and Ladder, not beside a Planner, Grid or Massager.
 trail_book.set_market_conflict(
-    lambda mi: planner_book.live_on_market(mi) or grid_book.live_on_market(mi)
+    lambda mi: (
+        planner_book.live_on_market(mi)
+        or grid_book.live_on_market(mi)
+        or massager_book.live_on_market(mi)
+    )
 )
 
 

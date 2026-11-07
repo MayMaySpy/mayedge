@@ -21,6 +21,7 @@ _FAMILIES = {
     "LD": "ladder",
     "TW": "twap",
     "TR": "trail",
+    "MS": "massager",
 }
 
 

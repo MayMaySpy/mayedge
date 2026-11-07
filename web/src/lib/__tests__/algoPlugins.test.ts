@@ -10,6 +10,8 @@ import {
   isAlgoClientOrder,
   ALGOS,
   LADDER_COI_BASE,
+  MASSAGER_COI_BASE,
+  MASSAGER_COI_END,
   ladderPlugin,
   PLANNER_COI_BASE,
   PLANNER_COI_END,
@@ -66,13 +68,22 @@ describe("algo plugin COI bands", () => {
     expect(algoOrderKind(PLANNER_COI_END)).toBe("Trail");
     expect(ALGOS.some((a) => (a.id as string) === "planner")).toBe(false);
   });
+
+  it("attributes Massager Clips by band; its ticket is not in the Algo menu yet", () => {
+    expect(isAlgoClientOrder(MASSAGER_COI_BASE)).toBe(true);
+    expect(algoOrderKind(MASSAGER_COI_BASE + 1)).toBe("Massager");
+    expect(isAlgoClientOrder(MASSAGER_COI_END)).toBe(false);
+    expect(algoPluginByDeskType("massager")?.label).toBe("Massager");
+    expect(ALGOS.some((a) => (a.id as string) === "massager")).toBe(false);
+  });
 });
 
 describe("trail plugin", () => {
   const ctx = { sizeNum: 1, decimals: 2, minSz: 0.1, symbol: "ETH", spot: 100, priceDecimals: 2 };
 
   it("labels its band and is in the Algo menu as an entry", () => {
-    expect(isAlgoClientOrder(TRAIL_COI_END)).toBe(false);
+    // The Massager's band starts where Trail's ends.
+    expect(algoOrderKind(TRAIL_COI_END)).toBe("Massager");
     expect(algoPluginByDeskType("trail")?.label).toBe("Trail");
     expect(ALGOS.some((a) => a.id === "trail")).toBe(true);
   });

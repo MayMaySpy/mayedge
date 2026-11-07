@@ -4,7 +4,7 @@ What a **Massager** does. Change a rule here first, then the code and the test t
 
 Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means the number is not a knob. Sizes are signed: long above zero, short below.
 
-Last checked against the code: 2026-11-07. Phases 1 and 2: the planner (`algos/massager/plan.py`) and the job (`algos/massager/job.py`) are coded and run on the harness fakes. The desk does not offer it yet: the registry, exclusivity, the web band and the ticket are phases 3 and 4.
+Last checked against the code: 2026-11-07. Phases 1 to 3: the planner (`algos/massager/plan.py`), the job (`algos/massager/job.py`) and the desk wiring are coded. The desk can start one through `POST /api/algos/massager/start` (body: `market_index`, `band_low`, `band_high`, `swing`, `clip`; a refusal is a 400 with its rule's message), but nothing on the page does yet: the ticket, the working row and the chart are phase 4.
 
 ## Example
 
@@ -52,3 +52,4 @@ LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3
 | MS15 | A change of Core counts only once it has held 3 s, so the Massager's own fill seen on the Position before its order row is not taken for an outside one. | 3 s is code | `test_its_own_fill_seen_early_is_not_an_outside_fill`, `test_an_outside_add_moves_the_core_and_its_entry` |
 | MS16 | Lean, level, level fills, Captured, Core, Core entry and the catch-up are kept with the run. On restart the Clips are pulled as for every Clip algo, the Core is judged again from the Position (MS12), and the lattice goes back on. | | `test_a_run_comes_back_with_its_lean_level_and_core` |
 | MS17 | Every Clip is a post-only Limit, never reduce-only, and it never sends a Market order. It never places, Amends or cancels a Stop or Take Profit Ticket. | | `test_start_takes_the_core_and_rests_two_levels_each_side` |
+| MS18 | One Massager per Market. It runs beside Chase, Ladder and TWAP. It refuses beside a Planner, a Trail or a Grid, and they refuse beside it. Its Clips take client_order_index from `[13e9, 14e9)` ([ADR 0004](adr/0004-partitioned-client-order-index.md)); its runs are `MS-`, named Massager in the journal and in a push. | `[13e9, 14e9)` is code | `test_massager_refuses_beside_planner_trail_or_grid`, `test_its_band_is_an_algo_band`, `test_its_runs_are_named_massager`, `test_a_massager_run_reads_back_with_its_core_lean_and_captured` |

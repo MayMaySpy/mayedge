@@ -13,6 +13,7 @@ _FAMILIES = {
     "grid": "Grid",
     "ladder": "Ladder",
     "twap": "TWAP",
+    "massager": "Massager",
 }
 
 

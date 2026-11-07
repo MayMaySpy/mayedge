@@ -14,7 +14,7 @@ LIT ranges between 3.20 and 3.50. A Ladder buy rests 5 rungs from 3.30 down to 3
 
 | # | Rule | Test |
 |---|---|---|
-| G1 | One Grid per Market. It runs beside Chase, Ladder and TWAP on that Market, either way round. It refuses beside a Planner (ADR 0015) or a Trail ([trail-rules.md](trail-rules.md) S1), and they refuse beside it. | `test_grid_runs_beside_chase_ladder_and_twap`, `test_grid_and_planner_each_refuse_beside_another_algo`, `test_trail_refuses_beside_planner_or_grid` |
+| G1 | One Grid per Market. It runs beside Chase, Ladder and TWAP on that Market, either way round. It refuses beside a Planner (ADR 0015), a Trail ([trail-rules.md](trail-rules.md) S1) or a Massager ([massager-rules.md](massager-rules.md) MS18), and they refuse beside it. | `test_grid_runs_beside_chase_ladder_and_twap`, `test_grid_and_planner_each_refuse_beside_another_algo`, `test_trail_refuses_beside_planner_or_grid`, `test_massager_refuses_beside_planner_trail_or_grid` |
 | G2 | Grid's inventory is only what its own Clips filled. It starts at 0 whatever Position is open, and a Position moved by a Ticket, another algo or a hand close does not change it. Max inventory caps that inventory, not the Position. | `test_grid_starts_flat_beside_an_open_position`, `test_grid_inventory_ignores_the_position` |
 | G3 | Grid's Clips are never reduce-only. A take-profit closes Grid's own lot at that lot's size, and the break-even flatten closes Grid's merged lot, whatever side the Position is on. | `test_grid_take_profit_is_not_reduce_only` |
 | G4 | Grid does not watch the Position. Stop Grid when you close its Market by hand: a take-profit left on would open what it was meant to close. Kill and Auto kill halt it. | |

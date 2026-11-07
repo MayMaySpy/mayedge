@@ -38,7 +38,7 @@ Restore holds the algo book until every family has loaded. That snapshot only se
 | Position watch | a Position's Stop, R, Idea stop, funding or the daily brief, by [position-rules.md](position-rules.md) E1–E7, and `positions` is `on` | the event's own text | `position:…` | E4 only |
 | Send test | the Alerts panel, or `POST /api/push/test` | `Desk test push ✓` | `test:{time}` | yes |
 
-`algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, and TWAP send an error and nothing else.
+`algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, TWAP and Massager send an error and nothing else.
 
 The could-not line counts one try per flatten slippage step. There are three steps.
 
