@@ -686,7 +686,7 @@ class RouterTests(unittest.TestCase):
         router, sink, _clock = self._router()
         chase = {
             "algo_id": "c1",
-            "algo_type": "chase",
+            "algo_type": "chase-iceberg",
             "status": "running",
             "symbol": "ETH",
             "side": "buy",
@@ -708,6 +708,13 @@ class RouterTests(unittest.TestCase):
             _algo(_trail(filled="1.5"), {**chase, "status": "error", "error": "rejected"})
         )
         self.assertEqual(sink.rows[-1][1], "Chase ETH stopped with an error: rejected")
+
+    def test_every_desk_algo_has_a_push_name(self) -> None:
+        """An error push names the algo by the desk's algo_type, never the fallback "Algo"."""
+        from mayedge import desk
+        from mayedge.push_text import _FAMILIES  # pyright: ignore[reportPrivateUsage]
+
+        self.assertEqual({book.algo_type for book in desk.books}, set(_FAMILIES))
 
     def test_errors_mode_skips_lifecycle(self) -> None:
         router, sink, _clock = self._router(PushSettings(algos="errors"))

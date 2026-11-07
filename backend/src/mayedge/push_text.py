@@ -6,13 +6,14 @@ import calendar
 import time
 from typing import Any
 
+# An algo's name in a push, by the desk's algo_type (each book's ALGO_ID).
 _FAMILIES = {
     "planner": "Planner",
     "trail": "Trail",
-    "chase": "Chase",
-    "grid": "Grid",
+    "chase-iceberg": "Chase",
+    "chase-grid": "Grid",
     "ladder": "Ladder",
-    "twap": "TWAP",
+    "advanced-twap": "TWAP",
     "massager": "Massager",
 }
 
