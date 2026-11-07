@@ -11,6 +11,7 @@ Words in bold mean what [CONTEXT.md](../CONTEXT.md) says they mean.
 3. The Core follows outside fills: a Ladder, a Ticket or a hand add moves the Core, not the Massager's **Lean**.
 4. It never touches a Stop or Take Profit Ticket.
 5. Name: the algo is **Massager**, the size it works around is the **Core**.
+6. The **Center** is the Band's middle, so the Band maps evenly onto ±Swing. It is not an input.
 
 ## 1. Language (proposed CONTEXT.md entries)
 
@@ -66,13 +67,14 @@ Only the nearest levels each side rest at once (2 each side in v1), so the latti
 | Band low, Band high | yes | Price must be inside to start. |
 | Swing | yes | Refused if it is not below the Core, so the Position can never go flat or flip from its own trades. |
 | Clip | yes | Over the venue minimum, and Swing must divide into whole Clips. |
-| Center | no | The price where Lean is 0. Defaults to the Band's middle (open question 1). |
+
+The Center, where Lean is 0, is always the Band's middle.
 
 Step is derived: Band width ÷ (2 × Swing ÷ Clip). Starting is refused if a Step does not clear the round-trip maker fees (0 on Standard, but Premium is not) plus one tick.
 
 ### 2.4 At start
 
-It reads the Position. Long or short, the Core takes that side; a short Core sells below the Center and buys above it, the mirror image. With no Position it refuses. If price is away from the Center, the Lean at that price is the target, and the first Clips move toward it as post-only orders at the nearest levels, never at market.
+It reads the Position. Long or short, the Core takes that side; a short Core sells below the Center and buys above it, the mirror image. With no Position it refuses. If price is away from the Center, it owes the Lean for the levels price has already passed. In the LIT example, starting at 3.42 owes a sell of 100 (the 3.40 level). That catch-up goes on post-only at the touch, never at market, and the lattice starts once it fills. The form shows the catch-up before Start.
 
 ### 2.5 The Core moves with outside fills
 
@@ -93,7 +95,7 @@ That is the risk the operator takes on: a break down leaves the Position at Core
 - **One Massager per Market.** It runs beside Chase, Ladder and TWAP, as Grid does ([grid-rules.md](grid-rules.md) G1).
 - **Not beside a Planner.** Planner owns the exit and pauses when the Position grows from outside ([planner-rules.md](planner-rules.md) M6), which a Massager does at every Step.
 - **Not beside a Trail.** A Trail Take Profit is a share of the Position, and that share would move under it.
-- **Not beside a Grid** in v1 (open question 2).
+- **Not beside a Grid** in v1 (open question 1).
 - **Stops are not touched.** A Stop sized to the Core does not cover a positive Lean. A Stop that closes the whole Position covers all of it. The Massager's form says so next to Swing.
 - **Auto kill** watches uPnL only and needs nothing new. Kill halts it with the other algos.
 - **Position watch** reads the Position as it is. R is measured from the Plan stop, so a larger Position shows a larger risk, which is true.
@@ -108,7 +110,7 @@ That is the risk the operator takes on: a break down leaves the Position at Core
 
 ## 5. UI
 
-- **Order ticket → Algo → Massager**, only on a Market with a Position. It shows Core (read-only), Band, Swing, Clip, Center, the derived Step and Captured per round trip, and the Position range Core − Swing to Core + Swing.
+- **Order ticket → Algo → Massager**, only on a Market with a Position. It shows Core (read-only), Band, Swing, Clip, the Center and Step it derives and Captured per round trip, and the Position range Core − Swing to Core + Swing.
 - **Working row**: Core, Lean, Position range, Captured, Basis against the venue entry.
 - **Chart**: the Band, the Center, and the resting levels.
 
@@ -121,9 +123,8 @@ That is the risk the operator takes on: a break down leaves the Position at Core
 
 ## 7. Open questions
 
-1. **Center.** The Band's middle, so the Band maps evenly to ±Swing (proposed), or the price at start, so it trades nothing until price moves?
-2. **Beside a Grid.** Both keep their own books, so the venue would not mind. Refuse in v1 to keep one range engine per Market, or allow?
-3. **Levels resting each side.** 2 is a guess. Fewer is cheaper on the rate budget, more catches a fast move.
+1. **Beside a Grid.** Both keep their own books, so the venue would not mind. Refuse in v1 to keep one range engine per Market, or allow?
+2. **Levels resting each side.** 2 is a guess. Fewer is cheaper on the rate budget, more catches a fast move.
 
 ## 8. Phases
 
