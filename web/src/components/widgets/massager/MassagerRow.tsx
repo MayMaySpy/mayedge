@@ -110,6 +110,9 @@ export function MassagerRow({
           </span>
         </span>
         <span>
+          Step <span className="text-text">{marketPrice(algo.step, sym)}</span>
+        </span>
+        <span>
           Swing <span className="text-text">{formatSize(algo.qty)}</span>
         </span>
         <span>

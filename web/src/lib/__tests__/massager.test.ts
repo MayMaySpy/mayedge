@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  lastAtr,
   massagerPreview,
   massagerRefusal,
   massagerRowFacts,
@@ -11,7 +12,7 @@ const LIT: MassagerInput = {
   bandLow: 3.2,
   bandHigh: 3.5,
   swing: 300,
-  clip: 100,
+  step: 0.05,
   position: 1000,
   mid: 3.42,
   tick: 0.0001,
@@ -21,9 +22,10 @@ const LIT: MassagerInput = {
 };
 
 describe("massager preview (massager-rules MS1–MS8)", () => {
-  it("cuts the Band into even levels around the Center", () => {
+  it("steps out from the Center and splits the Swing over the levels that fit", () => {
     const p = massagerPreview(LIT)!;
     expect(p.levels).toBe(3);
+    expect([p.clip, p.swing]).toEqual([100, 300]);
     expect(p.center).toBeCloseTo(3.35, 10);
     expect(p.step).toBeCloseTo(0.05, 10);
     expect(p.prices.map((x) => x.toFixed(4))).toEqual([
@@ -37,6 +39,22 @@ describe("massager preview (massager-rules MS1–MS8)", () => {
     ]);
     expect([p.positionLow, p.positionHigh]).toEqual([700, 1300]);
     expect(p.perRoundTrip).toBeCloseTo(5, 10);
+  });
+
+  it("derives the Clip from a typed Step, down to the size step (MS3)", () => {
+    const tight = massagerPreview({ ...LIT, step: 0.02 })!;
+    expect([tight.levels, tight.clip, tight.swing]).toEqual([7, 42, 294]);
+    expect(tight.perRoundTrip).toBeCloseTo(0.84, 10);
+    const odd = massagerPreview({ ...LIT, step: 0.04 })!;
+    expect(odd.prices.map((x) => x.toFixed(4))).toEqual([
+      "3.2300",
+      "3.2700",
+      "3.3100",
+      "3.3500",
+      "3.3900",
+      "3.4300",
+      "3.4700",
+    ]);
   });
 
   it("owes a catch-up for the levels price has passed", () => {
@@ -58,11 +76,10 @@ describe("massager preview (massager-rules MS1–MS8)", () => {
   it("refuses in the backend's words", () => {
     expect(massagerRefusal({ ...LIT, position: 0 })).toBe("A Massager needs an open Position");
     expect(massagerRefusal({ ...LIT, mid: 3.6 })).toBe("Price is outside the Band");
-    expect(massagerRefusal({ ...LIT, swing: 250 })).toBe(
-      "The Swing must be a whole number of Clips"
-    );
-    expect(massagerRefusal({ ...LIT, swing: 8, clip: 4 })).toBe(
-      "The Clip is under the venue minimum"
+    expect(massagerRefusal({ ...LIT, step: 0 })).toBe("Set the Swing and the Step");
+    expect(massagerRefusal({ ...LIT, step: 0.16 })).toBe("The Step is wider than half the Band");
+    expect(massagerRefusal({ ...LIT, step: 0.005, swing: 270 })).toBe(
+      "The Clip comes out under the venue minimum: widen the Step or raise the Swing"
     );
     expect(massagerRefusal({ ...LIT, position: 300 })).toBe(
       "The Swing must be smaller than the Core"
@@ -85,5 +102,13 @@ describe("massager working row (massager-rules MS20)", () => {
       captured: 5,
     });
     expect(massagerRowFacts({ core: "-1000", lean: "100", qty: "300" }).position).toBe(-900);
+  });
+});
+
+describe("massager Step presets (massager-rules MS19)", () => {
+  it("reads the last ATR off the candles, Wilder-smoothed", () => {
+    const flat = Array.from({ length: 20 }, () => ({ high: 3.3, low: 3.2, close: 3.25 }));
+    expect(lastAtr(flat)).toBeCloseTo(0.1, 10);
+    expect(lastAtr(flat.slice(0, 5))).toBeNull();
   });
 });

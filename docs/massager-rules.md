@@ -4,13 +4,13 @@ What a **Massager** does. Change a rule here first, then the code and the test t
 
 Words in bold in [CONTEXT.md](../CONTEXT.md) mean the same here. "code" means the number is not a knob. Sizes are signed: long above zero, short below.
 
-Last checked against the code: 2026-11-07. Built in four phases: the planner (`algos/massager/plan.py`), the job (`algos/massager/job.py`), the desk wiring, and the ticket, working row and chart (`web/src/lib/massager.ts`, `MassagerParamsSheet`, `MassagerRow`). The API is `POST /api/algos/massager/start` (body: `market_index`, `band_low`, `band_high`, `swing`, `clip`; a refusal is a 400 with its rule's message).
+Last checked against the code: 2026-11-07. Built in four phases: the planner (`algos/massager/plan.py`), the job (`algos/massager/job.py`), the desk wiring, and the ticket, working row and chart (`web/src/lib/massager.ts`, `MassagerParamsSheet`, `MassagerRow`). The API is `POST /api/algos/massager/start` (body: `market_index`, `band_low`, `band_high`, `swing`, `step`; a refusal is a 400 with its rule's message).
 
 ## Example
 
-LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3.42 at start.
+LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Step 0.05, mid 3.42 at start.
 
-- 3 levels each side (300 ÷ 100). Center 3.35, Step (3.50 − 3.20) ÷ 6 = 0.05. Levels 3.20, 3.25, 3.30, **3.35**, 3.40, 3.45, 3.50.
+- Center 3.35, half the Band 0.15, so 3 levels each side (0.15 ÷ 0.05) and a Clip of 100 (300 ÷ 3). Levels 3.20, 3.25, 3.30, **3.35**, 3.40, 3.45, 3.50.
 - Price has passed level +1 (3.40), so the catch-up sells 100. Lean −100, Position 900.
 - From level +1 it rests sells at 3.45 and 3.50 and buys at 3.35 and 3.30, 100 each.
 - The buy at 3.35 fills. Lean 0, Position 1,000, Captured (3.40 − 3.35) × 100 = $5. Basis 3.36 − 5 ÷ 1,000 = 3.355.
@@ -22,9 +22,9 @@ LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3
 |---|---|---|---|
 | MS1 | It needs an open Position. The **Core** is that Position, and its sign is the Core's side for as long as it runs. | | `test_no_position_is_refused` |
 | MS2 | The Band is two prices above 0, low below high. The book's mid at start must be inside it, ends included. | | `test_the_band_must_hold_the_price` |
-| MS3 | **Swing** and Clip are above 0, Swing is a whole number of Clips (that number is the levels each side), and the Clip is at least the venue minimum and on its size step. | | `test_swing_must_be_whole_clips`, `test_a_clip_under_the_minimum_is_refused` |
-| MS4 | The Swing is below the Core's size, so the Massager's own trades never take the Position flat or across. | | `test_a_swing_as_large_as_the_core_is_refused` |
-| MS5 | Center = (low + high) ÷ 2. Step = (high − low) ÷ (2 × levels). Level k is Center + k × Step for k from −levels to +levels, rounded to the nearest tick. | | `test_levels_split_the_band_evenly` |
+| MS3 | **Swing** and Step are above 0; the Step is how far apart the levels are. Levels each side = half the Band ÷ Step, rounded down, and at least 1. The Clip is Swing ÷ levels, rounded down to the Market's size step, and at least the venue minimum. The run's Swing is levels × Clip, which can be a little under the Swing asked for. | | `test_the_step_sets_the_levels_and_the_clip`, `test_a_step_wider_than_half_the_band_is_refused`, `test_a_clip_under_the_minimum_is_refused`, `test_the_swing_is_whole_clips` |
+| MS4 | The run's Swing is below the Core's size, so the Massager's own trades never take the Position flat or across. | | `test_a_swing_as_large_as_the_core_is_refused` |
+| MS5 | Center = (low + high) ÷ 2. Level k is Center + k × Step for k from −levels to +levels, rounded to the nearest tick, so the outer levels sit on the Band's ends or inside them. The Step is fixed for the run. | | `test_levels_step_out_from_the_center`, `test_a_step_that_does_not_fit_the_band_stays_inside_it` |
 | MS6 | A Step must clear the round-trip maker fee at the Center plus one tick: Step ≥ Center × 2 × maker bps ÷ 10,000 + tick. | | `test_a_step_that_does_not_clear_fees_is_refused` |
 
 ## The lattice
@@ -58,6 +58,6 @@ LIT, a 1,000 long Position at 3.36. Band 3.20–3.50, Swing 300, Clip 100, mid 3
 
 | # | Rule | Value | Test |
 |---|---|---|---|
-| MS19 | **Order ticket → Algo → Massager.** The ticket's size is the Swing, and the size field says so; the sheet takes the Clip and the Band. It shows the Core, the Position range, the Center, the Step, the levels each side, what one round trip captures and the catch-up, worked out the way MS1–MS8 do. Start is blocked with MS1–MS5's own words, and on reduce-only. MS6 needs the account's fee and is the backend's to refuse. It is one action, not Buy or Sell. | | `web: massager.test.ts`, `web: algoPlugins.test.ts` |
-| MS20 | **The working row** shows the Position and its range (Core ∓ Swing), Captured, Core, Lean, Basis against the Core's entry, the Band, Swing, Clip and level. Opened, it lists the live Clips by level and the fills. **The chart** draws the Band's ends and its Center; the resting levels are drawn as orders. | | `web: massager.test.ts` |
+| MS19 | **Order ticket → Algo → Massager.** The ticket's size is the Swing, and the size field says so; the sheet takes the Step and the Band. The Step has presets of ½, 1 and 2 × ATR(14) on 1h candles; a preset fills the field once, and the Step stays as typed for the run. It shows the ATR, the Core, the Position range, the Center, the levels each side, the Clip, the run's Swing when it is under the one typed, what one round trip captures and the catch-up, worked out the way MS1–MS8 do. Start is blocked with MS1–MS5's own words, and on reduce-only. MS6 needs the account's fee and is the backend's to refuse. It is one action, not Buy or Sell. | ATR(14), 1h, ½ / 1 / 2 are code | `web: massager.test.ts`, `web: algoPlugins.test.ts` |
+| MS20 | **The working row** shows the Position and its range (Core ∓ Swing), Captured, Core, Lean, Basis against the Core's entry, the Band, Step, Swing, Clip and level. Opened, it lists the live Clips by level and the fills. **The chart** draws the Band's ends and its Center; the resting levels are drawn as orders. | | `web: massager.test.ts` |
 

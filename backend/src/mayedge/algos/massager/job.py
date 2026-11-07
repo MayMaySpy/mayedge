@@ -387,7 +387,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             min_qty=self._clip_min_qty(),
             maker_bps=self._maker_bps(),
         )
-        grid = check_start(params, position=position, mid=mid, venue=venue)
+        params, grid = check_start(params, position=position, mid=mid, venue=venue)
         check_notional(params.swing, mid, settings.max_order_notional)
         owed = catch_up(grid, params, mid)
         runtime = MassagerRuntime(
@@ -443,6 +443,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             "offset_bps": None,
             "price_floor": fmt_decimal(p.band_low) if p else None,
             "price_ceiling": fmt_decimal(p.band_high) if p else None,
+            "step": fmt_decimal(p.step) if p else None,
             "core": fmt_decimal(rt.core),
             "lean": fmt_decimal(rt.book.lean) or "0",
             "position": fmt_decimal(position),

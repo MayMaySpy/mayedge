@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 
 from mayedge.algos.massager.plan import (
@@ -22,18 +23,19 @@ from mayedge.algos.massager.plan import (
 
 D = Decimal
 LIT = Venue(tick=D("0.0001"), size_step=D("1"), min_qty=D("10"))
-PARAMS = MassagerParams(band_low=D("3.20"), band_high=D("3.50"), swing=D("300"), clip=D("100"))
+# The run check_start makes of ASK: 3 levels each side, Clip 100.
+PARAMS = MassagerParams(
+    band_low=D("3.20"), band_high=D("3.50"), swing=D("300"), step=D("0.05"), clip=D("100")
+)
+ASK = replace(PARAMS, clip=D("0"))
 
 
-def params(**kw: object) -> MassagerParams:
-    base: dict[str, object] = {
-        "band_low": PARAMS.band_low,
-        "band_high": PARAMS.band_high,
-        "swing": PARAMS.swing,
-        "clip": PARAMS.clip,
-    }
-    base.update(kw)
-    return MassagerParams(**base)  # type: ignore[arg-type]
+def ask(**kw: object) -> MassagerParams:
+    return replace(ASK, **kw)  # type: ignore[arg-type]
+
+
+def start(p: MassagerParams = ASK, position: str = "1000", mid: str = "3.42", venue: Venue = LIT):
+    return check_start(p, position=D(position), mid=D(mid), venue=venue)
 
 
 class StartTests(unittest.TestCase):
@@ -47,34 +49,51 @@ class StartTests(unittest.TestCase):
         venue: Venue = LIT,
     ) -> None:
         with self.assertRaises(MassagerRefused) as ctx:
-            check_start(p, position=D(position), mid=D(mid), venue=venue)
+            start(p, position, mid, venue)
         self.assertEqual(ctx.exception.rule, rule)
 
     def test_no_position_is_refused(self) -> None:
-        self._refused("MS1", PARAMS, position="0")
+        self._refused("MS1", ASK, position="0")
 
     def test_the_band_must_hold_the_price(self) -> None:
-        self._refused("MS2", params(band_low=D("3.50"), band_high=D("3.20")))
-        self._refused("MS2", PARAMS, mid="3.51")
-        self._refused("MS2", PARAMS, mid="3.19")
-        check_start(PARAMS, position=D("1000"), mid=D("3.50"), venue=LIT)
+        self._refused("MS2", ask(band_low=D("3.50"), band_high=D("3.20")))
+        self._refused("MS2", ASK, mid="3.51")
+        self._refused("MS2", ASK, mid="3.19")
+        start(mid="3.50")
 
-    def test_swing_must_be_whole_clips(self) -> None:
-        self._refused("MS3", params(swing=D("250")))
-        self._refused("MS3", params(clip=D("0")))
+    def test_the_step_sets_the_levels_and_the_clip(self) -> None:
+        run, grid = start()
+        self.assertEqual(run, PARAMS)
+        self.assertEqual(grid.levels, 3)
+        # A tighter Step: 7 levels (0.15 ÷ 0.02, rounded down), Clip 300 ÷ 7 down to 42.
+        run, grid = start(ask(step=D("0.02")))
+        self.assertEqual((grid.levels, run.clip, run.swing), (7, D("42"), D("294")))
+        self._refused("MS3", ask(step=D("0")))
+        self._refused("MS3", ask(swing=D("0")))
+
+    def test_a_step_wider_than_half_the_band_is_refused(self) -> None:
+        self._refused("MS3", ask(step=D("0.16")))
+        run, _ = start(ask(step=D("0.15")))
+        self.assertEqual((run.levels, run.clip), (1, D("300")))
 
     def test_a_clip_under_the_minimum_is_refused(self) -> None:
-        self._refused("MS3", params(swing=D("8"), clip=D("4")))
-        self._refused("MS3", params(swing=D("301.5"), clip=D("100.5")))
+        # 0.15 ÷ 0.005 is 30 levels, so a Swing of 270 is a Clip of 9, under 10.
+        self._refused("MS3", ask(step=D("0.005"), swing=D("270")))
+        run, _ = start(ask(step=D("0.005"), swing=D("300")))
+        self.assertEqual(run.clip, D("10"))
+
+    def test_the_swing_is_whole_clips(self) -> None:
+        run, _ = start(ask(swing=D("250")))
+        self.assertEqual((run.clip, run.swing), (D("83"), D("249")))
+        self.assertEqual(run.swing / run.clip, run.levels)
 
     def test_a_swing_as_large_as_the_core_is_refused(self) -> None:
-        self._refused("MS4", PARAMS, position="300")
-        self._refused("MS4", PARAMS, position="-300")
-        check_start(PARAMS, position=D("-301"), mid=D("3.42"), venue=LIT)
+        self._refused("MS4", ASK, position="300")
+        self._refused("MS4", ASK, position="-300")
+        start(position="-301")
 
-    def test_levels_split_the_band_evenly(self) -> None:
-        grid = check_start(PARAMS, position=D("1000"), mid=D("3.42"), venue=LIT)
-        self.assertEqual(grid.levels, 3)
+    def test_levels_step_out_from_the_center(self) -> None:
+        _, grid = start()
         self.assertEqual(grid.center, D("3.35"))
         self.assertEqual(grid.step, D("0.05"))
         self.assertEqual(
@@ -82,8 +101,16 @@ class StartTests(unittest.TestCase):
             [D(x) for x in ("3.20", "3.25", "3.30", "3.35", "3.40", "3.45", "3.50")],
         )
 
+    def test_a_step_that_does_not_fit_the_band_stays_inside_it(self) -> None:
+        _, grid = start(ask(step=D("0.04")))
+        self.assertEqual(
+            list(grid.prices),
+            [D(x) for x in ("3.23", "3.27", "3.31", "3.35", "3.39", "3.43", "3.47")],
+        )
+
     def test_levels_round_to_the_nearest_tick(self) -> None:
-        grid = lattice(params(band_low=D("3.20"), band_high=D("3.30"), swing=D("300")), D("0.01"))
+        p = replace(PARAMS, band_low=D("3.20"), band_high=D("3.30"), step=D("0.05") / 3)
+        grid = lattice(p, D("0.01"))
         # Step 0.01666…: 3.2333 rounds to 3.23, 3.2667 to 3.27.
         self.assertEqual(
             list(grid.prices),
@@ -94,15 +121,15 @@ class StartTests(unittest.TestCase):
         # Center 3.35 × 2 × 80 bps = 0.0536 + tick > Step 0.05.
         self._refused(
             "MS6",
-            PARAMS,
+            ASK,
             venue=Venue(tick=LIT.tick, size_step=D("1"), min_qty=D("10"), maker_bps=D("80")),
         )
-        check_start(
-            PARAMS,
-            position=D("1000"),
-            mid=D("3.42"),
-            venue=Venue(tick=LIT.tick, size_step=D("1"), min_qty=D("10"), maker_bps=D("2")),
-        )
+        start(venue=Venue(tick=LIT.tick, size_step=D("1"), min_qty=D("10"), maker_bps=D("2")))
+
+    def test_a_run_kept_before_the_step_was_typed_reads_back(self) -> None:
+        raw = PARAMS.to_json()
+        del raw["step"]
+        self.assertEqual(MassagerParams.from_json(raw), PARAMS)
 
 
 class LatticeTests(unittest.TestCase):
@@ -175,7 +202,7 @@ class LatticeTests(unittest.TestCase):
 
     def test_a_short_core_also_sells_above_the_center(self) -> None:
         """MS7: a short holder sells high too, so its Position grows as price rises."""
-        grid = check_start(PARAMS, position=D("-1000"), mid=D("3.42"), venue=LIT)
+        _, grid = start(position="-1000")
         c = catch_up(grid, PARAMS, D("3.42"))
         self.assertEqual((c.side, c.qty), ("sell", D("100")))
         book = Book()

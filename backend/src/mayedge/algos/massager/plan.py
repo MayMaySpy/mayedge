@@ -5,7 +5,7 @@ Sizes are signed: long above zero, short below. The Position is Core + Lean.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
@@ -38,27 +38,39 @@ class MassagerRefused(ValueError):
 
 @dataclass(frozen=True)
 class MassagerParams:
+    """What was asked: the Band, the Swing and the Step. ``clip`` is 0 until check_start
+    derives it (MS3); after that ``swing`` is the run's Swing, levels × Clip."""
+
     band_low: Decimal
     band_high: Decimal
     swing: Decimal
-    clip: Decimal
+    step: Decimal
+    clip: Decimal = ZERO
+
+    @property
+    def levels(self) -> int:
+        return int(self.swing / self.clip) if self.clip > 0 else 0
 
     def to_json(self) -> dict[str, Any]:
         return {
             "band_low": fmt_decimal(self.band_low) or "0",
             "band_high": fmt_decimal(self.band_high) or "0",
             "swing": fmt_decimal(self.swing) or "0",
+            "step": fmt_decimal(self.step) or "0",
             "clip": fmt_decimal(self.clip) or "0",
         }
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> MassagerParams:
-        return cls(
-            band_low=Decimal(str(raw.get("band_low") or "0")),
-            band_high=Decimal(str(raw.get("band_high") or "0")),
-            swing=Decimal(str(raw.get("swing") or "0")),
-            clip=Decimal(str(raw.get("clip") or "0")),
-        )
+        low = Decimal(str(raw.get("band_low") or "0"))
+        high = Decimal(str(raw.get("band_high") or "0"))
+        swing = Decimal(str(raw.get("swing") or "0"))
+        clip = Decimal(str(raw.get("clip") or "0"))
+        step = Decimal(str(raw.get("step") or "0"))
+        if step <= 0 and clip > 0 and swing >= clip:
+            # A run kept before the Step was typed: its Step was the Band cut evenly.
+            step = (high - low) / (2 * int(swing / clip))
+        return cls(band_low=low, band_high=high, swing=swing, step=step, clip=clip)
 
 
 @dataclass(frozen=True)
@@ -105,15 +117,11 @@ def _sign(x: Decimal) -> int:
     return (x > 0) - (x < 0)
 
 
-def _on_step(qty: Decimal, step: Decimal) -> bool:
-    return step <= 0 or (qty / step) == (qty / step).to_integral_value()
-
-
 def lattice(params: MassagerParams, tick: Decimal) -> Lattice:
-    """MS5. Assumes the params passed check_start (or MS3 at least)."""
-    levels = int(params.swing / params.clip)
+    """MS5. Assumes the params passed check_start, so the Clip is set."""
+    levels = params.levels
     center = (params.band_low + params.band_high) / 2
-    step = (params.band_high - params.band_low) / (2 * levels)
+    step = params.step
     prices = tuple(
         ((center + k * step) / tick).to_integral_value(rounding=ROUND_HALF_UP) * tick
         for k in range(-levels, levels + 1)
@@ -123,8 +131,9 @@ def lattice(params: MassagerParams, tick: Decimal) -> Lattice:
 
 def check_start(
     params: MassagerParams, *, position: Decimal, mid: Decimal, venue: Venue
-) -> Lattice:
-    """MS1–MS6. Returns the lattice it would run, or raises MassagerRefused."""
+) -> tuple[MassagerParams, Lattice]:
+    """MS1–MS6. Returns the run's params (Clip derived, Swing whole Clips) and its lattice,
+    or raises MassagerRefused."""
     if position == 0:
         raise MassagerRefused("MS1", "A Massager needs an open Position")
     low, high = params.band_low, params.band_high
@@ -132,24 +141,26 @@ def check_start(
         raise MassagerRefused("MS2", "The Band needs a low below its high, both above 0")
     if not low <= mid <= high:
         raise MassagerRefused("MS2", "Price is outside the Band")
-    if params.swing <= 0 or params.clip <= 0:
-        raise MassagerRefused("MS3", "Set the Swing and the Clip")
-    whole = params.swing / params.clip
-    if whole != whole.to_integral_value():
-        raise MassagerRefused("MS3", "The Swing must be a whole number of Clips")
-    if params.clip < venue.min_qty:
-        raise MassagerRefused("MS3", "The Clip is under the venue minimum")
-    if not _on_step(params.clip, venue.size_step):
-        raise MassagerRefused("MS3", "The Clip is not on the Market's size step")
-    if params.swing >= abs(position):
+    if params.swing <= 0 or params.step <= 0:
+        raise MassagerRefused("MS3", "Set the Swing and the Step")
+    levels = int(((high - low) / 2 / params.step).to_integral_value(rounding=ROUND_FLOOR))
+    if levels < 1:
+        raise MassagerRefused("MS3", "The Step is wider than half the Band")
+    clip = params.swing / levels
+    if venue.size_step > 0:
+        clip = (clip / venue.size_step).to_integral_value(rounding=ROUND_FLOOR) * venue.size_step
+    if clip <= 0 or clip < venue.min_qty:
+        raise MassagerRefused(
+            "MS3", "The Clip comes out under the venue minimum: widen the Step or raise the Swing"
+        )
+    run = replace(params, swing=clip * levels, clip=clip)
+    if run.swing >= abs(position):
         raise MassagerRefused("MS4", "The Swing must be smaller than the Core")
-    grid = lattice(params, venue.tick)
+    grid = lattice(run, venue.tick)
     need = grid.center * 2 * venue.maker_bps / BPS + venue.tick
     if grid.step < need:
-        raise MassagerRefused(
-            "MS6", "A Step does not clear the fees: widen the Band or use fewer Clips"
-        )
-    return grid
+        raise MassagerRefused("MS6", "A Step does not clear the fees: widen the Step")
+    return run, grid
 
 
 def catch_up(grid: Lattice, params: MassagerParams, mid: Decimal) -> CatchUp:

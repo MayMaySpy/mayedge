@@ -208,7 +208,7 @@ Chases inside a price band and takes profit on each lot it bought. Its inventory
 
 ### Massager
 
-Works a Position you already hold. The ticket's size is the **Swing**: the Band is cut into levels, it sells a Clip at each level above the Center and buys it back a level lower, so the Position moves between Core − Swing and Core + Swing and comes back to its **Core**. **Basis** is the Core's entry less what that captured. Outside the Band it holds what it has. A Ladder or a hand add moves the Core; a hand close stops it. It never touches your Stops, and it does not run beside a Planner, Trail or Grid. Rules: [docs/massager-rules.md](docs/massager-rules.md).
+Works a Position you already hold. The ticket's size is the **Swing**, and you set the **Step**, how far apart its quotes are, by hand or as ½, 1 or 2 × the 1h ATR. Levels go out a Step at a time from the Band's Center, the Swing is split into a Clip per level, and it sells a Clip at each level above the Center and buys it back a level lower, so the Position moves between Core − Swing and Core + Swing and comes back to its **Core**. **Basis** is the Core's entry less what that captured. Outside the Band it holds what it has. A Ladder or a hand add moves the Core; a hand close stops it. It never touches your Stops, and it does not run beside a Planner, Trail or Grid. Rules: [docs/massager-rules.md](docs/massager-rules.md).
 
 ### Ladder
 

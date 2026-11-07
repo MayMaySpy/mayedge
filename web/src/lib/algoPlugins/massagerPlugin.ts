@@ -11,7 +11,7 @@ export const MASSAGER_COI_BASE = 13_000_000_000;
 export const MASSAGER_COI_END = 14_000_000_000;
 
 function massagerDefaultState(): MassagerParamsState {
-  return { clip: "", chaseFloor: "", chaseCeiling: "" };
+  return { step: "", chaseFloor: "", chaseCeiling: "" };
 }
 
 export const massagerPlugin: AlgoPlugin<MassagerParamsState> = {
@@ -52,7 +52,7 @@ export const massagerPlugin: AlgoPlugin<MassagerParamsState> = {
       band_low: canonicalDecimal(s.chaseFloor) ?? s.chaseFloor,
       band_high: canonicalDecimal(s.chaseCeiling) ?? s.chaseCeiling,
       swing: canonicalDecimal(swing) ?? swing,
-      clip: canonicalDecimal(s.clip) ?? s.clip,
+      step: canonicalDecimal(s.step) ?? s.step,
     });
     return startNotice(book, ctx, { kind: "massager", label: "Massager", size: swing });
   },

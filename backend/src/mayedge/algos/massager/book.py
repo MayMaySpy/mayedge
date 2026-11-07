@@ -58,7 +58,7 @@ class MassagerBook(ClipBook[MassagerRunner]):
             band_low=parse_decimal(str(body["band_low"])),
             band_high=parse_decimal(str(body["band_high"])),
             swing=parse_decimal(str(body["swing"])),
-            clip=parse_decimal(str(body["clip"])),
+            step=parse_decimal(str(body["step"])),
         )
         await self.start(market_index=int(body["market_index"]), params=params)
 

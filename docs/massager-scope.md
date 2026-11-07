@@ -72,7 +72,7 @@ Only the nearest 2 levels each side rest at once, so the lattice does not spend 
 
 The Center, where Lean is 0, is always the Band's middle.
 
-Step is derived: Band width ÷ (2 × Swing ÷ Clip). Starting is refused if a Step does not clear the round-trip maker fees (0 on Standard, but Premium is not) plus one tick.
+Step is derived: Band width ÷ (2 × Swing ÷ Clip). (Changed after the build: the Step is typed and the Clip is derived from it, see [massager-rules.md](massager-rules.md) MS3.) Starting is refused if a Step does not clear the round-trip maker fees (0 on Standard, but Premium is not) plus one tick.
 
 ### 2.4 At start
 

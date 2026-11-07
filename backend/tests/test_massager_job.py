@@ -31,7 +31,7 @@ from venue_harness import FakeClock  # noqa: E402
 
 D = Decimal
 # ETH on the fakes: tick 0.01, size step 0.1. Band 90–110, 3 levels each side, Step 3.333….
-PARAMS = MassagerParams(band_low=D("90"), band_high=D("110"), swing=D("3"), clip=D("1"))
+PARAMS = MassagerParams(band_low=D("90"), band_high=D("110"), swing=D("3"), step=D("10") / 3)
 
 
 class Rig:
@@ -119,6 +119,7 @@ class StartTests(MassagerJobCase):
         snap = rig.job.snapshot()
         self.assertEqual((snap["core"], snap["lean"], snap["level"]), ("10", "0", 0))
         self.assertEqual(snap["status"], "running")
+        self.assertEqual(snap["display_qty"], "1")
 
     async def test_no_position_is_refused(self) -> None:
         rig = Rig(position="0")
@@ -300,6 +301,7 @@ class RestartTests(MassagerJobCase):
             again = MassagerRunner(rig.book)
             again.hydrate_from_row(row)
         self.assertEqual(again.state.runtime.to_json(), rig.job.state.runtime.to_json())
-        self.assertEqual(again.state.params, PARAMS)
+        self.assertEqual(again.state.params, rig.job.state.params)
+        self.assertEqual(again.state.params.clip, D("1"))  # type: ignore[union-attr]
         self.assertEqual(again.state.status, ChaseStatus.RUNNING)
         self.assertEqual(again.snapshot()["captured_pnl"], rig.job.snapshot()["captured_pnl"])

@@ -334,7 +334,7 @@ describe("massager plugin", () => {
     minBase: 10,
     signedPos: 1000,
   };
-  const state = { clip: "100", chaseFloor: "3.20", chaseCeiling: "3.50" };
+  const state = { step: "0.05", chaseFloor: "3.20", chaseCeiling: "3.50" };
 
   it("starts from a Position, never reduce-only, as one action", () => {
     expect(massagerPlugin.blockReason(state, ctx)).toBeNull();
@@ -344,8 +344,8 @@ describe("massager plugin", () => {
     expect(massagerPlugin.blockReason(state, { ...ctx, reduceOnly: true })).toBe(
       "A Massager is never reduce-only"
     );
-    expect(massagerPlugin.blockReason(state, { ...ctx, sizeNum: 250 })).toBe(
-      "The Swing must be a whole number of Clips"
+    expect(massagerPlugin.blockReason({ ...state, step: "0.2" }, ctx)).toBe(
+      "The Step is wider than half the Band"
     );
     expect(massagerPlugin.singleAction).toBe(true);
     expect(massagerPlugin.cta("buy")).toBe("Start Massager");

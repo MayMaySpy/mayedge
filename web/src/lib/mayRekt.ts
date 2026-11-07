@@ -188,7 +188,7 @@ function trueRange(high: readonly number[], low: readonly number[], close: reado
   });
 }
 
-function atr(high: readonly number[], low: readonly number[], close: readonly number[], length: number): number[] {
+export function atr(high: readonly number[], low: readonly number[], close: readonly number[], length: number): number[] {
   return rma(trueRange(high, low, close), length);
 }
 
