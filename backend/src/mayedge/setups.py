@@ -1,4 +1,4 @@
-"""Setups: positioning and range facts on closed hours and days (docs/setup-rules.md, ADR 0025).
+"""Setups: positioning and range facts on closed hours and days (docs/setup-rules.md, ADR 0026).
 
 Pure: `find_setups` reads what it is given and returns rows. Nothing here reads the venue,
 the database, or sends anything.

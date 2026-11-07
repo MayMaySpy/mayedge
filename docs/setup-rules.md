@@ -1,6 +1,6 @@
 # Setup rules
 
-A **Setup** is a fact about a market's positioning or range, read on closed hours and closed days, that may be worth a swing trade. The **Setups** board on Scan lists them. Nothing on it toasts or pushes ([ADR 0025](adr/0025-a-setup-is-listed-not-raised.md)). Like an alert row, a Setup row states what the numbers show and does not name what it means ([ADR 0013](adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)).
+A **Setup** is a fact about a market's positioning or range, read on closed hours and closed days, that may be worth a swing trade. The **Setups** board on Scan lists them. Nothing on it toasts or pushes ([ADR 0026](adr/0026-a-setup-is-listed-not-raised.md)). Like an alert row, a Setup row states what the numbers show and does not name what it means ([ADR 0013](adr/0013-an-alert-is-a-fact-and-a-toast-is-a-coincidence.md)).
 
 Every Setup is written to the desk database when it is first listed, with its facts and the price then, so it can be scored later at swing horizons.
 
