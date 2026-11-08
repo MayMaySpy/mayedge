@@ -34,6 +34,7 @@ import { createTicketAmend, type DraftMove, type TicketAmend } from "@/lib/ticke
 import { createTicketPlace, type TicketPlace } from "@/lib/ticketPlace";
 import { candleSource, loadPins, loadTimeframe, parseTimeframe, supportsOpenInterest } from "@/lib/timeframe";
 import { loadWatchWindow, type WatchWindow } from "@/lib/watchWindow";
+import { chartDrawn, useAfterChart } from "@/lib/startup";
 
 import type { Ohlc } from "./chartFormat";
 import { loadBbo, loadFills, loadFund, loadMayRekt, loadMode, loadOi, loadScanTab, loadVol, type ChartMode } from "./chartPrefs";
@@ -224,9 +225,14 @@ export const ChartWidget = memo(function ChartWidget({
       ? fillMarkList.filter((mark) => mark.time === hover.time)
       : EMPTY_FILLS;
 
+  const deskLoaded = useAfterChart();
+  useEffect(() => {
+    if (!isPrice) chartDrawn();
+  }, [isPrice]);
+
   useEffect(() => {
     const index = chartMarket?.market_index;
-    if (!isPrice || index == null) return;
+    if (!isPrice || index == null || !deskLoaded) return;
     let cancelled = false;
     void api
       .accountTrades({ market_index: index, limit: 100 })
@@ -239,7 +245,7 @@ export const ChartWidget = memo(function ChartWidget({
     return () => {
       cancelled = true;
     };
-  }, [isPrice, chartMarket?.market_index]);
+  }, [isPrice, chartMarket?.market_index, deskLoaded]);
 
   const oiLine = useMemo(() => {
     if (!supportsOpenInterest(bar) || !oiOn || !isPrice) return EMPTY_OI_LINE;

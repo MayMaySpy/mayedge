@@ -52,6 +52,7 @@ import { averageReading, headlineAverage } from "@/lib/funding";
 import { formatClock } from "@/lib/alertFormat";
 import { utcClock } from "@/lib/utcTime";
 import { IDEAS_PATH, JOURNAL_PATH, PORTFOLIO_PATH } from "@/lib/deskRoute";
+import { useAfterChart } from "@/lib/startup";
 
 /** Prints settle hourly; a slow refresh keeps the average current. */
 const FUNDING_AVERAGE_REFRESH_MS = 10 * 60_000;
@@ -196,8 +197,9 @@ function FundingAverageAside({ avg }: { avg: FundingAverage | null }) {
 
 function useFundingAverage(symbol: string, perp: boolean): FundingAverage | null {
   const [avg, setAvg] = useState<{ symbol: string; value: FundingAverage } | null>(null);
+  const deskLoaded = useAfterChart();
   useEffect(() => {
-    if (!symbol || !perp) return;
+    if (!symbol || !perp || !deskLoaded) return;
     let cancelled = false;
     const load = () => {
       api
@@ -213,7 +215,7 @@ function useFundingAverage(symbol: string, perp: boolean): FundingAverage | null
       cancelled = true;
       clearInterval(id);
     };
-  }, [symbol, perp]);
+  }, [symbol, perp, deskLoaded]);
   return perp && avg?.symbol === symbol ? avg.value : null;
 }
 

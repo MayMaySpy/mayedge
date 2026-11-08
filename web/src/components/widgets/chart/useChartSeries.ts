@@ -15,6 +15,7 @@ import type { ChartOverlay } from "@/lib/chartTradingLines";
 import { FillMarksPrimitive, type FillSpot } from "@/lib/fillMarkPrimitive";
 import { formatApr, formatUsdCompact } from "@/lib/utils";
 import { rollLiveCandles } from "@/lib/liveData";
+import { chartDrawn } from "@/lib/startup";
 import { theme } from "@/lib/theme";
 import type { TopOfBookPrimitive } from "@/lib/chartTopOfBook";
 
@@ -261,6 +262,7 @@ export function useChartSeries(input: SeriesInput) {
 
     if (shouldReplaceChartData(prev, nextMeta, primedRef.current)) {
       series.setData(bars);
+      chartDrawn();
       vol?.setData(volOn ? volume : []);
       chart?.timeScale().applyOptions({
         secondsVisible: showsSeconds(bar),

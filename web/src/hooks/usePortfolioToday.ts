@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type PortfolioNow } from "@/lib/api";
 import { utcMidnightMs } from "@/lib/portfolioDay";
+import { useAfterChart } from "@/lib/startup";
 
 const POLL_MS = 60_000;
 /** Older than this, the header shows nothing rather than a stale figure. */
@@ -11,8 +12,10 @@ export function usePortfolioToday(enabled: boolean): PortfolioNow | null {
   const [last, setLast] = useState<{ at: number; data: PortfolioNow } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  const deskLoaded = useAfterChart();
+
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !deskLoaded) return;
     let live = true;
     const load = () => {
       if (document.visibilityState === "hidden") return;
@@ -36,7 +39,7 @@ export function usePortfolioToday(enabled: boolean): PortfolioNow | null {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", load);
     };
-  }, [enabled]);
+  }, [enabled, deskLoaded]);
 
   if (!enabled || last == null || now - last.at > STALE_MS) return null;
   return last.data;

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import type { Idea } from "@/lib/api.gen";
+import { afterChart } from "@/lib/startup";
 
 const IDEAS_MS = 60_000;
 
@@ -24,7 +25,7 @@ async function load() {
 
 function ensure() {
   if (timer != null) return;
-  void load();
+  afterChart(() => void load());
   timer = window.setInterval(() => {
     if (document.visibilityState === "visible") void load();
   }, IDEAS_MS);

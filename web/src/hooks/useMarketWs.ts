@@ -38,6 +38,7 @@ import {
   type MarketQuote,
   type Trade,
 } from "@/lib/liveData";
+import { afterChart } from "@/lib/startup";
 
 export type { OrderBookLevel, Trade } from "@/lib/liveData";
 
@@ -165,19 +166,23 @@ export function useMarketWs(symbol: string) {
         setState((s) => ({ ...s, connected: true }));
         armFillToasts();
         subscribe(ws);
-        api.account().then((a) => setAccount(a)).catch(() => {});
-        api
-          .liquidations({ limit: 200 })
-          .then(seedLiquidations)
-          .catch(() => {});
-        api
-          .alerts({ limit: 200 })
-          .then(seedAlerts)
-          .catch(() => {});
-        api.scanActivity().then(setScanActivity).catch(() => {});
-        api.toneBoard().then(setToneBoard).catch(() => {});
-        api.fundingExtremes().then(setFundingExtremes).catch(() => {});
-        api.boardLine().then(setBoardLine).catch(() => {});
+        // Hydration waits for the chart's first candles; the stream itself starts now.
+        afterChart(() => {
+          if (cancelled || wsRef.current !== ws) return;
+          api.account().then((a) => setAccount(a)).catch(() => {});
+          api
+            .liquidations({ limit: 200 })
+            .then(seedLiquidations)
+            .catch(() => {});
+          api
+            .alerts({ limit: 200 })
+            .then(seedAlerts)
+            .catch(() => {});
+          api.scanActivity().then(setScanActivity).catch(() => {});
+          api.toneBoard().then(setToneBoard).catch(() => {});
+          api.fundingExtremes().then(setFundingExtremes).catch(() => {});
+          api.boardLine().then(setBoardLine).catch(() => {});
+        });
       };
 
       ws.onmessage = (ev) => {
@@ -396,9 +401,11 @@ export function useMarketWs(symbol: string) {
       if (idx != null) payload.market_index = idx;
       wsRef.current.send(JSON.stringify(payload));
     }
-    api.account().then((a) => setAccount(a)).catch(() => {});
-    api.algoStatus().then((b) => setAlgo(b)).catch(() => {});
     api.activateMarket(symbol).catch(() => {});
+    return afterChart(() => {
+      api.account().then((a) => setAccount(a)).catch(() => {});
+      api.algoStatus().then((b) => setAlgo(b)).catch(() => {});
+    });
   }, [symbol]);
 
   return state;

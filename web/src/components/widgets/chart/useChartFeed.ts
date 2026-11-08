@@ -9,6 +9,7 @@ import { seedCandles1s, setMinuteCandles } from "@/lib/liveData";
 import type { OiLinePoint } from "@/lib/openInterest";
 import { createTicketAmend, type TicketAmend } from "@/lib/ticketAmend";
 import { createTicketPlace, type TicketPlace } from "@/lib/ticketPlace";
+import { afterChart, chartDrawn, loadCandles } from "@/lib/startup";
 import { candleSource } from "@/lib/timeframe";
 
 import type { QtyEditState } from "./useChartTicketInteraction";
@@ -165,15 +166,16 @@ export function useChartFeed(input: Feed) {
     const key = `${symbol}:${bar.label}`;
     const source = candleSource(bar);
     let cancelled = false;
-    api
-      .candles(symbol, source, 500)
+    loadCandles(symbol, source, 500)
       .then((data) => {
         if (cancelled) return;
         if (source === "1m") setMinuteCandles(data);
         const candles = source === bar.label ? data : aggregateCandles(data, bar.seconds);
         setHist({ key, candles });
+        if (!candles.length) chartDrawn();
       })
       .catch(() => {
+        chartDrawn();
         if (!cancelled) setHist({ key, candles: [] });
       });
     return () => {
@@ -184,26 +186,30 @@ export function useChartFeed(input: Feed) {
   useEffect(() => {
     if (!isPrice || fromSeconds || candleSource(bar) === "1m") return;
     let cancelled = false;
-    api
-      .candles(symbol, "1m", 500)
-      .then((data) => {
-        if (!cancelled) setMinuteCandles(data);
-      })
-      .catch(() => {});
+    // The live minute bars only back the mark; the drawn timeframe goes first.
+    const stop = afterChart(() => {
+      api
+        .candles(symbol, "1m", 500)
+        .then((data) => {
+          if (!cancelled) setMinuteCandles(data);
+        })
+        .catch(() => {});
+    });
     return () => {
       cancelled = true;
+      stop();
     };
   }, [symbol, bar, fromSeconds, isPrice]);
 
   useEffect(() => {
     if (!isPrice || !fromSeconds) return;
     let cancelled = false;
-    api
-      .candles(symbol, "1s", 3600)
+    loadCandles(symbol, "1s", 3600)
       .then((data) => {
         if (!cancelled && data.length) seedCandles1s(data);
+        if (!data.length) chartDrawn();
       })
-      .catch(() => {});
+      .catch(() => chartDrawn());
     return () => {
       cancelled = true;
     };

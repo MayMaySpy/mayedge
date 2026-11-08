@@ -28,6 +28,7 @@ import { useBoardLine, useFundingExtremes, useLiveAlerts } from "@/lib/liveData"
 import { formatFundingPct } from "@/lib/marketPicker";
 import { pairLabel } from "@/lib/venuePair";
 import { cn } from "@/lib/utils";
+import { useAfterChart } from "@/lib/startup";
 
 const MIN_SEV_KEY = "mayedge-alerts-min-sev";
 const FAV_ONLY_KEY = "mayedge-alerts-fav-only";
@@ -249,7 +250,9 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
   );
   const rows = useMemo(() => shown.slice(0, MAX_ROWS), [shown]);
 
+  const deskLoaded = useAfterChart();
   useEffect(() => {
+    if (!deskLoaded) return;
     let cancel = false;
     const load = () => {
       api
@@ -265,9 +268,10 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
       cancel = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [deskLoaded]);
 
   useEffect(() => {
+    if (!deskLoaded) return;
     let cancel = false;
     api
       .pushStatus()
@@ -278,7 +282,7 @@ export const AlertsPanel = memo(function AlertsPanel({ onOpenPair, onClose }: Al
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [deskLoaded]);
 
   const sendPushTest = async () => {
     setPushBusy(true);

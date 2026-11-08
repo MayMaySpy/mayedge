@@ -69,6 +69,7 @@ import {
 import { loadSlipPct } from "@/components/widgets/orderTicket/math";
 import { setMarketDecimals } from "@/lib/marketFormat";
 import { formatSize } from "@/lib/utils";
+import { afterChart, chartDrawn } from "@/lib/startup";
 
 const PlannerDialog = lazy(() =>
   import("@/components/widgets/planner/PlannerDialog").then((m) => ({ default: m.PlannerDialog })),
@@ -495,9 +496,17 @@ export function Dashboard() {
     return () => ro.disconnect();
   }, [mounted, containerRef]);
 
+  useEffect(
+    () => afterChart(() => {
+      api.health().then((h) => setTradingEnabled(h.trading_enabled)).catch(() => {});
+    }),
+    [],
+  );
+
+  // No chart on the desk: nothing to wait for.
   useEffect(() => {
-    api.health().then((h) => setTradingEnabled(h.trading_enabled)).catch(() => {});
-  }, []);
+    if (visible.chart === false) chartDrawn();
+  }, [visible.chart]);
 
   useEffect(() => {
     const load = () => api.markets().then(setRestMarkets).catch(() => {});
