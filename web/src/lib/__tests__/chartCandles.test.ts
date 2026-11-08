@@ -105,3 +105,49 @@ describe("formatBarVolume", () => {
     expect(formatBarVolume(0)).toBe("—");
   });
 });
+
+describe("history and live bars in either order", () => {
+  // The chart's paint step (useChartSeries): replace the series, or update its last bars.
+  function painter() {
+    let shown: Candle[] = [];
+    let meta: { first: number; time: number; len: number } | null = null;
+    return {
+      paint(display: Candle[]) {
+        if (!display.length) return;
+        const next = { first: display[0].time, time: display[display.length - 1].time, len: display.length };
+        if (shouldReplaceChartData(meta, next, meta != null)) {
+          shown = display.slice();
+        } else {
+          if (meta && next.len === meta.len + 1) shown = [...shown.slice(0, -1), display[display.length - 2]];
+          const last = display[display.length - 1];
+          shown = shown.length && shown[shown.length - 1].time === last.time ? [...shown.slice(0, -1), last] : [...shown, last];
+        }
+        meta = next;
+      },
+      get shown() {
+        return shown;
+      },
+    };
+  }
+
+  const H4 = 14_400;
+  const hist = Array.from({ length: 6 }, (_, i) => c({ time: i * H4 }));
+  const live = [c({ time: 5 * H4 + 60, close: 12 }), c({ time: 6 * H4, open: 12, close: 12.5 })];
+  const full = foldMinutes(hist, live, H4);
+
+  it("draws the whole history when it lands before the live bars", () => {
+    const p = painter();
+    p.paint(foldMinutes(hist, [], H4));
+    p.paint(foldMinutes(hist, live, H4));
+    expect(p.shown).toEqual(full);
+    expect(p.shown).toHaveLength(7);
+  });
+
+  it("draws the whole history when the live bars land first", () => {
+    const p = painter();
+    p.paint(foldMinutes([], live.slice(0, 1), H4));
+    p.paint(foldMinutes([], live, H4));
+    p.paint(foldMinutes(hist, live, H4));
+    expect(p.shown).toEqual(full);
+  });
+});

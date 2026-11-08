@@ -5,7 +5,7 @@
  */
 import { useSyncExternalStore } from "react";
 
-import { api, type Candle } from "@/lib/api";
+import { api, ApiError, type Candle } from "@/lib/api";
 import { loadMode } from "@/components/widgets/chart/chartPrefs";
 import { isIdeasPath, isJournalPath, isPortfolioPath, isWatchPath, readSymbol } from "@/lib/deskRoute";
 import { candleSource, loadTimeframe, parseTimeframe } from "@/lib/timeframe";
@@ -111,6 +111,51 @@ export function loadCandles(symbol: string, resolution: string, count: number): 
   );
   recent.set(key, entry);
   return entry.req;
+}
+
+/** Waits between history attempts; the last repeats until the history arrives. */
+export const HISTORY_RETRY_MS = [1000, 2000, 4000, 8000, 15000] as const;
+
+/** The desk's read budget refusal says when to come back: "… retry shortly (3s)". */
+export function retryHintMs(err: unknown): number {
+  if (!(err instanceof ApiError) || err.status !== 429) return 0;
+  const m = /\((\d+(?:\.\d+)?)s\)/.exec(err.message);
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) : 0;
+}
+
+/**
+ * Ask until it answers. A refused or failed history ask is not "no history": the desk's
+ * read budget turns chart reads away with a 429 when it is spent, and a chart that took
+ * that as empty showed only the live bar it built from the trade feed.
+ * The returned function stops it.
+ */
+export function untilLoaded<T>(
+  load: () => Promise<T>,
+  onLoad: (value: T) => void,
+  onFail?: (err: unknown) => void,
+): () => void {
+  let stopped = false;
+  let tries = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const attempt = () => {
+    load().then(
+      (value) => {
+        if (!stopped) onLoad(value);
+      },
+      (err: unknown) => {
+        if (stopped) return;
+        onFail?.(err);
+        const backoff = HISTORY_RETRY_MS[Math.min(tries, HISTORY_RETRY_MS.length - 1)];
+        tries += 1;
+        timer = setTimeout(attempt, Math.max(backoff, retryHintMs(err)));
+      },
+    );
+  };
+  attempt();
+  return () => {
+    stopped = true;
+    if (timer != null) clearTimeout(timer);
+  };
 }
 
 /** The chart's first request, as the chart will make it, sent before React renders. */

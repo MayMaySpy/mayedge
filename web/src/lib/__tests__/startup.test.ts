@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deskFirstCandles } from "@/lib/startup";
+import { ApiError } from "@/lib/api";
+import { deskFirstCandles, HISTORY_RETRY_MS, retryHintMs, untilLoaded } from "@/lib/startup";
 
 describe("deskFirstCandles", () => {
   it("asks for the selected Market's drawn timeframe on the desk", () => {
@@ -78,5 +79,44 @@ describe("desk load gate", () => {
     await startup.loadCandles("ETH", "1m", 500);
     await startup.loadCandles("eth", "1m", 500);
     expect(candles).toHaveBeenCalledOnce();
+  });
+});
+
+describe("untilLoaded", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const refused = () => new ApiError(429, "Lighter rate limit — retry shortly (3s)");
+
+  it("reads the desk's retry hint off a refused read", () => {
+    expect(retryHintMs(refused())).toBe(3000);
+    expect(retryHintMs(new ApiError(500, "boom"))).toBe(0);
+    expect(retryHintMs(new Error("(9s)"))).toBe(0);
+  });
+
+  it("keeps asking after a refusal until the history arrives", async () => {
+    const rows = [{ time: 1, open: 1, high: 1, low: 1, close: 1, volume: 0 }];
+    const load = vi.fn().mockRejectedValueOnce(refused()).mockRejectedValueOnce(new Error("down")).mockResolvedValue(rows);
+    const onLoad = vi.fn();
+    const onFail = vi.fn();
+    untilLoaded(load, onLoad, onFail);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onFail).toHaveBeenCalledOnce();
+    expect(onLoad).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(load).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(load).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(HISTORY_RETRY_MS[1]);
+    expect(onLoad).toHaveBeenCalledWith(rows);
+  });
+
+  it("stops asking once stopped", async () => {
+    const load = vi.fn().mockRejectedValue(new Error("down"));
+    const stop = untilLoaded(load, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(load).toHaveBeenCalledOnce();
   });
 });
