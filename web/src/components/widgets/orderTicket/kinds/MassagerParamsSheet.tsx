@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { decimalInput, parseDecimal } from "@/lib/numbers";
-import { useLiveAccount } from "@/lib/liveData";
+import { useLiveAccount, useLiveAlgos } from "@/lib/liveData";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import {
   atrMultLabel,
@@ -11,25 +11,34 @@ import {
   chopReading,
   closedAtr,
   MASSAGER_ATR_MULTIPLES,
-  MASSAGER_ATR_TIMEFRAMES,
   massagerInput,
   massagerPreview,
   massagerRefusal,
+  runningMassager,
   type MassagerAtrTf,
   type MassagerCarry,
   type MassagerChop,
+  type MassagerChopLabel,
   type MassagerParamsState,
 } from "@/lib/massager";
 import { marketPrice } from "@/lib/marketFormat";
-import { formatPrice, formatSigned, formatSize, formatUsd } from "@/lib/utils";
-import { TicketChips, TicketField, ToggleRow } from "../ui";
-import { BandFields } from "./ChaseFields";
+import { cn, formatPrice, formatSize, formatUsd } from "@/lib/utils";
+import { chaseBandFromPct } from "../math";
+import { TicketChips, TicketField } from "../ui";
+
+const TF_NEXT: Record<MassagerAtrTf, MassagerAtrTf> = { "15m": "1h", "1h": "4h", "4h": "15m" };
+const CHOP_TONE: Record<MassagerChopLabel, string> = {
+  ranging: "text-bid",
+  mixed: "text-muted-foreground",
+  trending: "text-ask",
+};
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <span>
-      {label} <span className="text-text">{children}</span>
-    </span>
+    <div className="flex min-w-0 justify-between gap-2">
+      <span className="shrink-0">{label}</span>
+      <span className="truncate text-right text-text">{children}</span>
+    </div>
   );
 }
 
@@ -42,6 +51,9 @@ export function MassagerParamsSheet({
 }: AlgoParamsSheetProps<MassagerParamsState>) {
   const set = (patch: Partial<MassagerParamsState>) => onStateChange({ ...state, ...patch });
   const account = useLiveAccount();
+  const algos = useLiveAlgos();
+  const sym = market.symbol;
+  const running = runningMassager(algos.working, sym);
   const position =
     parseFloat(
       account?.positions.find((p) => p.market_index === market.market_index)?.size ?? "0"
@@ -56,78 +68,117 @@ export function MassagerParamsSheet({
     makerBps,
   });
   const preview = massagerPreview(input);
-  const refusal = position === 0 ? massagerRefusal(input) : null;
-  const sym = market.symbol;
+  const refusal = massagerRefusal(input);
   const atr = useClosedAtr(sym, state.atrTf);
   const priceDecimals = market.price_decimals ?? 4;
-  const atrMode = state.stepMode === "atr";
+  const follow = state.stepMode === "atr";
   const k = parseDecimal(state.atrMult) ?? 0;
-  // MS19: an ATR Step is k × the ATR now; keep it in the state so Start can be checked.
-  const atrStep = atrMode && atr != null && k > 0 ? formatPrice(atr * k, priceDecimals) : "";
+  // MS19: a following Step is k × the ATR now; keep it in the state so Start can be checked.
+  const atrStep = follow && atr != null && k > 0 ? formatPrice(atr * k, priceDecimals) : "";
   useEffect(() => {
-    if (atrMode && state.atrStep !== atrStep) onStateChange({ ...state, atrStep });
-  }, [atrMode, atrStep, state, onStateChange]);
+    if (follow && state.atrStep !== atrStep) onStateChange({ ...state, atrStep });
+  }, [follow, atrStep, state, onStateChange]);
   // MS24: the Chop reading, kept in the state so Start sends it.
   const chop = useChop(sym, bookMid, input.tick);
   useEffect(() => {
     if (!sameChop(state.chop, chop)) onStateChange({ ...state, chop });
   }, [chop, state, onStateChange]);
-  const carry = useCarry(market.market_index, position);
-  const fillBand = () => {
-    if (chop?.bandLow == null || chop.bandHigh == null) return;
+  const carry = useCarry(market.market_index, running ? 0 : position);
+
+  if (running) {
+    return (
+      <p className="text-sm leading-snug text-muted-foreground">
+        {running.algo_id ?? "A Massager"} already works {sym}. Stop it in Algos to start a new
+        run at new levels; its Basis carries.
+      </p>
+    );
+  }
+
+  const atrLabel = atr == null ? "ATR loading" : `ATR ${state.atrTf} ${marketPrice(atr, sym)}`;
+  const tfButton = (
+    <button
+      type="button"
+      className="font-mono text-sm text-muted-foreground hover:text-text"
+      onClick={() => set({ atrTf: TF_NEXT[state.atrTf] })}
+      title={`${atrLabel}. Click for 15m, 1h or 4h candles`}
+    >
+      {state.atrTf}
+    </button>
+  );
+  const range = chop?.bandLow != null && chop.bandHigh != null ? chop : null;
+  const fillRange = () => {
+    if (range == null) return;
     set({
-      chaseFloor: formatPrice(chop.bandLow, priceDecimals),
-      chaseCeiling: formatPrice(chop.bandHigh, priceDecimals),
+      chaseFloor: formatPrice(range.bandLow!, priceDecimals),
+      chaseCeiling: formatPrice(range.bandHigh!, priceDecimals),
     });
   };
+  const carries = carry?.carried === true && !state.fresh;
 
   return (
-    <FieldGroup className="gap-3">
+    <FieldGroup className="gap-2">
+      <FieldGroup className="grid grid-cols-2 gap-2">
+        <TicketField
+          id="massager-floor"
+          label="Floor"
+          value={state.chaseFloor}
+          inputMode="decimal"
+          placeholder="0.00"
+          sanitize={decimalInput}
+          onChange={(v) => set({ chaseFloor: v })}
+        />
+        <TicketField
+          id="massager-ceil"
+          label="Ceiling"
+          value={state.chaseCeiling}
+          inputMode="decimal"
+          placeholder="0.00"
+          sanitize={decimalInput}
+          onChange={(v) => set({ chaseCeiling: v })}
+        />
+      </FieldGroup>
       <TicketChips
-        label="Step"
-        ariaLabel="Step kind"
-        value={state.stepMode}
-        onValueChange={(v) => set({ stepMode: v === "atr" ? "atr" : "fixed" })}
+        label="Band"
+        sticky={false}
+        ariaLabel="Band"
+        onValueChange={(v) => {
+          if (v === "24h") return fillRange();
+          const band = chaseBandFromPct(market, parseFloat(v), bookMid);
+          set({ chaseFloor: band.floor, chaseCeiling: band.ceiling });
+        }}
         items={[
-          { value: "fixed", label: "Fixed", title: "The Step stays as set for the run" },
           {
-            value: "atr",
-            label: "ATR",
-            title: "The Step follows k × ATR, moving the levels when it is 20% off",
+            value: "24h",
+            label: "24h",
+            disabled: range == null,
+            title: range
+              ? `${marketPrice(range.bandLow, sym)} to ${marketPrice(range.bandHigh, sym)}: the last 24 closed 1h candles`
+              : "Price is outside the last 24h range",
           },
+          { value: "1", label: "±1%" },
+          { value: "2", label: "±2%" },
         ]}
+        trailing={
+          chop && (
+            <span
+              className={cn("shrink-0 font-mono text-sm", CHOP_TONE[chop.label])}
+              title={`Chop ${chop.er.toFixed(2)}: efficiency of the last 24 closed 1h candles. Under 0.3 ranges, 0.5 and up trends.`}
+            >
+              {chopLabelText(chop.label)}
+            </span>
+          )
+        }
       />
-      <TicketChips
-        label="ATR"
-        ariaLabel="ATR timeframe"
-        value={state.atrTf}
-        onValueChange={(v) => set({ atrTf: v as MassagerAtrTf })}
-        items={MASSAGER_ATR_TIMEFRAMES.map((tf) => ({
-          value: tf,
-          label: tf,
-          title: `ATR(14) on closed ${tf} candles`,
-        }))}
-      />
-      {atrMode ? (
+      {follow ? (
         <TicketField
           id="massager-atr-mult"
-          label="× ATR"
+          label="Step × ATR"
           value={state.atrMult}
           inputMode="decimal"
           placeholder="0.5"
           sanitize={decimalInput}
           onChange={(v) => set({ atrMult: v })}
-          hint={atrStep ? `Step now ${atrStep}` : null}
-          chips={{
-            value: state.atrMult,
-            ariaLabel: "ATR multiple",
-            onValueChange: (v) => set({ atrMult: v }),
-            items: MASSAGER_ATR_MULTIPLES.map((m) => ({
-              value: String(m),
-              label: `${atrMultLabel(m)}×`,
-              title: `${m} × ATR(14) on ${state.atrTf}`,
-            })),
-          }}
+          addon={tfButton}
         />
       ) : (
         <TicketField
@@ -138,113 +189,93 @@ export function MassagerParamsSheet({
           placeholder="0.00"
           sanitize={decimalInput}
           onChange={(v) => set({ step: v })}
-          chips={{
-            sticky: false,
-            ariaLabel: "Step from ATR",
-            onValueChange: (v) => {
-              const m = parseFloat(v);
-              if (atr == null || !Number.isFinite(m)) return;
-              set({ step: formatPrice(atr * m, priceDecimals) });
-            },
-            items: MASSAGER_ATR_MULTIPLES.map((m) => ({
-              value: String(m),
-              label: `${atrMultLabel(m)}× ATR`,
-              title:
-                atr == null
-                  ? "ATR not loaded yet"
-                  : `${formatPrice(atr * m, priceDecimals)}: ${m} × ATR(14) on ${state.atrTf}`,
-            })),
-          }}
+          addon={tfButton}
         />
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-sm text-muted-foreground">
-        <Fact label="Chop 1h">
-          {chop == null ? "…" : `${chopLabelText(chop.label)} ${chop.er.toFixed(2)}`}
-        </Fact>
-        {chop?.bandLow != null && chop.bandHigh != null ? (
-          <>
-            <Fact label="Last 24h">
-              {marketPrice(chop.bandLow, sym)} to {marketPrice(chop.bandHigh, sym)}
-            </Fact>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={fillBand}
-              title="Fill the Band with the last 24 closed 1h candles' range"
-            >
-              Use as Band
-            </Button>
-          </>
-        ) : (
-          chop && <span>Price is outside the last 24h range</span>
-        )}
-      </div>
-      <BandFields
-        idPrefix="massager"
-        market={market}
-        bookMid={bookMid}
-        floor={state.chaseFloor}
-        ceiling={state.chaseCeiling}
-        onChange={set}
+      <TicketChips
+        label="ATR"
+        sticky={follow}
+        value={follow ? state.atrMult : undefined}
+        ariaLabel="Step from ATR"
+        onValueChange={(v) => {
+          if (follow) return set({ atrMult: v });
+          const m = parseFloat(v);
+          if (atr == null || !Number.isFinite(m)) return;
+          set({ step: formatPrice(atr * m, priceDecimals) });
+        }}
+        items={MASSAGER_ATR_MULTIPLES.map((m) => ({
+          value: String(m),
+          label: `${atrMultLabel(m)}×`,
+          disabled: !follow && atr == null,
+          title:
+            atr == null
+              ? "ATR loading"
+              : `${formatPrice(atr * m, priceDecimals)}: ${m} × ${atrLabel}`,
+        }))}
+        trailing={<FollowSwitch on={follow} onChange={(on) => set({ stepMode: on ? "atr" : "fixed" })} />}
       />
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-sm text-muted-foreground">
-        <Fact label={`ATR ${state.atrTf}`}>{atr == null ? "…" : marketPrice(atr, sym)}</Fact>
-        <Fact label="Core">{position === 0 ? "no Position" : formatSize(position)}</Fact>
-        {position !== 0 && carry && (
-          <Fact label="Tally">
-            {carry.carried && !state.fresh
-              ? `carries ${carry.source ?? "the last run"}: Basis ${marketPrice(carry.basis, sym)}, ` +
-                `captured ${formatSigned(parseFloat(carry.captured ?? "0") || 0)}, ` +
-                `run ${(carry.runs ?? 1)}`
-              : state.fresh
-                ? "new, started fresh"
-                : `new: ${carry.why}`}
+      {position !== 0 && sizeNum > 0 && refusal ? (
+        <p className="text-sm leading-snug text-ask">{refusal}</p>
+      ) : preview ? (
+        <div
+          className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-sm text-muted-foreground"
+          title="Sells above the Center and buys back below, two levels each side, post-only. A 1h close outside the Band pauses it and pushes."
+        >
+          <Fact label="Clip">
+            {formatSize(preview.clip)} × {preview.levels}
           </Fact>
-        )}
-        {preview && (
-          <>
-            <Fact label="Position">
-              {formatSize(preview.positionLow)} to {formatSize(preview.positionHigh)}
-            </Fact>
-            <Fact label="Center">{marketPrice(preview.center, sym)}</Fact>
-            <Fact label="Levels">{preview.levels} each side</Fact>
-            <Fact label="Clip">{formatSize(preview.clip)}</Fact>
-            {preview.swing < sizeNum - 1e-9 && (
-              <Fact label="Swing used">{formatSize(preview.swing)}</Fact>
-            )}
-            <Fact label="Per round trip">{formatUsd(preview.perRoundTrip)}</Fact>
-            <Fact label="Catch-up">
-              {preview.catchUp.side
-                ? `${preview.catchUp.side} ${formatSize(preview.catchUp.qty)} at the touch`
-                : "none"}
-            </Fact>
-          </>
-        )}
-      </div>
-      {position !== 0 && carry?.carried && (
-        <ToggleRow
-          id="massager-fresh"
-          label="Start a new Tally"
-          checked={state.fresh}
-          onCheckedChange={(on) => set({ fresh: on })}
-        />
-      )}
-      <p className="text-sm leading-snug text-muted-foreground">
-        {refusal ?? (
-          <>
-            The Swing is how far the Position may move off its Core either way; the Step is
-            how far apart its quotes are, and the Clip is the Swing split over the levels that
-            fit in the Band. Each quote is a Step from its last fill. A Fixed Step stays as set;
-            an ATR Step follows k × ATR after each candle closes, once it is 20% off. It sells
-            above the Center and buys back below, two levels resting each side, post-only. A 1h
-            close outside the Band pauses it and pushes; it holds what it has. Basis counts every
-            trade it makes and carries to the next run on this Position. It does not touch your
-            Stops: a Stop sized to the Core does not cover the Swing it buys on the way down.
-          </>
-        )}
-      </p>
+          <Fact label="Per trip">{formatUsd(preview.perRoundTrip)}</Fact>
+          <Fact label="Position">
+            {formatSize(preview.positionLow)}–{formatSize(preview.positionHigh)}
+          </Fact>
+          <Fact label="Catch-up">
+            {preview.catchUp.side ? `${preview.catchUp.side} ${formatSize(preview.catchUp.qty)}` : "none"}
+          </Fact>
+          {follow && <Fact label="Step">{atrStep ? marketPrice(atrStep, sym) : "…"}</Fact>}
+          {preview.swing < sizeNum - 1e-9 && <Fact label="Swing">{formatSize(preview.swing)}</Fact>}
+          {carry && (
+            <div className="col-span-2 flex min-w-0 items-center justify-between gap-2">
+              <span className="truncate" title={carries ? undefined : carry.why}>
+                Basis{" "}
+                <span className="text-text">
+                  {carries
+                    ? `${marketPrice(carry.basis, sym)} from ${carry.source ?? "the last run"}, run ${carry.runs ?? 1}`
+                    : "starts new"}
+                </span>
+              </span>
+              {carry.carried && (
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground underline-offset-2 hover:text-text hover:underline"
+                  onClick={() => set({ fresh: !state.fresh })}
+                  title={
+                    state.fresh
+                      ? `Carry ${carry.source}'s Basis and Captured`
+                      : "Start a new Tally: Basis from the entry, Captured from 0"
+                  }
+                >
+                  {state.fresh ? "carry" : "start new"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : account != null && position === 0 ? (
+        <p className="text-sm text-muted-foreground">A Massager needs an open Position on {sym}.</p>
+      ) : null}
     </FieldGroup>
+  );
+}
+
+function FollowSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label
+      className="flex shrink-0 cursor-pointer items-center gap-1.5 text-sm text-muted-foreground"
+      title="Follow ATR: the Step re-reads k × ATR after each candle and moves the levels when 20% off"
+    >
+      Follow
+      <Switch checked={on} onCheckedChange={(v) => onChange(v === true)} aria-label="Step follows ATR" />
+    </label>
   );
 }
 
@@ -278,6 +309,7 @@ function sameChop(a: MassagerChop | null, b: MassagerChop | null): boolean {
 function useChop(symbol: string, mid: number | null, tick: number): MassagerChop | null {
   const [candles, setCandles] = useState<{
     symbol: string;
+    at: number;
     rows: Awaited<ReturnType<typeof api.candles>>;
   } | null>(null);
   useEffect(() => {
@@ -285,17 +317,17 @@ function useChop(symbol: string, mid: number | null, tick: number): MassagerChop
     api
       .candles(symbol, "1h", 48)
       .then((rows) => {
-        if (live) setCandles({ symbol, rows });
+        if (live) setCandles({ symbol, at: Date.now(), rows });
       })
       .catch(() => {
-        if (live) setCandles({ symbol, rows: [] });
+        if (live) setCandles({ symbol, at: Date.now(), rows: [] });
       });
     return () => {
       live = false;
     };
   }, [symbol]);
   if (candles?.symbol !== symbol) return null;
-  return chopReading(candles.rows, { nowMs: Date.now(), mid, tick });
+  return chopReading(candles.rows, { nowMs: candles.at, mid, tick });
 }
 
 /** MS19, MS22: the Tally a Start would carry, asked again when the Position changes. */

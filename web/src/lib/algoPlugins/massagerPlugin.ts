@@ -5,8 +5,10 @@ import {
   chopBody,
   massagerInput,
   massagerRefusal,
+  runningMassager,
   type MassagerParamsState,
 } from "@/lib/massager";
+import { getAlgoBook } from "@/lib/liveData";
 import { canonicalDecimal } from "@/lib/numbers";
 import { startNotice } from "./startNotice";
 import type { AlgoPlugin } from "./types";
@@ -40,6 +42,8 @@ export const massagerPlugin: AlgoPlugin<MassagerParamsState> = {
   blockReason(state: unknown, ctx) {
     const s = state as MassagerParamsState;
     if (ctx.reduceOnly) return "A Massager is never reduce-only";
+    const running = runningMassager(getAlgoBook().working, ctx.symbol);
+    if (running) return `${running.algo_id ?? "A Massager"} already works ${ctx.symbol}`;
     if (!(ctx.sizeNum > 0)) return "Enter the Swing as size";
     // MS6 needs the account's fee; the backend checks it at Start.
     return massagerRefusal(

@@ -1,3 +1,4 @@
+import { setAlgo } from "@/lib/liveData";
 import { describe, expect, it } from "vitest";
 import {
   algoOrderKind,
@@ -352,6 +353,10 @@ describe("massager plugin", () => {
     expect(massagerPlugin.blockReason(state, { ...ctx, reduceOnly: true })).toBe(
       "A Massager is never reduce-only"
     );
+    // MS18: one Massager per Market.
+    setAlgo({ working: [{ type: "algo", id: "massager", algo_id: "MS-0005", algo_type: "massager", symbol: "LIT", status: "running" }], history: [] });
+    expect(massagerPlugin.blockReason(state, ctx)).toBe("MS-0005 already works LIT");
+    setAlgo(null);
     expect(massagerPlugin.blockReason({ ...state, step: "0.2" }, ctx)).toBe(
       "The Step is wider than half the Band"
     );

@@ -322,3 +322,11 @@ export function lastAtr(
   const last = values[values.length - 1];
   return last != null && Number.isFinite(last) ? last : null;
 }
+
+/** MS18: the Massager already working this Market, if any: a second one is refused. */
+export function runningMassager<T extends { algo_type?: string | null; symbol?: string | null }>(
+  working: readonly T[],
+  symbol: string
+): T | null {
+  return working.find((a) => a.algo_type === "massager" && a.symbol === symbol) ?? null;
+}
