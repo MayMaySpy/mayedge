@@ -25,6 +25,14 @@ const LIT: MassagerInput = {
 };
 
 describe("massager preview (massager-rules MS1–MS8)", () => {
+  it("says what it gives up at a Band end, and that 3 levels a side are few (MS19)", () => {
+    const p = massagerPreview(LIT)!;
+    // Sold 100 at 3.40, 3.45 and 3.50 with price at 3.50: 100 × (0.10 + 0.05 + 0).
+    expect(p.edgeCost).toBeCloseTo(15, 9);
+    expect(p.fewLevels).toBe(true);
+    expect(massagerPreview({ ...LIT, step: 0.025, swing: 600 })!.fewLevels).toBe(false);
+  });
+
   it("steps out from the Center and splits the Swing over the levels that fit", () => {
     const p = massagerPreview(LIT)!;
     expect(p.levels).toBe(3);

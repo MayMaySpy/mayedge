@@ -132,10 +132,20 @@ export interface MassagerPreview {
   positionHigh: number;
   /** One Clip sold and bought back a Step lower, before fees. */
   perRoundTrip: number;
+  /**
+   * MS19: what it gives up against holding the Core with price at a Band end and every level
+   * on that side filled: each Clip times the distance from its level to that end, the larger end.
+   * Past the end it costs the Swing times the further move.
+   */
+  edgeCost: number;
+  /** MS19: under MASSAGER_FEW_LEVELS levels a side, the fills come few and lumpy. */
+  fewLevels: boolean;
   catchUp: { side: "buy" | "sell" | null; qty: number; level: number };
 }
 
 const EPS = 1e-9;
+/** MS19: fewer levels a side than this and the ticket says the fills come few and lumpy. */
+export const MASSAGER_FEW_LEVELS = 6;
 
 function roundToTick(price: number, tick: number): number {
   if (!(tick > 0)) return price;
@@ -195,6 +205,12 @@ export function massagerPreview(input: MassagerInput): MassagerPreview | null {
     level = offset >= 0 ? Math.floor(offset + EPS) : Math.ceil(offset - EPS);
     level = Math.max(-levels, Math.min(levels, level));
   }
+  let up = 0;
+  let down = 0;
+  for (let k = 1; k <= levels; k++) {
+    up += clip * (high - prices[levels + k]);
+    down += clip * (prices[levels - k] - low);
+  }
   return {
     levels,
     clip,
@@ -202,6 +218,8 @@ export function massagerPreview(input: MassagerInput): MassagerPreview | null {
     center,
     step,
     prices,
+    edgeCost: Math.max(up, down),
+    fewLevels: levels < MASSAGER_FEW_LEVELS,
     positionLow: position - swing,
     positionHigh: position + swing,
     perRoundTrip: clip * step,
@@ -292,14 +310,14 @@ export function massagerInput(
   };
 }
 
-/** MS19, MS21: ATR(14) on 15m, 1h or 4h candles; presets of ½, 1 and 2 × it. */
+/** MS19, MS21: ATR(14) on 15m, 1h or 4h candles; presets of ¼, ½ and 1 × it. */
 export const MASSAGER_ATR_LENGTH = 14;
 export const MASSAGER_ATR_TIMEFRAMES: readonly MassagerAtrTf[] = ["15m", "1h", "4h"];
-export const MASSAGER_ATR_MULTIPLES = [0.5, 1, 2] as const;
+export const MASSAGER_ATR_MULTIPLES = [0.25, 0.5, 1] as const;
 const TIMEFRAME_SEC: Record<MassagerAtrTf, number> = { "15m": 900, "1h": 3600, "4h": 14400 };
 
 export function atrMultLabel(k: number): string {
-  return k === 0.5 ? "½" : String(k);
+  return k === 0.25 ? "¼" : k === 0.5 ? "½" : String(k);
 }
 
 /** MS21: ATR on the candles closed by now, as the desk reads it. Candle times are seconds. */

@@ -100,6 +100,9 @@ describe("Massager ticket (massager-rules MS19, MS24)", () => {
     expect(screen.getByText("Clip").nextSibling?.textContent).toBe("100 × 3");
     expect(screen.getByText("Position").nextSibling?.textContent).toBe("700–1,300");
     expect(screen.getByText("Catch-up").nextSibling?.textContent).toBe("none");
+    expect(screen.getByText("At an edge").nextSibling?.textContent).toMatch(/^−\$9\.00$/);
+    expect(screen.getByText(/3 levels a side: fills come few/)).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "¼×" })).toBeTruthy();
     expect(await screen.findByText("3.2697 from MS-0004, run 2")).toBeTruthy();
     expect(screen.queryByText(/The Swing is how far/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "start new" }));

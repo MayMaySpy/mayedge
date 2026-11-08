@@ -228,11 +228,25 @@ export function MassagerParamsSheet({
           <Fact label="Position">
             {formatSize(preview.positionLow)}–{formatSize(preview.positionHigh)}
           </Fact>
+          <Fact label="At an edge">
+            <span
+              className="text-ask"
+              title="Against holding the Core, with price at a Band end and every level on that side filled. Past the end it costs the Swing times the further move."
+            >
+              −{formatUsd(preview.edgeCost)}
+            </span>
+          </Fact>
           <Fact label="Catch-up">
             {preview.catchUp.side ? `${preview.catchUp.side} ${formatSize(preview.catchUp.qty)}` : "none"}
           </Fact>
           {follow && <Fact label="Step">{atrStep ? marketPrice(atrStep, sym) : "…"}</Fact>}
           {preview.swing < sizeNum - 1e-9 && <Fact label="Swing">{formatSize(preview.swing)}</Fact>}
+          {preview.fewLevels && (
+            <p className="col-span-2 font-sans leading-snug">
+              {preview.levels} {preview.levels === 1 ? "level" : "levels"} a side: fills come few and
+              lumpy. A smaller Step gives more for the same Swing.
+            </p>
+          )}
           {carry && (
             <div className="col-span-2 flex min-w-0 items-center justify-between gap-2">
               <span className="truncate" title={carries ? undefined : carry.why}>
