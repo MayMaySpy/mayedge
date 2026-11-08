@@ -461,6 +461,7 @@ def load_book_counters(
 from mayedge.persist_algo import (  # noqa: E402
     load_active_runs,
     load_history,
+    load_last_run,
     upsert_run,
 )
 from mayedge.persist_funding import (  # noqa: E402
@@ -517,6 +518,7 @@ __all__ = [
     "load_book_counters",
     "load_counters",
     "load_history",
+    "load_last_run",
     "load_manual_coi_seq",
     "mark_funding_backfill_done",
     "mark_funding_days_backfill_done",

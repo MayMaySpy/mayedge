@@ -7,7 +7,8 @@ from decimal import Decimal
 from typing import Any
 
 from mayedge.algos.chase.state import ClipState
-from mayedge.algos.massager.plan import Book, MassagerParams
+from mayedge.algos.massager.plan import Book, MassagerParams, Tally
+from mayedge.rows import obj
 
 
 def _dec_or_none(raw: Any) -> Decimal | None:
@@ -37,6 +38,18 @@ class MassagerRuntime:
     atr: Decimal | None = None
     step_moved_at: int = 0
     atr_next_at: int = 0
+    # MS22: the Position's record across runs. None only on a run kept before it (MS16).
+    tally: Tally | None = None
+    # MS22: whether a Start carried the Tally, why, and from which run.
+    carried: bool = False
+    carry_why: str | None = None
+    carried_from: str | None = None
+    # MS23: when the next 1h close is read, and the close that paused the run.
+    band_next_at: int = 0
+    band_close: Decimal | None = None
+    band_close_at: int = 0
+    # MS24: the Chop reading the ticket sent at Start.
+    chop: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -54,10 +67,18 @@ class MassagerRuntime:
             "clip_marks": {str(k): str(v) for k, v in self.clip_marks.items()},
             "atr": str(self.atr) if self.atr is not None else None,
             "step_moved_at": self.step_moved_at,
+            "tally": self.tally.to_json() if self.tally is not None else None,
+            "carried": self.carried,
+            "carry_why": self.carry_why,
+            "carried_from": self.carried_from,
+            "band_close": str(self.band_close) if self.band_close is not None else None,
+            "band_close_at": self.band_close_at,
+            "chop": self.chop,
         }
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> MassagerRuntime:
+        tally, chop = obj(raw.get("tally")), obj(raw.get("chop"))
         return cls(
             book=Book.from_json(dict(raw.get("book") or {})),
             core_side=int(raw.get("core_side") or 0),
@@ -75,6 +96,13 @@ class MassagerRuntime:
             },
             atr=_dec_or_none(raw.get("atr")),
             step_moved_at=int(raw.get("step_moved_at") or 0),
+            tally=Tally.from_json(tally) if tally else None,
+            carried=bool(raw.get("carried")),
+            carry_why=str(raw["carry_why"]) if raw.get("carry_why") else None,
+            carried_from=str(raw["carried_from"]) if raw.get("carried_from") else None,
+            band_close=_dec_or_none(raw.get("band_close")),
+            band_close_at=int(raw.get("band_close_at") or 0),
+            chop=chop or None,
         )
 
 

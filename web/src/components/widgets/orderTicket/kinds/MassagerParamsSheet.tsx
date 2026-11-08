@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
 import { api } from "@/lib/api";
 import { decimalInput, parseDecimal } from "@/lib/numbers";
@@ -6,6 +7,8 @@ import { useLiveAccount } from "@/lib/liveData";
 import type { AlgoParamsSheetProps } from "@/lib/algoPlugins/types";
 import {
   atrMultLabel,
+  chopLabelText,
+  chopReading,
   closedAtr,
   MASSAGER_ATR_MULTIPLES,
   MASSAGER_ATR_TIMEFRAMES,
@@ -13,11 +16,13 @@ import {
   massagerPreview,
   massagerRefusal,
   type MassagerAtrTf,
+  type MassagerCarry,
+  type MassagerChop,
   type MassagerParamsState,
 } from "@/lib/massager";
 import { marketPrice } from "@/lib/marketFormat";
-import { formatPrice, formatSize, formatUsd } from "@/lib/utils";
-import { TicketChips, TicketField } from "../ui";
+import { formatPrice, formatSigned, formatSize, formatUsd } from "@/lib/utils";
+import { TicketChips, TicketField, ToggleRow } from "../ui";
 import { BandFields } from "./ChaseFields";
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -62,6 +67,19 @@ export function MassagerParamsSheet({
   useEffect(() => {
     if (atrMode && state.atrStep !== atrStep) onStateChange({ ...state, atrStep });
   }, [atrMode, atrStep, state, onStateChange]);
+  // MS24: the Chop reading, kept in the state so Start sends it.
+  const chop = useChop(sym, bookMid, input.tick);
+  useEffect(() => {
+    if (!sameChop(state.chop, chop)) onStateChange({ ...state, chop });
+  }, [chop, state, onStateChange]);
+  const carry = useCarry(market.market_index, position);
+  const fillBand = () => {
+    if (chop?.bandLow == null || chop.bandHigh == null) return;
+    set({
+      chaseFloor: formatPrice(chop.bandLow, priceDecimals),
+      chaseCeiling: formatPrice(chop.bandHigh, priceDecimals),
+    });
+  };
 
   return (
     <FieldGroup className="gap-3">
@@ -139,6 +157,29 @@ export function MassagerParamsSheet({
           }}
         />
       )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-sm text-muted-foreground">
+        <Fact label="Chop 1h">
+          {chop == null ? "…" : `${chopLabelText(chop.label)} ${chop.er.toFixed(2)}`}
+        </Fact>
+        {chop?.bandLow != null && chop.bandHigh != null ? (
+          <>
+            <Fact label="Last 24h">
+              {marketPrice(chop.bandLow, sym)} to {marketPrice(chop.bandHigh, sym)}
+            </Fact>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={fillBand}
+              title="Fill the Band with the last 24 closed 1h candles' range"
+            >
+              Use as Band
+            </Button>
+          </>
+        ) : (
+          chop && <span>Price is outside the last 24h range</span>
+        )}
+      </div>
       <BandFields
         idPrefix="massager"
         market={market}
@@ -150,6 +191,17 @@ export function MassagerParamsSheet({
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-sm text-muted-foreground">
         <Fact label={`ATR ${state.atrTf}`}>{atr == null ? "…" : marketPrice(atr, sym)}</Fact>
         <Fact label="Core">{position === 0 ? "no Position" : formatSize(position)}</Fact>
+        {position !== 0 && carry && (
+          <Fact label="Tally">
+            {carry.carried && !state.fresh
+              ? `carries ${carry.source ?? "the last run"}: Basis ${marketPrice(carry.basis, sym)}, ` +
+                `captured ${formatSigned(parseFloat(carry.captured ?? "0") || 0)}, ` +
+                `run ${(carry.runs ?? 1)}`
+              : state.fresh
+                ? "new, started fresh"
+                : `new: ${carry.why}`}
+          </Fact>
+        )}
         {preview && (
           <>
             <Fact label="Position">
@@ -170,6 +222,14 @@ export function MassagerParamsSheet({
           </>
         )}
       </div>
+      {position !== 0 && carry?.carried && (
+        <ToggleRow
+          id="massager-fresh"
+          label="Start a new Tally"
+          checked={state.fresh}
+          onCheckedChange={(on) => set({ fresh: on })}
+        />
+      )}
       <p className="text-sm leading-snug text-muted-foreground">
         {refusal ?? (
           <>
@@ -177,9 +237,10 @@ export function MassagerParamsSheet({
             how far apart its quotes are, and the Clip is the Swing split over the levels that
             fit in the Band. Each quote is a Step from its last fill. A Fixed Step stays as set;
             an ATR Step follows k × ATR after each candle closes, once it is 20% off. It sells
-            above the Center and buys back below, two levels resting each side, post-only. Outside
-            the Band it holds what it has. It does not touch your Stops: a Stop sized to the Core
-            does not cover the Swing it buys on the way down.
+            above the Center and buys back below, two levels resting each side, post-only. A 1h
+            close outside the Band pauses it and pushes; it holds what it has. Basis counts every
+            trade it makes and carries to the next run on this Position. It does not touch your
+            Stops: a Stop sized to the Core does not cover the Swing it buys on the way down.
           </>
         )}
       </p>
@@ -206,4 +267,55 @@ function useClosedAtr(symbol: string, timeframe: MassagerAtrTf): number | null {
     };
   }, [key, symbol, timeframe]);
   return atr?.key === key ? atr.value : null;
+}
+
+function sameChop(a: MassagerChop | null, b: MassagerChop | null): boolean {
+  if (a == null || b == null) return a === b;
+  return a.er === b.er && a.label === b.label && a.bandLow === b.bandLow && a.bandHigh === b.bandHigh;
+}
+
+/** MS24: the Chop reading on the last 24 closed 1h candles. Null until loaded. */
+function useChop(symbol: string, mid: number | null, tick: number): MassagerChop | null {
+  const [candles, setCandles] = useState<{
+    symbol: string;
+    rows: Awaited<ReturnType<typeof api.candles>>;
+  } | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .candles(symbol, "1h", 48)
+      .then((rows) => {
+        if (live) setCandles({ symbol, rows });
+      })
+      .catch(() => {
+        if (live) setCandles({ symbol, rows: [] });
+      });
+    return () => {
+      live = false;
+    };
+  }, [symbol]);
+  if (candles?.symbol !== symbol) return null;
+  return chopReading(candles.rows, { nowMs: Date.now(), mid, tick });
+}
+
+/** MS19, MS22: the Tally a Start would carry, asked again when the Position changes. */
+function useCarry(marketIndex: number, position: number): MassagerCarry | null {
+  const key = `${marketIndex}:${position}`;
+  const [carry, setCarry] = useState<{ key: string; value: MassagerCarry | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (position === 0) return;
+    api
+      .massagerCarry(marketIndex)
+      .then((value) => {
+        if (live) setCarry({ key, value });
+      })
+      .catch(() => {
+        if (live) setCarry({ key, value: null });
+      });
+    return () => {
+      live = false;
+    };
+  }, [key, marketIndex, position]);
+  return carry?.key === key ? carry.value : null;
 }

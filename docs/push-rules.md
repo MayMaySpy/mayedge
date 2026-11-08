@@ -21,6 +21,7 @@ Restore holds the algo book until every family has loaded. That snapshot only se
 | Auto kill flattened | the kill status becomes `killed` after the boot seed, and the latest account snapshot has no open Position. A status already `killed` at boot sends nothing. | `Auto kill: flattened, 0 Positions open` | `autokill:{fired_at}:result` | yes |
 | Auto kill could not flatten | the kill status becomes `partial` after the boot seed. A status already `partial` at boot sends nothing. | `⚠️ Auto kill could not flatten after 3 tries — 1 Position open: ETH −2.0` | `autokill:{fired_at}:result` | yes |
 | Algo error | an algo's status moves to `error`. Sent for every family, on both `errors` and `lifecycle`, named by its algo (`test_every_desk_algo_has_a_push_name`). | `Planner ETH stopped with an error: book rejected` | `algo:{id}:error` | no |
+| Massager left the Band | a Massager's status moves to `paused` with reason `left_band` ([massager-rules.md](massager-rules.md) MS23). Sent on both `errors` and `lifecycle`. | `Massager LIT paused: 1h closed above the Band at 3.5123 · Lean −400.0 · Basis 3.2512` | `algo:{id}:left-band:{close time}` | no |
 | Planner entry | `algos: lifecycle`, and the entry fill count rose | `Planner ETH long: entry filled 1.5 @ 2,430 · stop 2,390 · risk $60` | `algo:{id}:entry` | no |
 | Planner stop | the stop fill count rose | `Planner ETH: stop filled @ 2,300` | `algo:{id}:stop` | no |
 | Planner target | a `tpN` fill count rose | `Planner ETH: target 1 filled @ 2,510 (+2.0R)` | `algo:{id}:target-{n}` | no |
@@ -38,7 +39,7 @@ Restore holds the algo book until every family has loaded. That snapshot only se
 | Position watch | a Position's Stop, R, Idea stop, funding or the daily brief, by [position-rules.md](position-rules.md) E1–E7, and `positions` is `on` | the event's own text | `position:…` | E4 only |
 | Send test | the Alerts panel, or `POST /api/push/test` | `Desk test push ✓` | `test:{time}` | yes |
 
-`algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder, TWAP and Massager send an error and nothing else.
+`algos: errors` still sends the error row. It does not send entry, stop, target, or done. Chase, Grid, Ladder and TWAP send an error and nothing else; a Massager also sends when it leaves the Band.
 
 The could-not line counts one try per flatten slippage step. There are three steps.
 

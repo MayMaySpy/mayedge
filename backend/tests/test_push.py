@@ -717,6 +717,43 @@ class RouterTests(unittest.TestCase):
         )
         self.assertEqual(sink.rows[-1][1], "Chase ETH stopped with an error: rejected")
 
+    def test_a_massager_that_left_the_band_pushes_once(self) -> None:
+        """Massager MS23: a pause on a close outside the Band, on errors as on lifecycle."""
+        router, sink, _clock = self._router()
+        row = {
+            "algo_id": "ms1",
+            "algo_type": "massager",
+            "status": "running",
+            "symbol": "LIT",
+            "lean": "-400",
+            "basis": "3.2512",
+            "reason": None,
+        }
+        router.on_message(_algo(row))
+        router.on_message(_algo({**row, "status": "paused", "reason": "user_paused"}))
+        self.assertEqual(sink.rows, [])
+        router.on_message(_algo(row))
+        left = {
+            **row,
+            "status": "paused",
+            "reason": "left_band",
+            "band_side": "above",
+            "band_close": "3.5123",
+            "band_close_at": 3_600_000,
+        }
+        router.on_message(_algo(left))
+        router.on_message(_algo(left))
+        self.assertEqual(
+            sink.rows,
+            [
+                (
+                    "algo:ms1:left-band:3600000",
+                    "Massager LIT paused: 1h closed above the Band at 3.5123 · Lean −400.0 · Basis 3.2512",
+                    False,
+                )
+            ],
+        )
+
     def test_every_desk_algo_has_a_push_name(self) -> None:
         """An error push names the algo by the desk's algo_type, never the fallback "Algo"."""
         from mayedge import desk

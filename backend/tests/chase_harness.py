@@ -440,6 +440,7 @@ def isolated_db() -> Iterator[None]:
             "mayedge.algos.clip_book.store.load_counters", return_value={"id_seq": 0, "coi_seq": 0}
         ),
         patch("mayedge.db.load_book_counters", return_value={"id_seq": 0, "coi_seq": 0}),
+        patch("mayedge.db.load_last_run", return_value=None),
     ):
         yield
 

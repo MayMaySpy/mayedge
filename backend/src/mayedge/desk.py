@@ -17,7 +17,7 @@ from mayedge.algos.grid.book import ChaseGridBook
 from mayedge.algos.grid.config import GRID_COI_BASE, GRID_COI_END
 from mayedge.algos.ladder.book import LadderBook
 from mayedge.algos.ladder.config import LADDER_COI_BASE, LADDER_COI_END
-from mayedge.algos.massager.atr import closed_atr
+from mayedge.algos.massager.atr import closed_atr, last_close
 from mayedge.algos.massager.book import MassagerBook
 from mayedge.algos.massager.config import MASSAGER_COI_BASE, MASSAGER_COI_END
 from mayedge.algos.planner.book import PlannerBook
@@ -139,12 +139,19 @@ async def _massager_atr(market_index: int, timeframe: str) -> Decimal | None:
     return closed_atr(candles, timeframe, int(time.time() * 1000))
 
 
+async def _massager_close(market_index: int, timeframe: str) -> tuple[int, Decimal] | None:
+    """MS23: the last closed candle of the timeframe, as (its close time in ms, its close)."""
+    candles = await gateway.get_candles(market_index, timeframe, 3, lane="read")
+    return last_close(candles, timeframe, int(time.time() * 1000))
+
+
 massager_book = MassagerBook(
     execution=execution,
     broadcast=_publish_algo_book,
     coi_base=MASSAGER_COI_BASE,
     coi_end=MASSAGER_COI_END,
     atr=_massager_atr,
+    close=_massager_close,
 )
 books: tuple[DeskBook, ...] = (
     chase_book,

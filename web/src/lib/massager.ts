@@ -21,6 +21,80 @@ export interface MassagerParamsState {
   atrStep: string;
   chaseFloor: string;
   chaseCeiling: string;
+  /** MS22: begin a new Tally instead of carrying the last run's. */
+  fresh: boolean;
+  /** MS24: the Chop reading the sheet last made, sent with Start. Null until loaded. */
+  chop: MassagerChop | null;
+}
+
+/** MS24: how much the last day of 1h candles ranged, and the Band it suggests. */
+export type MassagerChopLabel = "ranging" | "mixed" | "trending";
+export interface MassagerChop {
+  er: number;
+  label: MassagerChopLabel;
+  /** Null when the mid is outside the day's range. */
+  bandLow: number | null;
+  bandHigh: number | null;
+}
+
+export const MASSAGER_CHOP_CANDLES = 24;
+const CHOP_RANGING = 0.3;
+const CHOP_MIXED = 0.5;
+const HOUR_SEC = 3600;
+
+export function chopLabelText(label: MassagerChopLabel): string {
+  return label === "ranging" ? "Ranging" : label === "mixed" ? "Mixed" : "Trending";
+}
+
+/**
+ * MS24: the efficiency ratio of the last 24 closed 1h candles, |last − first close| ÷ the sum
+ * of each close's move, and a Band from their lowest low to highest high, rounded out to the
+ * tick. Null without 24 closed candles or with no movement at all.
+ */
+export function chopReading(
+  candles: readonly { time: number; high: number; low: number; close: number }[],
+  { nowMs, mid, tick }: { nowMs: number; mid: number | null; tick: number }
+): MassagerChop | null {
+  const closed = candles
+    .filter((c) => (c.time + HOUR_SEC) * 1000 <= nowMs)
+    .slice(-MASSAGER_CHOP_CANDLES);
+  if (closed.length < MASSAGER_CHOP_CANDLES) return null;
+  let path = 0;
+  for (let i = 1; i < closed.length; i++) path += Math.abs(closed[i].close - closed[i - 1].close);
+  if (!(path > 0)) return null;
+  const er = Math.abs(closed[closed.length - 1].close - closed[0].close) / path;
+  const label: MassagerChopLabel =
+    er < CHOP_RANGING ? "ranging" : er < CHOP_MIXED ? "mixed" : "trending";
+  const lowest = Math.min(...closed.map((c) => c.low));
+  const highest = Math.max(...closed.map((c) => c.high));
+  const low = tick > 0 ? Math.floor(lowest / tick + EPS) * tick : lowest;
+  const high = tick > 0 ? Math.ceil(highest / tick - EPS) * tick : highest;
+  const inside = mid != null && mid >= low - EPS && mid <= high + EPS;
+  return { er, label, bandLow: inside ? low : null, bandHigh: inside ? high : null };
+}
+
+/** MS24: the reading as Start sends it. */
+export function chopBody(chop: MassagerChop, priceDecimals: number): Record<string, unknown> {
+  return {
+    label: chop.label,
+    er: chop.er.toFixed(3),
+    ...(chop.bandLow != null && chop.bandHigh != null
+      ? { band_low: chop.bandLow.toFixed(priceDecimals), band_high: chop.bandHigh.toFixed(priceDecimals) }
+      : {}),
+    tf: "1h",
+    n: MASSAGER_CHOP_CANDLES,
+  };
+}
+
+/** MS19, MS22: what the desk says a Start would carry. */
+export interface MassagerCarry {
+  carried: boolean;
+  why: string;
+  source: string | null;
+  basis?: string | null;
+  entry?: string | null;
+  captured?: string | null;
+  runs?: number | null;
 }
 
 /** The Step the ticket would start with. */
@@ -146,6 +220,8 @@ export function massagerRowFacts(algo: {
   position?: string | null;
   qty?: string | null;
   captured_pnl?: string | null;
+  tally_captured?: string | null;
+  tally_runs?: number | null;
 }): {
   core: number;
   lean: number;
@@ -153,6 +229,9 @@ export function massagerRowFacts(algo: {
   positionLow: number;
   positionHigh: number;
   captured: number;
+  /** MS20: the Tally's Captured over every run, and how many runs. */
+  tallyCaptured: number;
+  runs: number;
 } {
   const num = (raw: string | null | undefined) => {
     const n = parseFloat(raw ?? "");
@@ -168,6 +247,11 @@ export function massagerRowFacts(algo: {
     positionLow: core - swing,
     positionHigh: core + swing,
     captured: num(algo.captured_pnl),
+    tallyCaptured:
+      algo.tally_captured != null && algo.tally_captured !== ""
+        ? num(algo.tally_captured)
+        : num(algo.captured_pnl),
+    runs: algo.tally_runs ?? 1,
   };
 }
 

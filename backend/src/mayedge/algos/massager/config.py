@@ -31,3 +31,10 @@ def next_close_ms(now_ms: int, timeframe: str) -> int:
     """When the candle of ``timeframe`` open at ``now_ms`` closes."""
     period = TIMEFRAME_MS.get(timeframe, 3_600_000)
     return (now_ms // period + 1) * period
+
+
+# MS23: the candle a close outside the Band is read on, how long after its close, and the
+# retry after a failed read.
+BAND_TIMEFRAME = "1h"
+BAND_SETTLE_MS = 5_000
+BAND_RETRY_MS = 60_000

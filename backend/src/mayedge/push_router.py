@@ -30,6 +30,7 @@ from mayedge.push_text import (
     _utc_date,
     daily_text,
     freeze_text,
+    massager_left_band_text,
     status_text,
 )
 
@@ -148,6 +149,9 @@ class PushRouter:
                 f"{family} {symbol} stopped with an error: {error}",
             )
             return
+        if family == "Massager":
+            self._emit_massager(algo_id, row, prev)
+            return
         if self._cfg.algos != "lifecycle" or family not in {"Planner", "Trail"}:
             return
         if family == "Planner":
@@ -158,6 +162,17 @@ class PushRouter:
             side = _side_word(row.get("side"))
             label = f"{symbol} {side}".strip()
             self._out.push(f"algo:{algo_id}:done", f"{family} {label}: done")
+
+    def _emit_massager(self, algo_id: str, row: dict[str, Any], prev: _SeenAlgo | None) -> None:
+        """Massager MS23: it paused on a close outside its Band. Sent on errors and lifecycle."""
+        if row.get("status") != "paused" or row.get("reason") != "left_band":
+            return
+        if prev is not None and prev.status == "paused":
+            return
+        self._out.push(
+            f"algo:{algo_id}:left-band:{row.get('band_close_at') or ''}",
+            massager_left_band_text(row),
+        )
 
     def _emit_planner(self, algo_id: str, row: dict[str, Any], prev: _SeenAlgo | None) -> None:
         fills = _role_fills(row)

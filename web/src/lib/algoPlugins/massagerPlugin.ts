@@ -1,7 +1,12 @@
 import { MassagerParamsSheet } from "@/components/widgets/orderTicket/kinds/MassagerParamsSheet";
 import { trimQty } from "@/components/widgets/orderTicket/math";
 import { api } from "@/lib/api";
-import { massagerInput, massagerRefusal, type MassagerParamsState } from "@/lib/massager";
+import {
+  chopBody,
+  massagerInput,
+  massagerRefusal,
+  type MassagerParamsState,
+} from "@/lib/massager";
 import { canonicalDecimal } from "@/lib/numbers";
 import { startNotice } from "./startNotice";
 import type { AlgoPlugin } from "./types";
@@ -19,6 +24,8 @@ function massagerDefaultState(): MassagerParamsState {
     atrStep: "",
     chaseFloor: "",
     chaseCeiling: "",
+    fresh: false,
+    chop: null,
   };
 }
 
@@ -67,6 +74,8 @@ export const massagerPlugin: AlgoPlugin<MassagerParamsState> = {
             atr_tf: s.atrTf,
           }
         : { step: canonicalDecimal(s.step) ?? s.step }),
+      ...(s.fresh ? { fresh: true } : {}),
+      ...(s.chop ? { chop: chopBody(s.chop, ctx.market.price_decimals ?? 4) } : {}),
     });
     return startNotice(book, ctx, { kind: "massager", label: "Massager", size: swing });
   },

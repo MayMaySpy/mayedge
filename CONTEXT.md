@@ -233,12 +233,20 @@ The most a Massager's Lean may be, either way. The Position stays between Core โ
 _Avoid_: range (that's the Band), max inventory (that's Grid's)
 
 **Captured**:
-A Massager's realized profit on its Lean, by average cost, less its fees.
+A Massager run's realized profit on its Lean, by average cost, less its fees. The **Tally** adds up its runs'.
 _Avoid_: PnL (unqualified), profit (unqualified)
 
 **Basis**:
-What a Massager's Core cost after Captured: the Core's entry less Captured per unit of Core. Lighter's entry only moves when you add, so it does not show the work; Basis does.
+What the Position has cost per unit after every Massager trade: the **Tally**'s cost รท the Position. A long's Basis falls when the Massager sells above it or buys below it; a short's rises the same way round. Lighter's entry only moves when you add, so it does not show the work; Basis does.
 _Avoid_: entry (that's the venue's), cost (unqualified), Breakeven (that's Planner's)
+
+**Tally**:
+A Position's Massager record across runs: its Basis, the Captured of every run and how many runs it took. It begins with the first run on a Position; a later run on the Market carries it while the Position is the one the last run left. It ends when the Position closes or flips.
+_Avoid_: campaign, session, history (that's the Algos panel's)
+
+**Chop**:
+The ticket's reading of how much a Market ranges: the efficiency ratio of the last 24 closed 1h candles, labelled Ranging, Mixed or Trending. It suggests; the trader starts and stops.
+_Avoid_: regime, choppiness index, ADX
 
 **Ladder**:
 An algo that keeps N live rungs on static prices.

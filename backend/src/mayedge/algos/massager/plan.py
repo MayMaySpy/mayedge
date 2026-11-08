@@ -345,3 +345,167 @@ def basis(core_entry: Decimal, core_size: Decimal, captured: Decimal) -> Decimal
     if core_size == 0:
         return None
     return core_entry - _sign(core_size) * captured / abs(core_size)
+
+
+# ── MS11, MS22: the Tally ────────────────────────────────────────────────────
+
+# MS22: an add between runs carries only at an implied price between these shares of the mid.
+IMPLIED_LOW = Decimal("0.5")
+IMPLIED_HIGH = Decimal("2")
+# MS22: entries this close (a share of the entry) are the same entry.
+ENTRY_SAME = Decimal("0.000001")
+
+
+@dataclass
+class Tally:
+    """MS11, MS22: a Position's Massager record across runs. ``size`` is the Position and
+    ``cost`` is signed like it, so Basis is cost ÷ size. ``captured_before`` is the earlier
+    runs' Captured. ``venue_size`` and ``venue_entry`` are the venue's, last seen agreeing."""
+
+    size: Decimal = ZERO
+    cost: Decimal = ZERO
+    entry: Decimal = ZERO
+    captured_before: Decimal = ZERO
+    runs: int = 1
+    since: int = 0
+    venue_size: Decimal | None = None
+    venue_entry: Decimal | None = None
+
+    @classmethod
+    def begin(cls, position: Decimal, entry: Decimal, *, since: int) -> Tally:
+        return cls(size=position, cost=position * entry, entry=entry, since=since)
+
+    def basis(self) -> Decimal | None:
+        return self.cost / self.size if self.size != 0 else None
+
+    def massager_fill(self, side: Side, qty: Decimal, price: Decimal, fee: Decimal) -> None:
+        """MS11: a Massager fill counts at its price, plus its fee."""
+        delta = qty if side == "buy" else -qty
+        self.size += delta
+        self.cost += delta * price + fee
+
+    def outside(self, delta: Decimal, price: Decimal) -> None:
+        """MS11: an add at ``price``; a reduction takes its share of the cost."""
+        if delta == 0:
+            return
+        if self.size == 0 or _sign(delta) == _sign(self.size):
+            self.entry = core_entry_after(self.entry, self.size, delta, price)
+            self.size += delta
+            self.cost += delta * price
+            return
+        kept = self.size + delta
+        self.cost = self.cost * kept / self.size if self.size != 0 else ZERO
+        self.size = kept
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "size": str(self.size),
+            "cost": str(self.cost),
+            "entry": str(self.entry),
+            "captured_before": str(self.captured_before),
+            "runs": self.runs,
+            "since": self.since,
+            "venue_size": str(self.venue_size) if self.venue_size is not None else None,
+            "venue_entry": str(self.venue_entry) if self.venue_entry is not None else None,
+        }
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> Tally:
+        vs, ve = raw.get("venue_size"), raw.get("venue_entry")
+        return cls(
+            size=Decimal(str(raw.get("size") or "0")),
+            cost=Decimal(str(raw.get("cost") or "0")),
+            entry=Decimal(str(raw.get("entry") or "0")),
+            captured_before=Decimal(str(raw.get("captured_before") or "0")),
+            runs=int(raw.get("runs") or 1),
+            since=int(raw.get("since") or 0),
+            venue_size=Decimal(str(vs)) if vs not in (None, "") else None,
+            venue_entry=Decimal(str(ve)) if ve not in (None, "") else None,
+        )
+
+
+def tally_from_run(
+    *,
+    core_size: Decimal,
+    core_entry: Decimal,
+    book: Book,
+    since: int,
+) -> Tally:
+    """MS16: the Tally a run kept before the Tally reads back with."""
+    lean_cost = book.lean * (book.lean_price if book.lean_price is not None else core_entry)
+    return Tally(
+        size=core_size + book.lean,
+        cost=core_size * core_entry - book.captured + lean_cost,
+        entry=core_entry,
+        since=since,
+    )
+
+
+@dataclass(frozen=True)
+class Carry:
+    """MS22: the Tally a Start takes. ``carried`` is False when a new one began; ``why`` says
+    why, in the trader's words. ``source`` is the run it came from."""
+
+    tally: Tally
+    carried: bool
+    why: str
+    source: str | None = None
+
+
+def _same_entry(a: Decimal, b: Decimal) -> bool:
+    return abs(a - b) <= abs(b) * ENTRY_SAME
+
+
+def carry(
+    last: Tally | None,
+    *,
+    last_captured: Decimal = ZERO,
+    last_closed: bool = False,
+    source: str | None = None,
+    position: Decimal,
+    entry: Decimal | None,
+    mid: Decimal,
+    since: int,
+    fresh: bool = False,
+) -> Carry:
+    """MS22. ``last`` is the last run's Tally, ``last_captured`` its own Captured."""
+
+    def begin(why: str) -> Carry:
+        return Carry(Tally.begin(position, entry or mid, since=since), False, why)
+
+    if fresh:
+        return begin("Started fresh")
+    if last is None:
+        return begin("First run on this Position")
+    if last_closed:
+        return begin(f"{source or 'The last run'} ended with its Position closed")
+    if position == 0 or _sign(position) != _sign(last.size):
+        return begin("The Position is on the other side")
+    t = replace(last)
+    t.captured_before = last.captured_before + last_captured
+    t.runs = last.runs + 1
+    t.venue_size = None
+    t.venue_entry = None
+    then_size, then_entry = last.venue_size, last.venue_entry
+    reopened = "The Position was closed and opened again since"
+    delta = position - last.size
+    if then_size is None or then_entry is None or entry is None:
+        if delta != 0:
+            return begin(reopened)
+        return Carry(t, True, "Carried", source)
+    if delta == 0:
+        # A fill of its own after the venue was last seen can move the entry.
+        if then_size == last.size and not _same_entry(entry, then_entry):
+            return begin(reopened)
+        return Carry(t, True, "Carried", source)
+    if _sign(delta) != _sign(last.size):
+        if not _same_entry(entry, then_entry):
+            return begin(reopened)
+        t.outside(delta, ZERO)
+        return Carry(t, True, "Carried, less what was closed since", source)
+    added = abs(position) - abs(then_size)
+    implied = (entry * abs(position) - then_entry * abs(then_size)) / added if added > 0 else ZERO
+    if not mid * IMPLIED_LOW <= implied <= mid * IMPLIED_HIGH:
+        return begin(reopened)
+    t.outside(delta, implied)
+    return Carry(t, True, "Carried, with what was added since", source)

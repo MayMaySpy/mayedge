@@ -86,6 +86,7 @@ const PAUSE_COPY: Record<string, string> = {
   catch_up: "Catching up at the touch",
   core_within_swing: "Core no larger than the Swing",
   position_closed: "Position closed",
+  left_band: "1h closed outside the Band",
 };
 
 export function algoReasonLabel(reason: string | null | undefined): string {

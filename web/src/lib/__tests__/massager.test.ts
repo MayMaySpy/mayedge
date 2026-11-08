@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  chopBody,
+  chopReading,
   closedAtr,
   lastAtr,
   massagerPreview,
@@ -101,6 +103,8 @@ describe("massager working row (massager-rules MS20)", () => {
       positionLow: 700,
       positionHigh: 1300,
       captured: 5,
+      tallyCaptured: 5,
+      runs: 1,
     });
     expect(massagerRowFacts({ core: "-1000", lean: "100", qty: "300" }).position).toBe(-900);
   });
@@ -124,5 +128,64 @@ describe("massager Step presets (massager-rules MS19)", () => {
     const now = 20 * hour * 1000 + 1;
     const wild = [...bars, { time: 20 * hour, high: 4, low: 3, close: 3.5 }];
     expect(closedAtr(wild, "1h", now)).toBeCloseTo(0.1, 10);
+  });
+});
+
+describe("massager Chop (massager-rules MS24)", () => {
+  const HOUR = 3600;
+  const bars = (closes: number[]) =>
+    closes.map((close, i) => ({ time: i * HOUR, high: close + 0.02, low: close - 0.02, close }));
+  const now = (n: number) => n * HOUR * 1000;
+
+  it("reads a back-and-forth day as Ranging and suggests its range as the Band", () => {
+    const closes = Array.from({ length: 24 }, (_, i) => (i % 2 === 0 ? 3.2 : 3.3));
+    const chop = chopReading(bars(closes), { nowMs: now(24), mid: 3.25, tick: 0.0001 })!;
+    expect(chop.label).toBe("ranging");
+    expect(chop.er).toBeCloseTo(0.1 / 2.3, 10);
+    expect(chop.bandLow).toBeCloseTo(3.18, 10);
+    expect(chop.bandHigh).toBeCloseTo(3.32, 10);
+  });
+
+  it("reads a straight run as Trending", () => {
+    const closes = Array.from({ length: 24 }, (_, i) => 3 + i * 0.01);
+    const chop = chopReading(bars(closes), { nowMs: now(24), mid: 3.2, tick: 0.0001 })!;
+    expect(chop.er).toBeCloseTo(1, 10);
+    expect(chop.label).toBe("trending");
+  });
+
+  it("labels Mixed from 0.3 to under 0.5", () => {
+    // Up 0.4 over a path of 1.0.
+    const closes = [3, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.5, 3.4, 3.3, 3.4];
+    while (closes.length < 24) closes.unshift(3);
+    const chop = chopReading(bars(closes), { nowMs: now(24), mid: 3.3, tick: 0.0001 })!;
+    expect(chop.er).toBeCloseTo(0.4 / 1.0, 10);
+    expect(chop.label).toBe("mixed");
+  });
+
+  it("leaves out the open candle and needs 24 closed ones", () => {
+    const closes = Array.from({ length: 24 }, (_, i) => (i % 2 === 0 ? 3.2 : 3.3));
+    expect(chopReading(bars(closes), { nowMs: now(24) - 1, mid: 3.25, tick: 0.0001 })).toBeNull();
+  });
+
+  it("suggests no Band with the mid outside the day's range", () => {
+    const closes = Array.from({ length: 24 }, (_, i) => (i % 2 === 0 ? 3.2 : 3.3));
+    const chop = chopReading(bars(closes), { nowMs: now(24), mid: 3.4, tick: 0.0001 })!;
+    expect([chop.bandLow, chop.bandHigh]).toEqual([null, null]);
+    expect(chopBody(chop, 4)).toEqual({ label: "ranging", er: "0.043", tf: "1h", n: 24 });
+  });
+
+  it("sends the reading with Start", () => {
+    expect(
+      chopBody({ er: 0.2134, label: "ranging", bandLow: 3.18, bandHigh: 3.32 }, 4)
+    ).toEqual({ label: "ranging", er: "0.213", band_low: "3.1800", band_high: "3.3200", tf: "1h", n: 24 });
+  });
+});
+
+describe("massager Tally on the row (massager-rules MS20)", () => {
+  it("shows the Tally's Captured over its runs, or this run's before it has one", () => {
+    const f = massagerRowFacts({ core: "1000", lean: "0", qty: "300", captured_pnl: "2", tally_captured: "9", tally_runs: 3 });
+    expect([f.captured, f.tallyCaptured, f.runs]).toEqual([2, 9, 3]);
+    const old = massagerRowFacts({ core: "1000", lean: "0", qty: "300", captured_pnl: "2" });
+    expect([old.tallyCaptured, old.runs]).toEqual([2, 1]);
   });
 });

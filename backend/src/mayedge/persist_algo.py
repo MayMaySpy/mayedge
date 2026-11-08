@@ -261,6 +261,23 @@ def load_active_runs(*, algo_type: str | None = None) -> list[dict[str, Any]]:
         return [_row_to_run(conn, r) for r in rows]
 
 
+def load_last_run(algo_type: str, market_index: int) -> dict[str, Any] | None:
+    """The newest run of an algo on a Market that is no longer working, or None."""
+    with _lock:
+        conn = _connect()
+        row = conn.execute(
+            """
+            SELECT * FROM algo_runs
+            WHERE algo_type = ? AND market_index = ?
+              AND (archived = 1 OR status IN ('stopped', 'done'))
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (algo_type, market_index),
+        ).fetchone()
+        return _row_to_run(conn, row) if row is not None else None
+
+
 def load_history(limit: int = 30, *, algo_type: str | None = None) -> list[dict[str, Any]]:
     """Terminal snapshots shaped like ChaseIcebergRunner.snapshot()."""
     with _lock:

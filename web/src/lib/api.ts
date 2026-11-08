@@ -27,6 +27,7 @@ import type {
   StopTakeRequest,
   TwapOrderRequest,
 } from "@/lib/api.gen";
+import type { MassagerCarry } from "@/lib/massager";
 
 export type {
   Idea,
@@ -357,6 +358,19 @@ export interface AlgoState {
   atr_tf?: string | null;
   atr?: string | null;
   step_moved_at?: number | null;
+  /** Massager MS22: the Tally across runs, and whether this run carried it. */
+  tally_captured?: string | null;
+  tally_runs?: number | null;
+  tally_since?: number | null;
+  carried?: boolean | null;
+  carry_why?: string | null;
+  carried_from?: string | null;
+  /** Massager MS23: the 1h close that paused it, and which end of the Band. */
+  band_close?: string | null;
+  band_close_at?: number | null;
+  band_side?: "above" | "below" | null;
+  /** Massager MS24: the Chop reading sent at Start. */
+  chop?: Record<string, unknown> | null;
   profit_bps?: string | null;
   grid_bps?: string | null;
   be_delay_ms?: number | null;
@@ -900,6 +914,8 @@ export const api = {
     return request<AccountFundingPage>(`/account/funding${qs ? `?${qs}` : ""}`);
   },
   algoStatus: () => request<AlgoBook>("/algos"),
+  massagerCarry: (marketIndex: number) =>
+    request<MassagerCarry>(`/algos/massager/carry?market_index=${marketIndex}`),
   algoStart: (algoType: string, body: Record<string, unknown>) =>
     request<AlgoBook>(`/algos/${encodeURIComponent(algoType)}/start`, {
       method: "POST",

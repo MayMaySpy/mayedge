@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any
 
@@ -20,6 +20,9 @@ from mayedge.algos.massager.config import (
     ATR_READ_TIMEOUT_S,
     ATR_RETRY_MS,
     ATR_SETTLE_MS,
+    BAND_RETRY_MS,
+    BAND_SETTLE_MS,
+    BAND_TIMEFRAME,
     MIN_PLACE_GAP_MS,
     MIN_REQUOTE_MS,
     OUTSIDE_GRACE_MS,
@@ -36,8 +39,10 @@ from mayedge.algos.massager.plan import (
     MassagerParams,
     MassagerRefused,
     Side,
+    Tally,
     Venue,
     basis,
+    carry,
     catch_up,
     check_start,
     core,
@@ -49,6 +54,7 @@ from mayedge.algos.massager.plan import (
     resting,
     should_redraw,
     start_anchor,
+    tally_from_run,
 )
 from mayedge.algos.massager.state import MassagerRuntime, MassagerState
 from mayedge.config import settings
@@ -62,6 +68,41 @@ ZERO = Decimal("0")
 
 # MS21: ATR(14) of a Market on a timeframe, from closed candles. None when there is none.
 AtrFn = Callable[[int, str], Awaitable[Decimal | None]]
+# MS23: the last closed candle of a Market on a timeframe, as (its close time in ms, its close).
+CloseFn = Callable[[int, str], Awaitable[tuple[int, Decimal] | None]]
+
+
+def venue_position(payload: dict[str, Any], market_index: int) -> tuple[Decimal, Decimal | None]:
+    """The Market's signed Position and the venue's entry, None without one."""
+    for pos in payload.get("positions") or ():
+        if is_obj(pos):
+            mi = int(pos.get("market_index") or 0)
+            size = to_decimal(pos.get("size") or "0")
+            sign = pos.get("sign")
+            entry_raw = pos.get("avg_entry_price") or pos.get("entry_price")
+        else:
+            mi = int(getattr(pos, "market_index", 0) or 0)
+            size = to_decimal(getattr(pos, "size", "0") or "0")
+            sign = getattr(pos, "sign", None)
+            entry_raw = getattr(pos, "entry_price", None)
+        if mi != market_index:
+            continue
+        if sign is not None and int(sign) < 0 and size > 0:
+            size = -size
+        entry = to_decimal(entry_raw) if entry_raw not in (None, "") else ZERO
+        return size, entry if entry > 0 else None
+    return ZERO, None
+
+
+@dataclass(frozen=True)
+class LastRun:
+    """MS22: what the last Massager run on a Market left: its Tally, its own Captured,
+    whether it ended with its Position closed, and its id."""
+
+    tally: Tally
+    captured: Decimal
+    closed: bool
+    algo_id: str
 
 
 class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
@@ -69,9 +110,12 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
 
     LABEL = "massager"
 
-    def __init__(self, book: ClipBookView, atr: AtrFn | None = None) -> None:
+    def __init__(
+        self, book: ClipBookView, atr: AtrFn | None = None, close: CloseFn | None = None
+    ) -> None:
         super().__init__(book, MassagerState())
         self._atr = atr
+        self._close = close
         self._last_catch_tx_ms = 0
         self._place_refused: str | None = None
 
@@ -87,24 +131,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
 
     def _venue_position(self) -> tuple[Decimal, Decimal | None]:
         payload = self._exec().cached_account_payload() or {}
-        for pos in payload.get("positions") or ():
-            if is_obj(pos):
-                mi = int(pos.get("market_index") or 0)
-                size = to_decimal(pos.get("size") or "0")
-                sign = pos.get("sign")
-                entry_raw = pos.get("avg_entry_price") or pos.get("entry_price")
-            else:
-                mi = int(getattr(pos, "market_index", 0) or 0)
-                size = to_decimal(getattr(pos, "size", "0") or "0")
-                sign = getattr(pos, "sign", None)
-                entry_raw = getattr(pos, "entry_price", None)
-            if mi != self._state.market_index:
-                continue
-            if sign is not None and int(sign) < 0 and size > 0:
-                size = -size
-            entry = to_decimal(entry_raw) if entry_raw not in (None, "") else ZERO
-            return size, entry if entry > 0 else None
-        return ZERO, None
+        return venue_position(payload, self._state.market_index)
 
     def _maker_bps(self) -> Decimal:
         payload = self._exec().cached_account_payload() or {}
@@ -153,7 +180,10 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             if qty <= 0:
                 continue
             px = self._avg_fill_price(clip)
-            rt.book.fill(clip.side, qty, px, fee=qty * px * maker / BPS)
+            fee = qty * px * maker / BPS
+            rt.book.fill(clip.side, qty, px, fee=fee)
+            if rt.tally is not None:
+                rt.tally.massager_fill(clip.side, qty, px, fee)
             rt.handled[clip.seq] = done + qty
             level = rt.clip_levels.get(clip.seq)
             if level is not None and rt.book.level_fill(level, qty, params.clip):
@@ -191,8 +221,12 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         params = self._state.params
         assert params is not None
         rt = self._state.runtime
-        position, _ = self._venue_position()
+        position, entry = self._venue_position()
         now_core = core(position, rt.book.lean)
+        if rt.tally is not None and entry is not None and position == rt.tally.size:
+            # MS22: keep the venue's size and entry while they agree with the Tally.
+            rt.tally.venue_size = position
+            rt.tally.venue_entry = entry
         if now_core == rt.core:
             rt.pending_core = None
             return True
@@ -206,6 +240,9 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         mid = (view.bid + view.ask) / 2 if view.bid and view.ask else None
         if mid is not None:
             rt.core_entry = core_entry_after(rt.core_entry, rt.core, now_core - rt.core, mid)
+        if rt.tally is not None:
+            price = mid if mid is not None else rt.tally.basis() or rt.core_entry
+            rt.tally.outside(now_core - rt.core, price)
         rt.core = now_core
         rt.pending_core = None
         verdict = judge(position, rt.book.lean, core_side=rt.core_side, swing=params.swing)
@@ -389,6 +426,44 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             rt.step = live
             rt.step_moved_at = now
 
+    # ── leaving the Band ─────────────────────────────────────────────────
+
+    async def _read_close(self, market_index: int) -> tuple[int, Decimal] | None:
+        if self._close is None:
+            return None
+        try:
+            return await asyncio.wait_for(
+                self._close(market_index, BAND_TIMEFRAME), ATR_READ_TIMEOUT_S
+            )
+        except Exception as e:
+            logger.warning("massager close read failed on market %s: %s", market_index, e)
+            return None
+
+    async def _check_band(self) -> bool:
+        """MS23: after each 1h close, a close outside the Band pauses it. False if paused."""
+        params = self._state.params
+        rt = self._state.runtime
+        if params is None or self._close is None:
+            return True
+        now = common.now_ms()
+        if now < rt.band_next_at:
+            return True
+        read = await self._read_close(self._state.market_index)
+        if read is None:
+            rt.band_next_at = now + BAND_RETRY_MS
+            return True
+        rt.band_next_at = next_close_ms(now, BAND_TIMEFRAME) + BAND_SETTLE_MS
+        closed_at, close = read
+        # A candle that closed before the run, or the one that paused it already, does not.
+        if closed_at <= max(rt.band_close_at, self._state.created_at or 0):
+            return True
+        if params.band_low <= close <= params.band_high:
+            return True
+        rt.band_close = close
+        rt.band_close_at = closed_at
+        await self._pause_for("left_band")
+        return False
+
     # ── the loop ─────────────────────────────────────────────────────────
 
     async def _evaluate(self) -> None:
@@ -413,6 +488,8 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
                 return
             if not await self._judge_outside(view):
                 return
+            if not await self._check_band():
+                return
             await self._update_step(view)
             if self._state.runtime.catching:
                 await self._work_catch_up(view)
@@ -435,8 +512,18 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
 
     # ── start, snapshot, restore ─────────────────────────────────────────
 
-    async def start(self, *, algo_id: str, market_index: int, params: MassagerParams) -> None:
-        """MS1–MS8: check, take the Core from the Position, and owe the catch-up."""
+    async def start(
+        self,
+        *,
+        algo_id: str,
+        market_index: int,
+        params: MassagerParams,
+        last: LastRun | None = None,
+        fresh: bool = False,
+        chop: dict[str, Any] | None = None,
+    ) -> None:
+        """MS1–MS8, MS22: check, take the Core from the Position, carry the Tally, and owe
+        the catch-up."""
         meta = self._exec().get_market_by_index(market_index)
         if not meta:
             raise ValueError("Unknown market")
@@ -466,6 +553,17 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         check_notional(params.swing, mid, settings.max_order_notional)
         owed = catch_up(grid, params, mid)
         now = common.now_ms()
+        took = carry(
+            last.tally if last else None,
+            last_captured=last.captured if last else ZERO,
+            last_closed=last.closed if last else False,
+            source=last.algo_id if last else None,
+            position=position,
+            entry=entry,
+            mid=mid,
+            since=now,
+            fresh=fresh,
+        )
         runtime = MassagerRuntime(
             core_side=1 if position > 0 else -1,
             core=position,
@@ -477,6 +575,12 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             atr=atr,
             step_moved_at=now,
             atr_next_at=next_close_ms(now, params.atr_tf) + ATR_SETTLE_MS if atr else 0,
+            tally=took.tally,
+            carried=took.carried,
+            carry_why=took.why,
+            carried_from=took.source,
+            band_next_at=next_close_ms(now, BAND_TIMEFRAME) + BAND_SETTLE_MS,
+            chop=chop,
         )
         self._state = MassagerState(
             status=ChaseStatus.RUNNING,
@@ -486,7 +590,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             symbol=meta.symbol,
             remaining=params.swing,
             algo_id=algo_id,
-            created_at=common.now_ms(),
+            created_at=now,
         )
         self._cois.clear()
         self._reset_job()
@@ -507,7 +611,11 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             {**c, "kind": kinds.get(int(c["seq"]))} if is_obj(c) else c
             for c in ledger.get("clips") or ()
         ]
-        b = basis(rt.core_entry, rt.core, rt.book.captured)
+        t = rt.tally
+        b = t.basis() if t is not None else basis(rt.core_entry, rt.core, rt.book.captured)
+        band_side = None
+        if rt.band_close is not None and p is not None:
+            band_side = "above" if rt.band_close > p.band_high else "below"
         return {
             "type": "algo",
             "id": ALGO_ID,
@@ -536,8 +644,18 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             "level": rt.book.level,
             "catching": rt.catching,
             "captured_pnl": fmt_decimal(rt.book.captured) or "0",
-            "core_entry": fmt_decimal(rt.core_entry),
+            "core_entry": fmt_decimal(t.entry if t is not None else rt.core_entry),
             "basis": fmt_decimal(b) if b is not None else None,
+            "tally_captured": fmt_decimal(t.captured_before + rt.book.captured) if t else None,
+            "tally_runs": t.runs if t is not None else None,
+            "tally_since": t.since or None if t is not None else None,
+            "carried": rt.carried,
+            "carry_why": rt.carry_why,
+            "carried_from": rt.carried_from,
+            "band_close": fmt_decimal(rt.band_close) if rt.band_close is not None else None,
+            "band_close_at": rt.band_close_at or None,
+            "band_side": band_side,
+            "chop": rt.chop,
             "remaining": fmt_decimal(st.remaining),
             "filled": fmt_decimal(st.filled),
             "quote_action": st.quote_action,
@@ -562,5 +680,13 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         if runtime.anchor is None and not runtime.catching:
             runtime.anchor = start_anchor(params, runtime.book.level)
         fields = ClipState.fields_from_row(row)
+        # MS16: a run kept before the Tally reads back with one built from it.
+        if runtime.tally is None and runtime.core != 0:
+            runtime.tally = tally_from_run(
+                core_size=runtime.core,
+                core_entry=runtime.core_entry,
+                book=runtime.book,
+                since=int(fields.get("created_at") or 0),
+            )
         self._restore_state(MassagerState(params=params, runtime=runtime, **fields))
         self._reconcile_master()

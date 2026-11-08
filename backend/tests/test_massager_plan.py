@@ -1,4 +1,4 @@
-"""Massager planner: docs/massager-rules.md MS1–MS12."""
+"""Massager planner: docs/massager-rules.md MS1–MS12, MS22."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ from mayedge.algos.massager.plan import (
     Book,
     MassagerParams,
     MassagerRefused,
+    Tally,
     Venue,
     basis,
+    carry,
     catch_up,
     check_start,
     core,
@@ -23,6 +25,7 @@ from mayedge.algos.massager.plan import (
     resting,
     should_redraw,
     start_anchor,
+    tally_from_run,
 )
 
 D = Decimal
@@ -339,3 +342,150 @@ class AtrTests(unittest.TestCase):
         wild = [*bars, Candle(time=20 * hour, open=3.25, high=4.0, low=3.0, close=3.5, volume=1)]
         self.assertEqual(closed_atr(wild, "1h", now_ms), atr)
         self.assertIsNone(closed_atr(bars[:10], "1h", now_ms))
+
+
+class TallyTests(unittest.TestCase):
+    """MS11: Basis is the Tally's cost over the Position."""
+
+    def test_basis_counts_every_massager_trade(self) -> None:
+        """The example: 1,000 at 3.36, sell 100 at 3.40, buy back at 3.35, then three sells."""
+        t = Tally.begin(D("1000"), D("3.36"), since=1)
+        t.massager_fill("sell", D("100"), D("3.40"), D("0"))
+        t.massager_fill("buy", D("100"), D("3.35"), D("0"))
+        self.assertEqual(t.basis(), D("3.355"))
+        for px in ("3.40", "3.45", "3.50"):
+            t.massager_fill("sell", D("100"), D(px), D("0"))
+        self.assertEqual((t.size, t.cost), (D("700"), D("2320")))
+        self.assertEqual(t.entry, D("3.36"))
+
+    def test_a_fee_raises_a_longs_basis(self) -> None:
+        t = Tally.begin(D("1000"), D("3"), since=1)
+        t.massager_fill("sell", D("100"), D("3"), D("1"))
+        t.massager_fill("buy", D("100"), D("3"), D("1"))
+        self.assertEqual(t.basis(), D("3.002"))
+
+    def test_basis_of_a_short_rises_with_a_round_trip(self) -> None:
+        t = Tally.begin(D("-1000"), D("3.36"), since=1)
+        t.massager_fill("sell", D("100"), D("3.40"), D("0"))
+        t.massager_fill("buy", D("100"), D("3.35"), D("0"))
+        self.assertEqual(t.basis(), D("3.365"))
+
+    def test_an_outside_add_moves_basis_at_the_mid(self) -> None:
+        t = Tally.begin(D("1000"), D("3.36"), since=1)
+        t.massager_fill("sell", D("100"), D("3.46"), D("0"))  # cost 3,014 for 900
+        t.outside(D("100"), D("3.20"))
+        self.assertEqual((t.size, t.cost), (D("1000"), D("3334")))
+        self.assertEqual(t.entry, (D("3.36") * 900 + D("3.20") * 100) / 1000)
+
+    def test_an_outside_reduction_keeps_basis(self) -> None:
+        t = Tally.begin(D("1000"), D("3.36"), since=1)
+        t.massager_fill("sell", D("100"), D("3.46"), D("0"))
+        before = t.basis()
+        t.outside(D("-450"), D("9.99"))
+        self.assertEqual(t.size, D("450"))
+        self.assertEqual(t.basis(), before)
+        self.assertEqual(t.entry, D("3.36"))
+
+    def test_the_tally_round_trips(self) -> None:
+        t = Tally(D("5"), D("15"), D("3"), D("2"), 3, 9, D("5"), D("3.1"))
+        self.assertEqual(Tally.from_json(t.to_json()), t)
+
+    def test_a_run_kept_before_the_tally_builds_one(self) -> None:
+        """MS16: Core 1,000 at 3.36, Captured 5, Lean −100 at 3.40."""
+        book = Book(lean=D("-100"), lean_price=D("3.40"), captured=D("5"))
+        t = tally_from_run(core_size=D("1000"), core_entry=D("3.36"), book=book, since=7)
+        self.assertEqual((t.size, t.cost, t.runs, t.since), (D("900"), D("3015"), 1, 7))
+
+
+def ended(size: str = "700", entry: str = "3.40", cost: str = "2320") -> Tally:
+    """A run's Tally that last saw the venue at ``size`` and ``entry``."""
+    return Tally(
+        size=D(size),
+        cost=D(cost),
+        entry=D("3.36"),
+        captured_before=D("4"),
+        runs=1,
+        since=1,
+        venue_size=D(size),
+        venue_entry=D(entry),
+    )
+
+
+class CarryTests(unittest.TestCase):
+    """MS22: the Tally a new run takes."""
+
+    def take(self, last: Tally | None, position: str, entry: str | None, **kw: object):
+        return carry(
+            last,
+            last_captured=D("5"),
+            source="MS-0001",
+            position=D(position),
+            entry=D(entry) if entry else None,
+            mid=D("3.60"),
+            since=50,
+            **kw,  # type: ignore[arg-type]
+        )
+
+    def test_a_new_run_carries_the_tally(self) -> None:
+        took = self.take(ended(), "700", "3.40")
+        self.assertTrue(took.carried)
+        self.assertEqual(took.source, "MS-0001")
+        self.assertEqual((took.tally.cost, took.tally.size), (D("2320"), D("700")))
+        self.assertEqual((took.tally.captured_before, took.tally.runs), (D("9"), 2))
+        self.assertIsNone(took.tally.venue_size)
+
+    def test_a_fresh_start_begins_a_new_tally(self) -> None:
+        took = self.take(ended(), "700", "3.40", fresh=True)
+        self.assertFalse(took.carried)
+        self.assertEqual((took.tally.cost, took.tally.runs), (D("2380"), 1))
+        self.assertEqual(took.tally.captured_before, D("0"))
+        self.assertEqual(took.why, "Started fresh")
+
+    def test_no_run_begins_at_the_mid_without_an_entry(self) -> None:
+        took = self.take(None, "700", None)
+        self.assertFalse(took.carried)
+        self.assertEqual(took.tally.basis(), D("3.60"))
+
+    def test_a_closed_position_does_not_carry(self) -> None:
+        self.assertFalse(self.take(ended(), "700", "3.40", last_closed=True).carried)
+
+    def test_the_other_side_does_not_carry(self) -> None:
+        took = self.take(ended(), "-700", "3.40")
+        self.assertFalse(took.carried)
+        self.assertEqual(took.why, "The Position is on the other side")
+
+    def test_a_reduction_between_runs_carries_at_basis(self) -> None:
+        took = self.take(ended(), "350", "3.40")
+        self.assertTrue(took.carried)
+        self.assertEqual((took.tally.size, took.tally.cost), (D("350"), D("1160")))
+
+    def test_an_add_between_runs_carries_at_the_implied_price(self) -> None:
+        """700 at 3.40, now 1,000 at 3.43: the 300 added came in at 3.50."""
+        took = self.take(ended(), "1000", "3.43")
+        self.assertTrue(took.carried)
+        self.assertEqual((took.tally.size, took.tally.cost), (D("1000"), D("3370")))
+
+    def test_a_reopened_position_does_not_carry(self) -> None:
+        self.assertFalse(self.take(ended(), "700", "3.10").carried)
+        self.assertFalse(self.take(ended(), "350", "3.10").carried)
+        # An add whose implied price is far from the mid is a Position opened again.
+        self.assertFalse(self.take(ended(), "710", "4.10").carried)
+
+    def test_a_run_without_the_venue_carries_only_to_the_same_size(self) -> None:
+        last = replace(ended(), venue_size=None, venue_entry=None)
+        self.assertTrue(self.take(last, "700", "3.10").carried)
+        self.assertFalse(self.take(last, "800", "3.10").carried)
+
+    def test_the_band_reads_the_last_closed_candle(self) -> None:
+        """MS23: the open candle's close does not count until it closes."""
+        from mayedge.algos.massager.atr import last_close
+        from mayedge.lighter.models import Candle
+
+        hour = 3600
+        bars = [
+            Candle(time=i * hour, open=3.2, high=3.3, low=3.2, close=3.2 + i / 100, volume=1)
+            for i in range(3)
+        ]
+        self.assertEqual(last_close(bars, "1h", 3 * hour * 1000 - 1), (2 * hour * 1000, D("3.21")))
+        self.assertEqual(last_close(bars, "1h", 3 * hour * 1000), (3 * hour * 1000, D("3.22")))
+        self.assertIsNone(last_close(bars[:1], "1h", hour * 1000 - 1))

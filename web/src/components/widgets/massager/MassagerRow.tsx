@@ -13,6 +13,14 @@ import { utcClock } from "@/lib/utcTime";
 function statusLine(algo: AlgoState): string | null {
   if (algo.status === "error") return algoReasonLabel(algo.error || algo.reason) || "Error";
   if (algo.status === "stopped") return algoReasonLabel(algo.reason) || "Stopped";
+  // MS23: which end of the Band the 1h candle closed past, and at what.
+  if (algo.status === "paused" && algo.reason === "left_band") {
+    const end = algo.band_side === "below" ? "below" : "above";
+    return (
+      `Paused — 1h closed ${end} the Band at ${marketPrice(algo.band_close, algo.symbol ?? "")}. ` +
+      "Resume, or stop and start at new levels: the Tally carries."
+    );
+  }
   if (algo.status === "paused") return `Paused — ${algoReasonLabel(algo.reason) || "clips pulled"}`;
   if (algo.reason) return algoReasonLabel(algo.reason);
   return null;
@@ -63,10 +71,16 @@ export function MassagerRow({
             {" "}
             in {formatSize(facts.positionLow)} to {formatSize(facts.positionHigh)}
           </span>
-          <span className="ml-2 text-xs text-muted-foreground" title="Realized on the Lean, after fees">
+          <span className="ml-2 text-xs text-muted-foreground" title="Realized on the Lean this run, after fees">
             captured{" "}
             <span className={signClass(facts.captured)}>{formatSigned(facts.captured)}</span>
           </span>
+          {facts.runs > 1 && (
+            <span className="ml-2 text-xs text-muted-foreground" title="Captured over every run on this Position">
+              {facts.runs} runs{" "}
+              <span className={signClass(facts.tallyCaptured)}>{formatSigned(facts.tallyCaptured)}</span>
+            </span>
+          )}
         </div>
         {tradingEnabled && working && (
           <div className="flex shrink-0 items-center gap-0.5">
@@ -97,11 +111,9 @@ export function MassagerRow({
         <span>
           Lean <span className={signClass(facts.lean)}>{formatSigned(facts.lean, 6)}</span>
         </span>
-        <span title="Core's entry less Captured per unit">
+        <span title="What the Position cost per unit after every Massager trade, against the entry its Tally began at">
           Basis <span className="text-text">{marketPrice(algo.basis, sym)}</span>
-          {algo.core_entry && (
-            <span> vs {marketPrice(algo.core_entry, sym)}</span>
-          )}
+          {algo.core_entry && <span> vs {marketPrice(algo.core_entry, sym)}</span>}
         </span>
         <span>
           Band{" "}

@@ -177,6 +177,19 @@ def _trim(value: float) -> str:
     return text or "0"
 
 
+def massager_left_band_text(row: dict[str, Any]) -> str:
+    """Massager MS23: which end of the Band the 1h candle closed past, and where it stands."""
+    symbol = str(row.get("symbol") or "")
+    end = "above" if row.get("band_side") == "above" else "below"
+    parts = [
+        f"Massager {symbol} paused: 1h closed {end} the Band at {_px(_num(row.get('band_close')))}",
+        f"Lean {_signed(_num(row.get('lean')))}",
+    ]
+    if row.get("basis") not in (None, ""):
+        parts.append(f"Basis {_px(_num(row.get('basis')))}")
+    return " · ".join(parts)
+
+
 def daily_journal_text(count: int, net: float, fees: float, funding: float) -> str:
     """Yesterday's closed Round trips. Fees are a cost; funding keeps its sign."""
     if count <= 0:

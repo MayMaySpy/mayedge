@@ -98,6 +98,12 @@ async def stop_trail(body: dict[str, Any]) -> dict[str, Any]:
     return desk.algo_book()
 
 
+@router.get("/api/algos/massager/carry")
+async def massager_carry(market_index: int) -> dict[str, Any]:
+    """MS19, MS22: the Tally a Massager Start would carry on the Market."""
+    return desk.massager_book.carry_preview(market_index)
+
+
 @router.get("/api/algos/{algo_type}")
 async def get_algo_type(algo_type: str) -> dict[str, Any]:
     book = desk.get_book(algo_type)

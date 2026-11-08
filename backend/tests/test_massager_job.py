@@ -1,4 +1,4 @@
-"""Massager job on the harness fakes: docs/massager-rules.md MS8–MS17."""
+"""Massager job on the harness fakes: docs/massager-rules.md MS8–MS23."""
 
 from __future__ import annotations
 
@@ -7,14 +7,19 @@ import contextlib
 import sys
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import patch
 
+from mayedge import db as store
+from mayedge import persist_algo
 from mayedge.algos.chase.state import ChaseStatus
 from mayedge.algos.massager.book import MassagerBook
 from mayedge.algos.massager.config import OUTSIDE_GRACE_MS, is_massager_client_order
 from mayedge.algos.massager.job import MassagerRunner
 from mayedge.algos.massager.plan import MassagerParams, MassagerRefused
+from mayedge.config import settings
 
 _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
@@ -51,6 +56,9 @@ class Rig:
     def __init__(self, *, bid: str = "100", ask: str = "100.10", position: str = "10") -> None:
         self.atr: Decimal | None = D("8")
         self.atr_reads: list[str] = []
+        # MS23: the last closed 1h candle the desk would read, as (close time ms, close).
+        self.close: tuple[int, Decimal] | None = None
+        self.close_reads = 0
         self.clock = FakeClock()
         self.gateway = FakeGateway()
         self.gateway.set_book(bid, ask)
@@ -61,7 +69,11 @@ class Rig:
             execution=lambda: make_execution(self.gateway, self.orders),
             broadcast=lambda _p: None,
         )
-        self.job = MassagerRunner(self.book, self.read_atr)
+        self.job = MassagerRunner(self.book, self.read_atr, self.read_close)
+
+    async def read_close(self, market_index: int, timeframe: str) -> tuple[int, Decimal] | None:
+        self.close_reads += 1
+        return self.close
 
     async def read_atr(self, market_index: int, timeframe: str) -> Decimal | None:
         self.atr_reads.append(timeframe)
@@ -70,8 +82,8 @@ class Rig:
     def patch(self) -> Any:
         return patch_grid(self.clock, self.gateway, self.orders)
 
-    async def start(self, params: MassagerParams = PARAMS) -> None:
-        await self.job.start(algo_id="MS-0001", market_index=1, params=params)
+    async def start(self, params: MassagerParams = PARAMS, **kw: Any) -> None:
+        await self.job.start(algo_id="MS-0001", market_index=1, params=params, **kw)
         # Drive the job by hand: drop the background loop without setting its stop flag.
         task, self.job._task = self.job._task, None
         if task is not None:
@@ -100,9 +112,23 @@ class Rig:
                 return
         raise AssertionError(f"no {side} resting at {price}: {self.resting()}")
 
-    def set_position(self, size: str) -> None:
+    def set_position(self, size: str, entry: str = "98") -> None:
         self.orders.positions = (
-            [] if size == "0" else [{"market_index": 1, "size": size, "entry_price": "98"}]
+            [] if size == "0" else [{"market_index": 1, "size": size, "entry_price": entry}]
+        )
+
+    def keep_as_stopped(self, algo_id: str = "MS-0001", reason: str | None = None) -> None:
+        """Store the run as the book does when it ends, in the test's own database."""
+        snap = {**self.job.snapshot(), "algo_id": algo_id, "status": "stopped", "reason": reason}
+        ledger = self.job.state.ledger.to_persist()
+        persist_algo.upsert_run(
+            snap,
+            next_clip=ledger["next_clip"],
+            next_fill=ledger["next_fill"],
+            trade_ids=ledger["trade_ids"],
+            trade_qty_by_clip=ledger["trade_qty_by_clip"],
+            clips=ledger["clips"],
+            fills=ledger["fills"],
         )
 
 
@@ -404,3 +430,222 @@ class LiveStepTests(MassagerJobCase):
             rig.clock.advance(HOUR_MS * 2)
             await rig.tick()
         self.assertEqual(rig.atr_reads, [])
+
+
+async def round_trip(rig: Rig) -> None:
+    """Start at 100, sell a Clip at 103.33 and buy it back at 100: Captured 3.33."""
+    await rig.start()
+    await rig.tick()
+    rig.fill("sell", "103.33")
+    rig.set_position("9")
+    rig.gateway.set_book("103.20", "103.30")
+    await rig.tick()
+    rig.fill("buy", "100.00")
+    rig.set_position("10")
+    rig.gateway.set_book("99.90", "100")
+    await rig.tick()
+
+
+class TallyTests(MassagerJobCase):
+    def setUp(self) -> None:
+        self._td = TemporaryDirectory()
+        self._path = patch.object(settings, "db_path", str(Path(self._td.name) / "mayedge.db"))
+        self._path.start()
+        # The class keeps the store off disk; these tests read their own runs back.
+        self._read = patch("mayedge.db.load_last_run", persist_algo.load_last_run)
+        self._read.start()
+        store.close_db()
+        store.init_db()
+
+    def tearDown(self) -> None:
+        store.close_db()
+        self._read.stop()
+        self._path.stop()
+        self._td.cleanup()
+
+    async def test_the_tally_counts_its_fills_and_shows_basis(self) -> None:
+        """MS11: 10 at 98, a round trip of 3.33: Basis 98 − 0.333."""
+        rig = Rig()
+        with rig.patch():
+            await round_trip(rig)
+        snap = rig.job.snapshot()
+        self.assertEqual(snap["captured_pnl"], "3.33")
+        self.assertEqual(snap["basis"], "97.667")
+        self.assertEqual((snap["core_entry"], snap["tally_runs"]), ("98", 1))
+        self.assertEqual(snap["tally_captured"], "3.33")
+        tally = rig.job.state.runtime.tally
+        assert tally is not None
+        self.assertEqual((tally.venue_size, tally.venue_entry), (D("10"), D("98")))
+
+    async def test_an_outside_add_moves_basis_at_the_mid(self) -> None:
+        """MS11, MS15: a Ladder adds 5 at the mid 100.05."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            await rig.tick(1)
+            rig.set_position("15")
+            await rig.job._evaluate()
+            rig.clock.advance(OUTSIDE_GRACE_MS)
+            await rig.job._evaluate()
+        tally = rig.job.state.runtime.tally
+        assert tally is not None
+        self.assertEqual((tally.size, tally.cost), (D("15"), D("980") + D("100.05") * 5))
+
+    async def test_start_carries_the_last_runs_tally(self) -> None:
+        """MS22: the next run on the Market takes the Tally the last one left."""
+        first = Rig()
+        with first.patch():
+            await round_trip(first)
+            first.keep_as_stopped("MS-0001")
+        second = Rig()
+        last = second.book.last_run(1)
+        assert last is not None
+        with second.patch():
+            await second.job.start(algo_id="MS-0002", market_index=1, params=PARAMS, last=last)
+        snap = second.job.snapshot()
+        self.assertTrue(snap["carried"])
+        self.assertEqual(snap["carried_from"], "MS-0001")
+        self.assertEqual((snap["basis"], snap["tally_runs"]), ("97.667", 2))
+        self.assertEqual((snap["tally_captured"], snap["captured_pnl"]), ("3.33", "0"))
+
+    async def test_a_fresh_start_does_not_carry(self) -> None:
+        first = Rig()
+        with first.patch():
+            await round_trip(first)
+            first.keep_as_stopped("MS-0001")
+        second = Rig()
+        last = second.book.last_run(1)
+        with second.patch():
+            await second.job.start(
+                algo_id="MS-0002", market_index=1, params=PARAMS, last=last, fresh=True
+            )
+        snap = second.job.snapshot()
+        self.assertFalse(snap["carried"])
+        self.assertEqual(
+            (snap["basis"], snap["tally_runs"], snap["carry_why"]), ("98", 1, "Started fresh")
+        )
+
+    async def test_the_carry_preview_says_what_a_start_would_take(self) -> None:
+        first = Rig()
+        with first.patch():
+            await round_trip(first)
+            first.keep_as_stopped("MS-0001")
+        preview = first.book.carry_preview(1)
+        self.assertEqual(
+            preview,
+            {
+                "carried": True,
+                "why": "Carried",
+                "source": "MS-0001",
+                "basis": "97.667",
+                "entry": "98",
+                "captured": "3.33",
+                "runs": 2,
+            },
+        )
+
+    async def test_a_run_kept_before_the_tally_builds_one(self) -> None:
+        """MS16: a stored run with no Tally reads back with one built from its Core."""
+        rig = Rig()
+        with rig.patch():
+            await round_trip(rig)
+            row = {**rig.job.snapshot(), **rig.job.state.ledger.to_persist()}
+            row["params_json"]["runtime"].pop("tally")
+            again = MassagerRunner(rig.book)
+            again.hydrate_from_row(row)
+        self.assertEqual(again.snapshot()["basis"], "97.667")
+        tally = again.state.runtime.tally
+        assert tally is not None
+        self.assertEqual((tally.size, tally.runs), (D("10"), 1))
+
+    async def test_the_chop_reading_is_kept_with_the_run(self) -> None:
+        """MS24."""
+        rig = Rig()
+        chop = {
+            "label": "ranging",
+            "er": "0.21",
+            "band_low": "95",
+            "band_high": "105",
+            "tf": "1h",
+            "n": 24,
+        }
+        with rig.patch():
+            await rig.start(chop=chop)
+            row = {**rig.job.snapshot(), **rig.job.state.ledger.to_persist()}
+            again = MassagerRunner(rig.book)
+            again.hydrate_from_row(row)
+        self.assertEqual(again.snapshot()["chop"], chop)
+
+
+class BandTests(MassagerJobCase):
+    """MS23: a 1h close outside the Band pauses it."""
+
+    async def at_the_close(self, rig: Rig, close: str) -> None:
+        await rig.start()
+        await rig.tick()
+        rig.close = (3_600_000, D(close))
+        rig.clock.now_ms = 3_605_000
+        await rig.tick(1)
+
+    async def test_a_close_above_the_band_pauses_it(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await self.at_the_close(rig, "110.50")
+        self.assertEqual(rig.job.state.status, ChaseStatus.PAUSED)
+        self.assertEqual(rig.resting(), [])
+        snap = rig.job.snapshot()
+        self.assertEqual(
+            (snap["reason"], snap["band_side"], snap["band_close"]), ("left_band", "above", "110.5")
+        )
+        self.assertEqual(snap["lean"], "0")
+
+    async def test_a_close_below_the_band_pauses_it(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await self.at_the_close(rig, "89.99")
+        self.assertEqual(rig.job.snapshot()["band_side"], "below")
+        self.assertEqual(rig.job.state.status, ChaseStatus.PAUSED)
+
+    async def test_a_close_inside_keeps_it_running(self) -> None:
+        """A wick past the Band that closes inside does not pause it."""
+        rig = Rig()
+        with rig.patch():
+            await self.at_the_close(rig, "109.99")
+        self.assertEqual(rig.job.state.status, ChaseStatus.RUNNING)
+        self.assertEqual(len(rig.resting()), 4)
+
+    async def test_a_band_check_reads_once_per_close(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await self.at_the_close(rig, "100")
+            await rig.tick(4)
+        self.assertEqual(rig.close_reads, 1)
+
+    async def test_a_failed_band_read_tries_again(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            rig.clock.now_ms = 3_605_000
+            await rig.tick(1)
+            self.assertEqual(rig.close_reads, 1)
+            rig.close = (3_600_000, D("120"))
+            await rig.tick(3)
+            self.assertEqual(rig.close_reads, 1)
+            rig.clock.advance(60_000)
+            await rig.tick(1)
+        self.assertEqual(rig.close_reads, 2)
+        self.assertEqual(rig.job.state.status, ChaseStatus.PAUSED)
+
+    async def test_resume_does_not_pause_again_on_the_same_close(self) -> None:
+        rig = Rig()
+        with rig.patch():
+            await self.at_the_close(rig, "120")
+            rig.job.state.runtime.band_next_at = 0
+            await rig.job.unpause()
+            task, rig.job._task = rig.job._task, None
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            await rig.tick(1)
+        self.assertEqual(rig.job.state.status, ChaseStatus.RUNNING)
