@@ -220,6 +220,7 @@ export function massagerRowFacts(algo: {
   position?: string | null;
   qty?: string | null;
   captured_pnl?: string | null;
+  massager_pnl?: string | null;
   tally_captured?: string | null;
   tally_runs?: number | null;
 }): {
@@ -229,6 +230,8 @@ export function massagerRowFacts(algo: {
   positionLow: number;
   positionHigh: number;
   captured: number;
+  /** MS10: Captured plus the Lean marked at the mid; null while the desk has no mid. */
+  pnl: number | null;
   /** MS20: the Tally's Captured over every run, and how many runs. */
   tallyCaptured: number;
   runs: number;
@@ -247,6 +250,7 @@ export function massagerRowFacts(algo: {
     positionLow: core - swing,
     positionHigh: core + swing,
     captured: num(algo.captured_pnl),
+    pnl: algo.massager_pnl != null && algo.massager_pnl !== "" ? num(algo.massager_pnl) : null,
     tallyCaptured:
       algo.tally_captured != null && algo.tally_captured !== ""
         ? num(algo.tally_captured)

@@ -135,6 +135,16 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         payload = self._exec().cached_account_payload() or {}
         return venue_position(payload, self._state.market_index)
 
+    def _mid_now(self, market_index: int) -> Decimal | None:
+        """MS10: the book's mid, None without both sides or a venue."""
+        try:
+            bid_s, ask_s = self._exec().best_bid_ask(market_index)
+        except Exception:
+            return None
+        if not bid_s or not ask_s:
+            return None
+        return (to_decimal(bid_s) + to_decimal(ask_s)) / 2
+
     def _maker_bps(self) -> Decimal:
         payload = self._exec().cached_account_payload() or {}
         return to_decimal(payload.get("maker_fee_bps") or "0")
@@ -645,6 +655,8 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         ]
         t = rt.tally
         b = t.basis() if t is not None else basis(rt.core_entry, rt.core, rt.book.captured)
+        mid = self._mid_now(st.market_index)
+        pnl = rt.book.marked(mid) if mid is not None else None
         band_side = None
         if rt.band_close is not None and p is not None:
             band_side = "above" if rt.band_close > p.band_high else "below"
@@ -676,6 +688,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
             "level": rt.book.level,
             "catching": rt.catching,
             "captured_pnl": fmt_decimal(rt.book.captured) or "0",
+            "massager_pnl": fmt_decimal(pnl) if pnl is not None else None,
             "core_entry": fmt_decimal(t.entry if t is not None else rt.core_entry),
             "basis": fmt_decimal(b) if b is not None else None,
             "tally_captured": fmt_decimal(t.captured_before + rt.book.captured) if t else None,

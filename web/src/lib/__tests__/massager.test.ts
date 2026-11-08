@@ -103,9 +103,11 @@ describe("massager working row (massager-rules MS20)", () => {
       positionLow: 700,
       positionHigh: 1300,
       captured: 5,
+      pnl: null,
       tallyCaptured: 5,
       runs: 1,
     });
+    expect(massagerRowFacts({ captured_pnl: "5", massager_pnl: "-1.25" }).pnl).toBe(-1.25);
     expect(massagerRowFacts({ core: "-1000", lean: "100", qty: "300" }).position).toBe(-900);
   });
 });

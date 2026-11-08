@@ -295,6 +295,12 @@ class Book:
             level_fills={int(k): Decimal(str(v)) for k, v in fills.items()},
         )
 
+    def marked(self, mid: Decimal) -> Decimal:
+        """MS10: the Massager P&L, Captured plus the Lean marked at the mid."""
+        if self.lean == 0 or self.lean_price is None:
+            return self.captured
+        return self.captured + self.lean * (mid - self.lean_price)
+
     def fill(self, side: Side, qty: Decimal, price: Decimal, fee: Decimal = ZERO) -> None:
         """MS10: average-cost Lean. A reduction realizes; a fill through zero opens the rest."""
         if qty <= 0:

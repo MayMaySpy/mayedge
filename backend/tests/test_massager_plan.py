@@ -212,6 +212,14 @@ class LatticeTests(unittest.TestCase):
         sell = next(o for o in rest(-2) if o.level == -1)
         self.assertEqual(book.qty_for(sell, PARAMS.swing), D("100"))
 
+    def test_the_massager_pnl_marks_the_lean_at_the_mid(self) -> None:
+        """MS10: Captured 5 and a Lean of +100 at 3.30 marked at 3.25 is 5 − 5 = 0."""
+        book = Book(level=-1, lean=D("100"), lean_price=D("3.30"), captured=D("5"))
+        self.assertEqual(book.marked(D("3.25")), D("0"))
+        self.assertEqual(Book(captured=D("5")).marked(D("3.25")), D("5"))
+        short = Book(lean=D("-100"), lean_price=D("3.40"), captured=D("5"))
+        self.assertEqual(short.marked(D("3.35")), D("10"))
+
     def test_the_book_round_trips(self) -> None:
         book = Book(level=-1, lean=D("100"), lean_price=D("3.3"), captured=D("5"))
         book.level_fills[-2] = D("30")

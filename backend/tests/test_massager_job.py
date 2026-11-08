@@ -242,6 +242,18 @@ class LatticeTests(MassagerJobCase):
         self.assertEqual(rt.core, D("10"))
         self.assertEqual(rig.job.snapshot()["captured_pnl"], "3.33")
 
+    async def test_the_snapshot_carries_the_massager_pnl(self) -> None:
+        """MS10: sold 1 at 103.33 and marked at a 104.05 mid, the run is 0.72 down."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            await rig.tick()
+            rig.fill("sell", "103.33")
+            rig.set_position("9")
+            rig.gateway.set_book("104", "104.10")
+            await rig.tick()
+        self.assertEqual(D(rig.job.snapshot()["massager_pnl"]), D("-0.72"))
+
     async def test_a_partial_fill_keeps_the_level(self) -> None:
         """MS9: 0.4 filled at level −1 adds to the Lean but does not move the lattice."""
         rig = Rig()

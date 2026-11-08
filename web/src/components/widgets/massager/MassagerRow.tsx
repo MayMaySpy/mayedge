@@ -71,6 +71,14 @@ export function MassagerRow({
             {" "}
             in {formatSize(facts.positionLow)} to {formatSize(facts.positionHigh)}
           </span>
+          {facts.pnl != null && (
+            <span
+              className="ml-2 text-xs text-muted-foreground"
+              title="Massager P&L: Captured plus the Lean marked at the mid. What this run's own trades made against holding the Core."
+            >
+              P&L <span className={signClass(facts.pnl)}>{formatSigned(facts.pnl)}</span>
+            </span>
+          )}
           <span className="ml-2 text-xs text-muted-foreground" title="Realized on the Lean this run, after fees">
             captured{" "}
             <span className={signClass(facts.captured)}>{formatSigned(facts.captured)}</span>
@@ -111,7 +119,7 @@ export function MassagerRow({
         <span>
           Lean <span className={signClass(facts.lean)}>{formatSigned(facts.lean, 6)}</span>
         </span>
-        <span title="What the Position cost per unit after every Massager trade, against the entry its Tally began at">
+        <span title="What the Position cost per unit after every Massager trade, against the entry its Tally began at. It also falls when the Massager buys below it, so it is not the score: P&L is.">
           Basis <span className="text-text">{marketPrice(algo.basis, sym)}</span>
           {algo.core_entry && <span> vs {marketPrice(algo.core_entry, sym)}</span>}
         </span>

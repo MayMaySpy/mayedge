@@ -236,6 +236,10 @@ _Avoid_: range (that's the Band), max inventory (that's Grid's)
 A Massager run's realized profit on its Lean, by average cost, less its fees. The **Tally** adds up its runs'.
 _Avoid_: PnL (unqualified), profit (unqualified)
 
+**Massager P&L**:
+A Massager run's **Captured** plus its **Lean** marked at the mid against the Lean's average: what its own trades made against holding the Core. It is the run's score; Basis is not.
+_Avoid_: PnL (unqualified), own PnL, profit (unqualified)
+
 **Basis**:
 What the Position has cost per unit after every Massager trade: the **Tally**'s cost ÷ the Position. A long's Basis falls when the Massager sells above it or buys below it; a short's rises the same way round. Lighter's entry only moves when you add, so it does not show the work; Basis does.
 _Avoid_: entry (that's the venue's), cost (unqualified), Breakeven (that's Planner's)

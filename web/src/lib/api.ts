@@ -344,6 +344,8 @@ export interface AlgoState {
   inventory?: string | null;
   inventory_vwap?: string | null;
   captured_pnl?: string | null;
+  /** Massager MS10: Captured plus the Lean marked at the mid. */
+  massager_pnl?: string | null;
   /** Massager: its Core, Lean, Position, level, Core entry, Basis and Step (massager-rules). */
   core?: string | null;
   lean?: string | null;
