@@ -20,8 +20,10 @@ Verdict = Literal["run", "pause", "stop"]
 
 BPS = Decimal("10000")
 ZERO = Decimal("0")
-# MS9: levels resting on each side of the current one.
+# MS9: levels resting on each side of the current one, and how far out one already resting
+# stays, so a fill does not pull the far Clip on the other side only to put it back.
 RESTING_EACH_SIDE = 2
+KEPT_EACH_SIDE = 3
 # MS21: ATR length, and how far the live Step must move before the levels follow it.
 ATR_LENGTH = 14
 REDRAW_SHARE = Decimal("0.20")
@@ -228,14 +230,20 @@ def start_anchor(params: MassagerParams, level: int) -> Decimal:
 
 
 def resting(
-    params: MassagerParams, *, level: int, anchor: Decimal, step: Decimal, tick: Decimal
+    params: MassagerParams,
+    *,
+    level: int,
+    anchor: Decimal,
+    step: Decimal,
+    tick: Decimal,
+    each_side: int = RESTING_EACH_SIDE,
 ) -> tuple[LevelOrder, ...]:
     """MS9: sells a Step and two above the anchor, buys a Step and two below, none past
-    ±levels or outside the Band."""
+    ±levels or outside the Band. ``each_side`` KEPT_EACH_SIDE gives the ones that may stay."""
     out: list[LevelOrder] = []
     sides: tuple[tuple[Side, int], ...] = (("sell", 1), ("buy", -1))
     for side, sign in sides:
-        for j in range(1, RESTING_EACH_SIDE + 1):
+        for j in range(1, each_side + 1):
             k = level + sign * j
             if abs(k) > params.levels:
                 continue

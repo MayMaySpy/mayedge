@@ -36,6 +36,8 @@ from mayedge.algos.massager.plan import (
     ALGO_VERSION,
     ATR_TIMEFRAMES,
     BPS,
+    KEPT_EACH_SIDE,
+    RESTING_EACH_SIDE,
     Lattice,
     LevelOrder,
     MassagerParams,
@@ -400,17 +402,26 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         if rt.anchor is None:
             rt.anchor = start_anchor(params, rt.book.level)
         step = rt.step if rt.step > 0 else params.step
-        orders = resting(params, level=rt.book.level, anchor=rt.anchor, step=step, tick=view.tick)
-        wanted = {(o.level, o.side): o for o in orders}
+        at, anchor = rt.book.level, rt.anchor
+
+        def around(each_side: int) -> dict[tuple[int, str], LevelOrder]:
+            orders = resting(
+                params, level=at, anchor=anchor, step=step, tick=view.tick, each_side=each_side
+            )
+            return {(o.level, o.side): o for o in orders}
+
+        wanted = around(RESTING_EACH_SIDE)
+        # MS9: a Clip already resting a third level out stays; only the nearest two are sent.
+        kept = around(KEPT_EACH_SIDE)
         live_by_key: dict[tuple[int, str], Clip] = {}
         for clip in list(self._state.ledger.live_clips()):
             level = rt.clip_levels.get(clip.seq)
             key = (level, clip.side) if level is not None and clip.side else None
             if (
                 key is None
-                or key not in wanted
+                or key not in kept
                 or key in live_by_key
-                or clip.price != wanted[key].price  # MS21: the Step moved
+                or clip.price != kept[key].price  # MS21: the Step moved
             ):
                 await self._cancel_clip(clip)
                 continue

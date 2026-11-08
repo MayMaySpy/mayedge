@@ -226,6 +226,7 @@ class LatticeTests(MassagerJobCase):
             self.assertEqual(
                 rig.resting(),
                 [
+                    ("buy", D("93.33"), D("1")),
                     ("buy", D("96.67"), D("1")),
                     ("buy", D("100.00"), D("1")),
                     ("sell", D("106.67"), D("1")),
@@ -241,6 +242,40 @@ class LatticeTests(MassagerJobCase):
         self.assertEqual(rt.book.captured, D("3.33"))
         self.assertEqual(rt.core, D("10"))
         self.assertEqual(rig.job.snapshot()["captured_pnl"], "3.33")
+
+    async def test_a_third_level_lingers(self) -> None:
+        """MS9: a round trip pulls nothing; the Clip three levels out stays, four out goes."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            await rig.tick()
+            rig.fill("sell", "103.33")
+            rig.set_position("9")
+            rig.gateway.set_book("103.20", "103.30")
+            await rig.tick()
+            rig.fill("buy", "100.00")
+            rig.set_position("10")
+            rig.gateway.set_book("99.90", "100")
+            await rig.tick()
+            self.assertEqual(rig.orders.cancels, [])
+            self.assertEqual(
+                rig.resting(),
+                [
+                    ("buy", D("93.33"), D("1")),
+                    ("buy", D("96.67"), D("1")),
+                    ("sell", D("103.33"), D("1")),
+                    ("sell", D("106.67"), D("1")),
+                    ("sell", D("110.00"), D("1")),
+                ],
+            )
+            rig.fill("buy", "96.67")
+            rig.set_position("11")
+            rig.gateway.set_book("96.60", "96.70")
+            await rig.tick()
+        # Level −1: the sell at 110.00 is four out and comes off.
+        self.assertEqual(len(rig.orders.cancels), 1)
+        self.assertNotIn(("sell", D("110.00"), D("1")), rig.resting())
+        self.assertIn(("sell", D("106.67"), D("1")), rig.resting())
 
     async def test_the_snapshot_carries_the_massager_pnl(self) -> None:
         """MS10: sold 1 at 103.33 and marked at a 104.05 mid, the run is 0.72 down."""
