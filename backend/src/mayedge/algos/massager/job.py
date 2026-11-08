@@ -23,9 +23,11 @@ from mayedge.algos.massager.config import (
     BAND_RETRY_MS,
     BAND_SETTLE_MS,
     BAND_TIMEFRAME,
+    KEEP_CLOSED,
     MIN_PLACE_GAP_MS,
     MIN_REQUOTE_MS,
     OUTSIDE_GRACE_MS,
+    TRIM_AFTER_MS,
     is_massager_client_order,
     next_close_ms,
 )
@@ -192,6 +194,35 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
         if rt.catching:
             self._end_catch_up_when_owed_is_paid()
         self._reconcile_master()
+
+    def _trim_ledger(self) -> None:
+        """MS16: a closed Clip older than the last KEEP_CLOSED goes, with its fills, once its
+        fills are counted and it has been closed TRIM_AFTER_MS. Lean, Captured and the Tally
+        already hold what it did."""
+        ledger = self._state.ledger
+        rt = self._state.runtime
+        closed = [c for c in ledger.clips if c.status != "live"]
+        if len(closed) <= KEEP_CLOSED:
+            return
+        now = common.now_ms()
+        drop = {
+            c.seq
+            for c in closed[:-KEEP_CLOSED]
+            if c.closed_at is not None
+            and now - c.closed_at >= TRIM_AFTER_MS
+            and rt.handled.get(c.seq, ZERO) >= min(c.filled, c.qty)
+        }
+        if not drop:
+            return
+        self._cois -= {c.client_order_index for c in ledger.clips if c.seq in drop}
+        ledger.clips = [c for c in ledger.clips if c.seq not in drop]
+        ledger.fills = [f for f in ledger.fills if f.clip_seq not in drop]
+        for seq in drop:
+            rt.handled.pop(seq, None)
+            rt.clip_levels.pop(seq, None)
+            rt.clip_marks.pop(seq, None)
+            rt.catch_seqs.discard(seq)
+            ledger.trade_qty_by_clip.pop(seq, None)
 
     def _owed(self) -> Decimal:
         """MS8: the Lean the catch-up still owes, signed."""
@@ -472,6 +503,7 @@ class MassagerRunner(ClipJob[ClipBookView, MassagerState]):
                 return
             await self._sync_live_clips()
             self._process_fills()
+            self._trim_ledger()
             if common.now_ms() < self._backoff_until:
                 self._hold_quotes(self._backoff_reason or "rate_limited")
                 return

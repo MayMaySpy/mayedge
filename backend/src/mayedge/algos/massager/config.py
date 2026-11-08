@@ -38,3 +38,8 @@ def next_close_ms(now_ms: int, timeframe: str) -> int:
 BAND_TIMEFRAME = "1h"
 BAND_SETTLE_MS = 5_000
 BAND_RETRY_MS = 60_000
+
+# MS16: the closed Clips a run keeps beside its live ones, and how long a closed Clip waits
+# before it can go, so a fill that crosses its cancel still lands on it.
+KEEP_CLOSED = 50
+TRIM_AFTER_MS = 600_000

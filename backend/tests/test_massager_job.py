@@ -274,6 +274,44 @@ class LatticeTests(MassagerJobCase):
         self.assertIn(("sell", D("106.67"), D("1")), rig.resting())
 
 
+class TrimTests(MassagerJobCase):
+    async def test_old_closed_clips_are_dropped_once_counted(self) -> None:
+        """MS16: past the last 50 closed Clips, one closed 10 minutes and counted goes."""
+        rig = Rig()
+        with rig.patch():
+            await rig.start()
+            await rig.tick()
+            ledger = rig.job.state.ledger
+            rt = rig.job.state.runtime
+            live = {c.seq for c in ledger.live_clips()}
+            now = rig.clock.now_ms
+            for i in range(60):
+                c = ledger.place(
+                    client_order_index=13_500_000_000 + i,
+                    price=D("99"),
+                    qty=D("1"),
+                    now=now,
+                    side="buy",
+                )
+                c.status = "cancelled"
+                c.closed_at = now
+                rt.clip_levels[c.seq] = -1
+            uncounted = ledger.clips[-60]
+            ledger._fill(uncounted, D("1"), now)
+            rig.job._trim_ledger()
+            self.assertEqual(sum(c.status != "live" for c in ledger.clips), 60)
+            rig.clock.advance(600_000)
+            rig.job._trim_ledger()
+        closed = [c for c in ledger.clips if c.status != "live"]
+        # 50 kept, plus the one whose fill is not counted yet.
+        self.assertEqual(len(closed), 51)
+        self.assertIn(uncounted, closed)
+        self.assertTrue(live <= {c.seq for c in ledger.clips})
+        kept = {c.seq for c in ledger.clips}
+        self.assertTrue(all(f.clip_seq in kept for f in ledger.fills))
+        self.assertTrue(set(rt.clip_levels) <= kept)
+
+
 class OutsideFillTests(MassagerJobCase):
     async def test_an_outside_add_moves_the_core_and_its_entry(self) -> None:
         """MS11, MS12, MS15: a Ladder adds 5; once it has held 3 s the Core is 15."""
